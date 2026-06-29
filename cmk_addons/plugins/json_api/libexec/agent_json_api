@@ -20,11 +20,41 @@ import json
 import re
 import sys
 from collections.abc import Sequence
+from pathlib import Path
 
 import requests
-from cmk.password_store.v1_unstable import parser_add_secret_option, resolve_secret_option
+from cmk.utils import password_store as _legacy_pwstore
+
+try:
+    # Checkmk 2.5+: public convenience API for secret options.
+    from cmk.password_store.v1_unstable import parser_add_secret_option, resolve_secret_option
+
+    _HAVE_PWSTORE_V1 = True
+except ImportError:
+    # Checkmk 2.4: fall back to the internal password store (same on-disk format).
+    _HAVE_PWSTORE_V1 = False
 
 _PATH_TOKEN = re.compile(r"([^.\[\]]+)|\[(\d+)\]")
+
+
+def _add_secret_option(parser: argparse.ArgumentParser, name: str, help_text: str) -> None:
+    """Register a required secret option, adapting to the available API.
+
+    Both paths end up reading the same server-side-call rendering: a bare
+    ``Secret`` becomes ``--<name>-id "<id>:<password_store_file>"``.
+    """
+    if _HAVE_PWSTORE_V1:
+        parser_add_secret_option(parser, long=f"--{name}", help=help_text, required=True)
+    else:
+        parser.add_argument(f"--{name}-id", required=True, help=help_text)
+
+
+def _reveal_secret(args: argparse.Namespace, name: str) -> str:
+    """Resolve a secret from the parsed args, across Checkmk 2.4 and 2.5+."""
+    if _HAVE_PWSTORE_V1:
+        return resolve_secret_option(args, name).reveal()
+    secret_id, store_file = getattr(args, f"{name}_id").split(":", 1)
+    return _legacy_pwstore.lookup(Path(store_file), secret_id)
 
 
 def _resolve_path(data: object, path: str) -> tuple[bool, object]:
@@ -75,9 +105,9 @@ def parse_arguments(argv: Sequence[str]) -> argparse.Namespace:
     sub = parser.add_subparsers(dest="auth")
     login = sub.add_parser("auth_login")
     login.add_argument("--username", required=True)
-    parser_add_secret_option(login, long="--password", help="API password", required=True)
+    _add_secret_option(login, "password", "API password")
     token = sub.add_parser("auth_token")
-    parser_add_secret_option(token, long="--token", help="API bearer token", required=True)
+    _add_secret_option(token, "token", "API bearer token")
     return parser.parse_args(argv)
 
 
@@ -89,9 +119,9 @@ def _build_session(args: argparse.Namespace) -> tuple[requests.Session, dict[str
         headers[name.strip()] = value.strip()
     match args.auth:
         case "auth_login":
-            session.auth = (args.username, resolve_secret_option(args, "password").reveal())
+            session.auth = (args.username, _reveal_secret(args, "password"))
         case "auth_token":
-            headers["Authorization"] = "Bearer " + resolve_secret_option(args, "token").reveal()
+            headers["Authorization"] = "Bearer " + _reveal_secret(args, "token")
     return session, headers
 
 

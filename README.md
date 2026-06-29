@@ -6,7 +6,7 @@ A generic Checkmk **special agent for monitoring any HTTP/JSON API** — query a
 Checkmk services with thresholds and metrics. No custom Python, no MKP
 development per integration: it's all one Setup rule.
 
-Targets **Checkmk 2.5+** and the current stable plugin APIs
+Targets **Checkmk 2.4+** and the current stable plugin APIs
 (`cmk.agent_based.v2`, `cmk.rulesets.v1`, `cmk.server_side_calls.v1`,
 `cmk.graphing.v1`).
 
@@ -28,7 +28,7 @@ Targets **Checkmk 2.5+** and the current stable plugin APIs
 
 ## Requirements
 
-- Checkmk 2.5.0 or newer (any edition)
+- Checkmk 2.4.0 or newer (any edition)
 
 ## Installation
 

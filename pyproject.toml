@@ -12,7 +12,7 @@ package_name = "json_api"
 title = "Generic JSON API"
 author = "Benjamin Knapp"
 download_url = "https://github.com/otAAAh/checkmk-json-agent"
-min_required = "2.5.0"
+min_required = "2.4.0"
 
 [tool.ruff]
 line-length = 100

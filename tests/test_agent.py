@@ -106,6 +106,22 @@ def test_build_session_token_auth(agent):
     assert headers["Authorization"] == "Bearer abc"
 
 
+def test_secret_resolution_24_fallback(agent, monkeypatch):
+    # Force the Checkmk 2.4 path: no v1_unstable convenience API.
+    monkeypatch.setattr(agent, "_HAVE_PWSTORE_V1", False)
+    args = agent.parse_arguments(
+        ["--url", "http://x", "--extractions", "[]", "auth_token", "--token-id", "myid:/var/store"]
+    )
+    captured = {}
+    monkeypatch.setattr(
+        agent._legacy_pwstore,
+        "lookup",
+        lambda pw_file, pw_id: captured.update(file=str(pw_file), id=pw_id) or "S3CRET",
+    )
+    assert agent._reveal_secret(args, "token") == "S3CRET"
+    assert captured == {"file": "/var/store", "id": "myid"}
+
+
 def test_build_session_basic_auth_and_headers(agent):
     args = agent.parse_arguments(
         [

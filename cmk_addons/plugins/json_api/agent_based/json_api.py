@@ -27,7 +27,8 @@ from cmk.agent_based.v2 import (
 
 # Level tuples come straight from the SimpleLevels form spec, JSON-encoded by
 # the agent: ("fixed", (warn, crit)) or ("no_levels", None) or absent.
-type _Levels = tuple[str, tuple[float, float] | None] | None
+# Plain alias (not a PEP 695 `type` statement) to stay portable to Checkmk 2.4.
+_Levels = tuple[str, tuple[float, float] | None] | None
 
 
 @dataclass(frozen=True)
