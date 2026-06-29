@@ -59,8 +59,17 @@ def parse_json_api(string_table: StringTable) -> Section | None:
     if not string_table:
         return None
     payload = json.loads(string_table[0][0])
-    items = {
-        result["service"]: Item(
+    items: dict[str, Item] = {}
+    for result in payload["results"]:
+        # The agent already makes wildcard labels unique; this is a defensive
+        # backstop so a duplicate service name can never silently drop a service.
+        name = result["service"]
+        if name in items:
+            suffix = 2
+            while f"{name} ({suffix})" in items:
+                suffix += 1
+            name = f"{name} ({suffix})"
+        items[name] = Item(
             found=result["found"],
             value=result["value"],
             error=result["error"],
@@ -68,8 +77,6 @@ def parse_json_api(string_table: StringTable) -> Section | None:
             levels_lower=_coerce_levels(result.get("levels_lower")),
             expected=result.get("expected"),
         )
-        for result in payload["results"]
-    }
     return Section(error=payload.get("error"), items=items)
 
 

@@ -74,6 +74,16 @@ def test_extract_wildcard_scalar_array(agent):
     assert [(r["service"], r["value"]) for r in results] == [("Node 0", "n0"), ("Node 1", "n1")]
 
 
+def test_extract_wildcard_duplicate_labels_disambiguated(agent):
+    doc = {"pods": [{"app": "web", "v": 1}, {"app": "web", "v": 2}, {"app": "db", "v": 3}]}
+    specs = [{"path": "pods[*].v", "service": "Pod", "label_path": "app"}]
+    results = agent._extract(doc, specs)
+    names = [r["service"] for r in results]
+    # the two "web" pods are disambiguated by index; "db" stays clean
+    assert names == ["Pod web [0]", "Pod web [1]", "Pod db"]
+    assert len(set(names)) == len(names)  # all unique
+
+
 def test_extract_wildcard_not_an_array(agent):
     specs = [{"path": "status[*]", "service": "X"}]
     (result,) = agent._extract(DOC, specs)

@@ -77,6 +77,14 @@ def test_check_missing_path_is_unknown(check):
     assert result.state == State.UNKNOWN
 
 
+def test_parse_duplicate_service_names_kept_distinct(check):
+    # Defensive backstop: identical service names must not collapse into one.
+    section = _section(check, [_entry("Dup", value="a"), _entry("Dup", value="b")])
+    assert len(section.items) == 2
+    assert "Dup" in section.items
+    assert "Dup (2)" in section.items
+
+
 def test_check_api_error_is_crit(check):
     # A section-level error surfaces as CRIT on any discovered item.
     items = _section(check, [_entry("X", value="1")]).items

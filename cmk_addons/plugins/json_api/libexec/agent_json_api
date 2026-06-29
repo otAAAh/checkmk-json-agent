@@ -171,13 +171,7 @@ def _extract(document: object, extractions: list[dict]) -> list[dict]:
             )
             continue
 
-        label_path = spec.get("label_path")
-        for index, element in enumerate(array):
-            if label_path:
-                label_found, label_value = _resolve_path(element, label_path)
-                label = str(label_value) if label_found else str(index)
-            else:
-                label = str(index)
+        for label, element in zip(_element_labels(array, spec.get("label_path")), array):
             if after:
                 found, value = _resolve_path(element, after)
             else:
@@ -186,6 +180,30 @@ def _extract(document: object, extractions: list[dict]) -> list[dict]:
                 _result(spec, f"{spec['service']} {label}", found, value, "path not found in element")
             )
     return results
+
+
+def _element_labels(array: list, label_path: str | None) -> list[str]:
+    """One label per array element, guaranteed unique.
+
+    The label comes from label_path within each element (falling back to the
+    index). If a label value repeats across elements, every occurrence of it is
+    suffixed with its index, so two elements can never collapse into one
+    service.
+    """
+    labels = []
+    for index, element in enumerate(array):
+        if label_path:
+            found, value = _resolve_path(element, label_path)
+            labels.append(str(value) if found else str(index))
+        else:
+            labels.append(str(index))
+    counts: dict[str, int] = {}
+    for label in labels:
+        counts[label] = counts.get(label, 0) + 1
+    return [
+        f"{label} [{index}]" if counts[label] > 1 else label
+        for index, label in enumerate(labels)
+    ]
 
 
 def main(argv: Sequence[str] | None = None) -> int:
