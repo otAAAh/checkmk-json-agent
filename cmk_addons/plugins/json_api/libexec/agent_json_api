@@ -22,7 +22,6 @@ import sys
 from collections.abc import Sequence
 
 import requests
-
 from cmk.password_store.v1_unstable import parser_add_secret_option, resolve_secret_option
 
 _PATH_TOKEN = re.compile(r"([^.\[\]]+)|\[(\d+)\]")
@@ -76,9 +75,9 @@ def parse_arguments(argv: Sequence[str]) -> argparse.Namespace:
     sub = parser.add_subparsers(dest="auth")
     login = sub.add_parser("auth_login")
     login.add_argument("--username", required=True)
-    parser_add_secret_option(login, "password")
+    parser_add_secret_option(login, long="--password", help="API password", required=True)
     token = sub.add_parser("auth_token")
-    parser_add_secret_option(token, "token")
+    parser_add_secret_option(token, long="--token", help="API bearer token", required=True)
     return parser.parse_args(argv)
 
 
@@ -92,9 +91,7 @@ def _build_session(args: argparse.Namespace) -> tuple[requests.Session, dict[str
         case "auth_login":
             session.auth = (args.username, resolve_secret_option(args, "password").reveal())
         case "auth_token":
-            headers["Authorization"] = (
-                "Bearer " + resolve_secret_option(args, "token").reveal()
-            )
+            headers["Authorization"] = "Bearer " + resolve_secret_option(args, "token").reveal()
     return session, headers
 
 
