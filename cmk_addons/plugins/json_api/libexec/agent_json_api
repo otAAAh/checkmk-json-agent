@@ -114,25 +114,77 @@ def _fetch(args: argparse.Namespace) -> tuple[object | None, str | None]:
         return None, f"Response is not valid JSON: {exc}"
 
 
+_WILDCARD = "[*]"
+
+
+def _split_wildcard(path: str) -> tuple[str, str] | None:
+    """Split a path on a single '[*]' wildcard into (before, after).
+
+    'after' is the per-element remainder with a leading '.' stripped. Returns
+    None when there is no wildcard. Only the first '[*]' is honoured.
+    """
+    index = path.find(_WILDCARD)
+    if index == -1:
+        return None
+    before = path[:index]
+    after = path[index + len(_WILDCARD) :]
+    if after.startswith("."):
+        after = after[1:]
+    return before, after
+
+
+def _result(
+    spec: dict, service: str, found: bool, value: object, error: str
+) -> dict:
+    # Values that are not JSON scalars (dict/list) are reported as strings.
+    if found and isinstance(value, (dict, list)):
+        value = json.dumps(value)
+    return {
+        "service": service,
+        "path": spec["path"],
+        "found": found,
+        "value": value if found else None,
+        "error": None if found else error,
+        "levels_upper": spec.get("levels_upper"),
+        "levels_lower": spec.get("levels_lower"),
+        "expected": spec.get("expected"),
+    }
+
+
 def _extract(document: object, extractions: list[dict]) -> list[dict]:
     results = []
     for spec in extractions:
-        found, value = _resolve_path(document, spec["path"])
-        # Values that are not JSON scalars (dict/list) are reported as strings.
-        if found and isinstance(value, (dict, list)):
-            value = json.dumps(value)
-        results.append(
-            {
-                "service": spec["service"],
-                "path": spec["path"],
-                "found": found,
-                "value": value if found else None,
-                "error": None if found else "path not found in response",
-                "levels_upper": spec.get("levels_upper"),
-                "levels_lower": spec.get("levels_lower"),
-                "expected": spec.get("expected"),
-            }
-        )
+        split = _split_wildcard(spec["path"])
+        if split is None:
+            found, value = _resolve_path(document, spec["path"])
+            results.append(
+                _result(spec, spec["service"], found, value, "path not found in response")
+            )
+            continue
+
+        # Array wildcard: one service per element, labelled by label_path or index.
+        before, after = split
+        found_array, array = _resolve_path(document, before)
+        if not found_array or not isinstance(array, list):
+            results.append(
+                _result(spec, spec["service"], False, None, "array not found at wildcard path")
+            )
+            continue
+
+        label_path = spec.get("label_path")
+        for index, element in enumerate(array):
+            if label_path:
+                label_found, label_value = _resolve_path(element, label_path)
+                label = str(label_value) if label_found else str(index)
+            else:
+                label = str(index)
+            if after:
+                found, value = _resolve_path(element, after)
+            else:
+                found, value = True, element
+            results.append(
+                _result(spec, f"{spec['service']} {label}", found, value, "path not found in element")
+            )
     return results
 
 

@@ -97,10 +97,24 @@ def _extraction() -> Dictionary:
                     help_text=Help(
                         "Dotted path into the JSON response, e.g. "
                         "'status', 'components.db.status' or 'items[0].count'. "
-                        "A leading '$.' is optional."
+                        "Use a '[*]' wildcard (e.g. 'nodes[*].health') to create "
+                        "one service per array element. A leading '$.' is optional."
                     ),
                     prefill=InputHint("status"),
                     custom_validate=(validators.LengthInRange(min_value=1),),
+                ),
+            ),
+            "label_path": DictElement(
+                required=False,
+                parameter_form=String(
+                    title=Title("Item label path (for '[*]' wildcards)"),
+                    help_text=Help(
+                        "When the path contains a '[*]' wildcard, this optional "
+                        "path - relative to each array element, e.g. 'name' or "
+                        "'id' - provides the label appended to the service name. "
+                        "Defaults to the array index. Pick a field that is unique "
+                        "and stable across runs."
+                    ),
                 ),
             ),
             "levels_upper": DictElement(

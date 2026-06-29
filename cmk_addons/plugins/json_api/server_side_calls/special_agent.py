@@ -37,6 +37,7 @@ class AuthToken(BaseModel, frozen=True):
 class Extraction(BaseModel, frozen=True):
     path: str
     service: str
+    label_path: str | None = None
     # The level tuples are produced by the SimpleLevels form spec, i.e.
     # ("fixed", (warn, crit)) or ("no_levels", None). We pass them through
     # verbatim to the check via the agent section, so they stay opaque here.
