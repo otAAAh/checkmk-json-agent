@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128" role="img" aria-label="Generic JSON API">
+  <title>Generic JSON API</title>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#1e293b"/>
+      <stop offset="1" stop-color="#0f172a"/>
+    </linearGradient>
+  </defs>
+  <rect x="4" y="4" width="120" height="120" rx="26" fill="url(#bg)"/>
+  <g fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <!-- JSON braces -->
+    <path d="M50 32 C42 32 44 44 44 56 C44 62 40 64 36 64 C40 64 44 66 44 72 C44 84 42 96 50 96"
+          stroke="#f8fafc" stroke-width="7"/>
+    <path d="M78 32 C86 32 84 44 84 56 C84 62 88 64 92 64 C88 64 84 66 84 72 C84 84 86 96 78 96"
+          stroke="#f8fafc" stroke-width="7"/>
+    <!-- health pulse -->
+    <path d="M50 64 H58 L62 51 L68 81 L72 64 H78"
+          stroke="#34d399" stroke-width="6"/>
+  </g>
+</svg>
