@@ -52,6 +52,7 @@ class Params(BaseModel, frozen=True):
     body: str | None = None
     headers: Sequence[Header] = ()
     verify_cert: bool = True
+    timeout: float | None = None
     auth: (
         tuple[Literal["auth_login"], AuthLogin] | tuple[Literal["auth_token"], AuthToken] | None
     ) = None
@@ -74,6 +75,8 @@ def _commands_function(
         args += ["--header", f"{header.name}:{header.value}"]
     if params.body is not None:
         args += ["--body", params.body]
+    if params.timeout is not None:
+        args += ["--timeout", str(params.timeout)]
     if not params.verify_cert:
         args.append("--no-cert-check")
     # Auth subcommand must come last: the agent parses it with subparsers that

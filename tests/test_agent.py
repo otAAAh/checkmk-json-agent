@@ -91,6 +91,40 @@ def test_extract_wildcard_not_an_array(agent):
     assert result["error"] == "array not found at wildcard path"
 
 
+def test_extract_nested_wildcard_errors_clearly(agent):
+    doc = {"a": [{"b": [1, 2]}]}
+    (result,) = agent._extract(doc, [{"path": "a[*].b[*]", "service": "X"}])
+    assert result["found"] is False
+    assert "nested" in result["error"]
+
+
+def test_build_session_defaults_json_content_type_for_body(agent):
+    args = agent.parse_arguments(
+        ["--url", "http://x", "--method", "POST", "--body", "{}", "--extractions", "[]"]
+    )
+    _session, headers = agent._build_session(args)
+    assert headers["Content-Type"] == "application/json"
+
+
+def test_build_session_keeps_explicit_content_type(agent):
+    args = agent.parse_arguments(
+        [
+            "--url",
+            "http://x",
+            "--method",
+            "POST",
+            "--body",
+            "a=1",
+            "--header",
+            "Content-Type: application/x-www-form-urlencoded",
+            "--extractions",
+            "[]",
+        ]
+    )
+    _session, headers = agent._build_session(args)
+    assert headers["Content-Type"] == "application/x-www-form-urlencoded"
+
+
 def test_parse_arguments_no_auth(agent):
     args = agent.parse_arguments(["--url", "http://x", "--extractions", "[]"])
     assert args.url == "http://x"

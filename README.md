@@ -52,10 +52,11 @@ endpoint:
 |---|---|
 | **URL** | Full endpoint URL incl. scheme, e.g. `https://app.example.com/actuator/health` |
 | **HTTP method** | `GET` or `POST` |
-| **Request body** | Optional body for `POST` |
+| **Request body** | Optional body for `POST` (defaults `Content-Type: application/json` unless you set one) |
 | **Additional request headers** | Name/value pairs |
 | **Authentication** | None, basic, or bearer token |
 | **Verify the TLS certificate** | On by default |
+| **Request timeout (seconds)** | Optional; defaults to 30 |
 | **Fields to monitor** | One entry per service (see below) |
 
 Each **field to monitor** has:

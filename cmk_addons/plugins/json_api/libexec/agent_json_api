@@ -76,7 +76,7 @@ def _resolve_path(data: object, path: str) -> tuple[bool, object]:
             current = current[key]
         else:
             i = int(index)
-            if not isinstance(current, list) or not (-len(current) <= i < len(current)):
+            if not isinstance(current, list) or i >= len(current):
                 return False, None
             current = current[i]
     return True, current
@@ -122,6 +122,8 @@ def _build_session(args: argparse.Namespace) -> tuple[requests.Session, dict[str
             session.auth = (args.username, _reveal_secret(args, "password"))
         case "auth_token":
             headers["Authorization"] = "Bearer " + _reveal_secret(args, "token")
+    if args.body is not None and not any(h.lower() == "content-type" for h in headers):
+        headers["Content-Type"] = "application/json"
     return session, headers
 
 
@@ -194,6 +196,11 @@ def _extract(document: object, extractions: list[dict]) -> list[dict]:
 
         # Array wildcard: one service per element, labelled by label_path or index.
         before, after = split
+        if _WILDCARD in after:
+            results.append(
+                _result(spec, spec["service"], False, None, "nested [*] wildcards are not supported")
+            )
+            continue
         found_array, array = _resolve_path(document, before)
         if not found_array or not isinstance(array, list):
             results.append(

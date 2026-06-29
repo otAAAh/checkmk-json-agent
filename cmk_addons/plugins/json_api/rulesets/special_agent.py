@@ -109,7 +109,8 @@ def _extraction() -> Dictionary:
                         "Dotted path into the JSON response, e.g. "
                         "'status', 'components.db.status' or 'items[0].count'. "
                         "Use a '[*]' wildcard (e.g. 'nodes[*].health') to create "
-                        "one service per array element. A leading '$.' is optional."
+                        "one service per array element. A leading '$.' is optional. "
+                        "Keys that themselves contain '.' or '[' cannot be addressed."
                     ),
                     prefill=InputHint("status"),
                     custom_validate=(validators.LengthInRange(min_value=1),),
@@ -221,6 +222,15 @@ def _parameter_form() -> Dictionary:
                     label=Label("Verify the TLS certificate"),
                     help_text=Help("Disabling certificate verification is insecure."),
                     prefill=DefaultValue(True),
+                ),
+            ),
+            "timeout": DictElement(
+                required=False,
+                parameter_form=Float(
+                    title=Title("Request timeout (seconds)"),
+                    help_text=Help("Per-request timeout. Defaults to 30 seconds."),
+                    prefill=DefaultValue(30.0),
+                    custom_validate=(validators.NumberInRange(min_value=0.1),),
                 ),
             ),
             "extractions": DictElement(

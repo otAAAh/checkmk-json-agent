@@ -63,6 +63,21 @@ def test_headers_body_and_cert_flag(ssc):
     assert "--header" in args and args[args.index("--header") + 1] == "X-Api:v1"
 
 
+def test_timeout_passed_through(ssc):
+    args = _command_args(
+        ssc,
+        {
+            "url": "http://x",
+            "method": "GET",
+            "verify_cert": True,
+            "timeout": 5.0,
+            "extractions": [],
+        },
+    )
+    assert "--timeout" in args
+    assert args[args.index("--timeout") + 1] == "5.0"
+
+
 def test_label_path_passed_through(ssc):
     args = _command_args(
         ssc,
