@@ -20,12 +20,12 @@ from cmk.rulesets.v1.form_specs import (
     InputHint,
     LevelDirection,
     List,
-    migrate_to_password,
     Password,
     SimpleLevels,
     SingleChoice,
     SingleChoiceElement,
     String,
+    migrate_to_password,
     validators,
 )
 from cmk.rulesets.v1.rule_specs import SpecialAgent, Topic
@@ -45,9 +45,7 @@ def _authentication() -> CascadingSingleChoice:
                             required=True,
                             parameter_form=String(
                                 title=Title("Username"),
-                                custom_validate=(
-                                    validators.LengthInRange(min_value=1),
-                                ),
+                                custom_validate=(validators.LengthInRange(min_value=1),),
                             ),
                         ),
                         "password": DictElement(
@@ -69,9 +67,7 @@ def _authentication() -> CascadingSingleChoice:
                             required=True,
                             parameter_form=Password(
                                 title=Title("Token"),
-                                help_text=Help(
-                                    "Sent as 'Authorization: Bearer <token>'."
-                                ),
+                                help_text=Help("Sent as 'Authorization: Bearer <token>'."),
                                 migrate=migrate_to_password,
                             ),
                         ),
@@ -90,9 +86,7 @@ def _extraction() -> Dictionary:
                 required=True,
                 parameter_form=String(
                     title=Title("Service name"),
-                    help_text=Help(
-                        "Becomes the Checkmk service description for this field."
-                    ),
+                    help_text=Help("Becomes the Checkmk service description for this field."),
                     custom_validate=(validators.LengthInRange(min_value=1),),
                 ),
             ),

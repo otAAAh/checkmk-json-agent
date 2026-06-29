@@ -7,7 +7,7 @@ A single, unit-less metric is shared by every numeric service (each service has
 its own item, so the metric is per-service). Per-field units are a follow-up.
 """
 
-from cmk.graphing.v1 import metrics, Title
+from cmk.graphing.v1 import Title, metrics
 
 metric_json_api_value = metrics.Metric(
     name="json_api_value",

@@ -1,0 +1,30 @@
+# SPDX-License-Identifier: GPL-2.0-only
+[project]
+name = "checkmk-json-agent"
+version = "0.1.0"
+description = "Generic Checkmk special agent for monitoring any HTTP/JSON API"
+requires-python = ">=3.12"
+license = "GPL-2.0-only"
+
+# Metadata baked into the MKP manifest by scripts/build_mkp.py
+[tool.mkp]
+package_name = "json_api"
+title = "Generic JSON API"
+author = "checkmk-json-agent contributors"
+download_url = "https://github.com/otAAAh/checkmk-json-agent"
+min_required = "2.5.0"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "C4"]
+
+[tool.mypy]
+python_version = "3.12"
+warn_unused_ignores = true
+warn_redundant_casts = true
+disallow_untyped_defs = true
+# The cmk.* plugin APIs are only present inside a Checkmk site.
+ignore_missing_imports = true

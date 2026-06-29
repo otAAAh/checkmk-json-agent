@@ -11,14 +11,13 @@ import json
 from collections.abc import Iterable, Sequence
 from typing import Literal
 
-from pydantic import BaseModel
-
 from cmk.server_side_calls.v1 import (
     HostConfig,
     Secret,
     SpecialAgentCommand,
     SpecialAgentConfig,
 )
+from pydantic import BaseModel
 
 
 class Header(BaseModel, frozen=True):
@@ -53,9 +52,7 @@ class Params(BaseModel, frozen=True):
     headers: Sequence[Header] = ()
     verify_cert: bool = True
     auth: (
-        tuple[Literal["auth_login"], AuthLogin]
-        | tuple[Literal["auth_token"], AuthToken]
-        | None
+        tuple[Literal["auth_login"], AuthLogin] | tuple[Literal["auth_token"], AuthToken] | None
     ) = None
     extractions: Sequence[Extraction] = ()
 

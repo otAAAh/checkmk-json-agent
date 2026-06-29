@@ -118,8 +118,7 @@ def check_json_api(item: str, section: Section) -> CheckResult:
         ok = re.fullmatch(entry.expected, text) is not None
         yield Result(
             state=State.OK if ok else State.CRIT,
-            summary=f"Value: {text}"
-            + ("" if ok else f" (expected to match '{entry.expected}')"),
+            summary=f"Value: {text}" + ("" if ok else f" (expected to match '{entry.expected}')"),
         )
         return
 
