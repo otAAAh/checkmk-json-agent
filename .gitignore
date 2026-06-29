@@ -1,0 +1,42 @@
+# Editor / swap files
+.*.swp
+*~
+*kate-swp
+*.iml
+
+# OS
+.DS_Store
+.directory
+
+# IDEs
+.idea/
+.vscode/*
+*.code-workspace
+**/launch.json
+.history/
+.ionide
+
+# Python
+.cache
+*.pyc
+__pycache__/
+.coverage
+.coverage.*
+htmlcov/
+.hypothesis/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+.ropeproject
+.python-version
+
+# Virtualenv
+/.venv/
+.venv.lock
+
+# Build artifacts (MKP package output)
+*.mkp
+
+# AI agent local config
+CLAUDE.md
+/.claude/settings.local.json
