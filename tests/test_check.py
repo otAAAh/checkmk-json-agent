@@ -69,6 +69,22 @@ def test_check_plain_numeric_value_emits_metric(check):
     assert any(isinstance(r, Metric) and r.value == 42.0 for r in results)
 
 
+def test_check_invalid_regex_is_unknown_not_crash(check):
+    section = _section(check, [_entry("Bad", value="UP", expected="(unclosed")])
+    (result,) = list(check.check_json_api("Bad", section))
+    assert result.state == State.UNKNOWN
+    assert "Invalid expected pattern" in result.summary
+
+
+def test_check_levels_on_non_numeric_warns(check):
+    section = _section(
+        check, [_entry("Str", value="not-a-number", levels_upper=["fixed", [5.0, 10.0]])]
+    )
+    (result,) = list(check.check_json_api("Str", section))
+    assert result.state == State.WARN
+    assert "not numeric" in result.summary
+
+
 def test_check_missing_path_is_unknown(check):
     section = _section(
         check, [_entry("Gone", found=False, value=None, error="path not found in response")]

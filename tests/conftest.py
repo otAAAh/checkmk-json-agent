@@ -43,3 +43,8 @@ def check():
 @pytest.fixture(scope="session")
 def ssc():
     return _load("ja_ssc", "server_side_calls/special_agent.py")
+
+
+@pytest.fixture(scope="session")
+def ruleset():
+    return _load("ja_ruleset", "rulesets/special_agent.py")

@@ -123,10 +123,26 @@ def check_json_api(item: str, section: Section) -> CheckResult:
 
     if entry.expected is not None:
         text = str(entry.value)
-        ok = re.fullmatch(entry.expected, text) is not None
+        try:
+            ok = re.fullmatch(entry.expected, text) is not None
+        except re.error as exc:
+            yield Result(
+                state=State.UNKNOWN,
+                summary=f"Invalid expected pattern '{entry.expected}': {exc}",
+            )
+            return
         yield Result(
             state=State.OK if ok else State.CRIT,
             summary=f"Value: {text}" + ("" if ok else f" (expected to match '{entry.expected}')"),
+        )
+        return
+
+    if entry.levels_upper or entry.levels_lower:
+        # Levels were configured but the value is not numeric - surface it
+        # instead of silently passing.
+        yield Result(
+            state=State.WARN,
+            summary=f"Value: {entry.value} (levels configured but value is not numeric)",
         )
         return
 

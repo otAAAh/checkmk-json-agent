@@ -8,7 +8,9 @@ extract (each with optional thresholds / expected-string match). This is the
 deliberate UX choice — no separate master-item / discovery / threshold rules.
 """
 
-from cmk.rulesets.v1 import Help, Label, Title
+import re
+
+from cmk.rulesets.v1 import Help, Label, Message, Title
 from cmk.rulesets.v1.form_specs import (
     BooleanChoice,
     CascadingSingleChoice,
@@ -29,6 +31,15 @@ from cmk.rulesets.v1.form_specs import (
     validators,
 )
 from cmk.rulesets.v1.rule_specs import SpecialAgent, Topic
+
+
+def _validate_regex(value: str) -> None:
+    try:
+        re.compile(value)
+    except re.error as exc:
+        raise validators.ValidationError(
+            Message("Invalid regular expression: %s") % str(exc)
+        ) from exc
 
 
 def _authentication() -> CascadingSingleChoice:
@@ -144,6 +155,7 @@ def _extraction() -> Dictionary:
                         "fully matches this regular expression (e.g. 'UP|ok'). "
                         "Otherwise CRIT."
                     ),
+                    custom_validate=(_validate_regex,),
                 ),
             ),
         },
