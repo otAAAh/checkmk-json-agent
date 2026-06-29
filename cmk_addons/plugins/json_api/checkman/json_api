@@ -1,0 +1,25 @@
+title: Generic JSON API: monitor fields from any HTTP/JSON endpoint
+agents: json_api
+catalog: app
+license: GPLv2
+distribution: https://github.com/otAAAh/checkmk-json-agent
+description:
+ This check works together with the {Generic JSON API} special agent. The
+ agent fetches a JSON document over HTTP(S) and extracts the fields configured
+ in the rule. Each configured field becomes one service.
+
+ A numeric value with configured levels is checked against those levels and
+ exposed as a metric. A value configured with an expected-value regular
+ expression goes {CRIT} unless the value matches. Otherwise the value is shown
+ in the service summary, and a metric is added when it is numeric.
+
+ The service goes {UNKNOWN} if the configured path is not present in the
+ response, and {CRIT} if the request itself failed or did not return JSON.
+
+ Configure it in Setup with the rule {Generic JSON API}.
+
+item:
+ The service name configured for the extracted field.
+
+discovery:
+ One service is created for each field configured in the special agent rule.

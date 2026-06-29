@@ -1,0 +1,158 @@
+#!/usr/bin/env python3
+# Copyright (C) 2026 checkmk-json-agent contributors
+# SPDX-License-Identifier: GPL-2.0-only
+"""Generic JSON API special agent.
+
+Fetches a JSON document over HTTP(S), extracts the configured fields by path,
+and prints a 'json_api' section. One JSON document per run, on a single line.
+
+The section payload looks like:
+
+    {"url": "...", "error": null,
+     "results": [{"service": "...", "path": "...", "found": true,
+                  "value": "UP", "error": null,
+                  "levels_upper": ["fixed", [80, 90]], "levels_lower": null,
+                  "expected": "UP|ok"}, ...]}
+"""
+
+import argparse
+import json
+import re
+import sys
+from collections.abc import Sequence
+
+import requests
+
+from cmk.password_store.v1_unstable import parser_add_secret_option, resolve_secret_option
+
+_PATH_TOKEN = re.compile(r"([^.\[\]]+)|\[(\d+)\]")
+
+
+def _resolve_path(data: object, path: str) -> tuple[bool, object]:
+    """Resolve a dotted path with optional [index] segments.
+
+    Returns (found, value). Supports e.g. 'a.b', 'a[0].b', leading '$.' is
+    stripped. Array wildcards ('[*]') are intentionally not supported yet.
+    """
+    current = data
+    cleaned = path.strip()
+    if cleaned.startswith("$."):
+        cleaned = cleaned[2:]
+    elif cleaned.startswith("$"):
+        cleaned = cleaned[1:]
+    for key, index in _PATH_TOKEN.findall(cleaned):
+        if key:
+            if not isinstance(current, dict) or key not in current:
+                return False, None
+            current = current[key]
+        else:
+            i = int(index)
+            if not isinstance(current, list) or not (-len(current) <= i < len(current)):
+                return False, None
+            current = current[i]
+    return True, current
+
+
+def parse_arguments(argv: Sequence[str]) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--url", required=True)
+    parser.add_argument("--method", default="GET", choices=["GET", "POST"])
+    parser.add_argument("--body", default=None)
+    parser.add_argument(
+        "--header",
+        action="append",
+        default=[],
+        metavar="NAME:VALUE",
+        help="Additional request header, repeatable.",
+    )
+    parser.add_argument("--no-cert-check", action="store_true")
+    parser.add_argument("--timeout", type=float, default=30.0)
+    parser.add_argument(
+        "--extractions",
+        required=True,
+        help="JSON list of {path, service, levels_upper, levels_lower, expected}.",
+    )
+
+    sub = parser.add_subparsers(dest="auth")
+    login = sub.add_parser("auth_login")
+    login.add_argument("--username", required=True)
+    parser_add_secret_option(login, "password")
+    token = sub.add_parser("auth_token")
+    parser_add_secret_option(token, "token")
+    return parser.parse_args(argv)
+
+
+def _build_session(args: argparse.Namespace) -> tuple[requests.Session, dict[str, str]]:
+    session = requests.Session()
+    headers: dict[str, str] = {}
+    for raw in args.header:
+        name, _, value = raw.partition(":")
+        headers[name.strip()] = value.strip()
+    match args.auth:
+        case "auth_login":
+            session.auth = (args.username, resolve_secret_option(args, "password").reveal())
+        case "auth_token":
+            headers["Authorization"] = (
+                "Bearer " + resolve_secret_option(args, "token").reveal()
+            )
+    return session, headers
+
+
+def _fetch(args: argparse.Namespace) -> tuple[object | None, str | None]:
+    session, headers = _build_session(args)
+    try:
+        response = session.request(
+            args.method,
+            args.url,
+            data=args.body,
+            headers=headers,
+            verify=not args.no_cert_check,
+            timeout=args.timeout,
+        )
+        response.raise_for_status()
+        return response.json(), None
+    except requests.exceptions.RequestException as exc:
+        return None, f"Request failed: {exc}"
+    except ValueError as exc:
+        return None, f"Response is not valid JSON: {exc}"
+
+
+def _extract(document: object, extractions: list[dict]) -> list[dict]:
+    results = []
+    for spec in extractions:
+        found, value = _resolve_path(document, spec["path"])
+        # Values that are not JSON scalars (dict/list) are reported as strings.
+        if found and isinstance(value, (dict, list)):
+            value = json.dumps(value)
+        results.append(
+            {
+                "service": spec["service"],
+                "path": spec["path"],
+                "found": found,
+                "value": value if found else None,
+                "error": None if found else "path not found in response",
+                "levels_upper": spec.get("levels_upper"),
+                "levels_lower": spec.get("levels_lower"),
+                "expected": spec.get("expected"),
+            }
+        )
+    return results
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    args = parse_arguments(sys.argv[1:] if argv is None else argv)
+    extractions = json.loads(args.extractions)
+
+    document, error = _fetch(args)
+    payload = {
+        "url": args.url,
+        "error": error,
+        "results": [] if error else _extract(document, extractions),
+    }
+    sys.stdout.write("<<<json_api:sep(0)>>>\n")
+    sys.stdout.write(json.dumps(payload) + "\n")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
