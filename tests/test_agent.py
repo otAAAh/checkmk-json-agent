@@ -1,0 +1,117 @@
+# Copyright (C) 2026 checkmk-json-agent contributors
+# SPDX-License-Identifier: GPL-2.0-only
+"""Tests for the special agent: path resolution, extraction, args, auth."""
+
+import pytest
+
+DOC = {
+    "status": "UP",
+    "components": {"db": {"status": "DOWN", "details": {"connections": 7}}},
+    "items": [{"name": "alpha", "count": 42}, {"name": "beta", "count": 99}],
+    "nodes": ["n0", "n1"],
+}
+
+
+@pytest.mark.parametrize(
+    "path, expected",
+    [
+        ("status", (True, "UP")),
+        ("$.status", (True, "UP")),
+        ("components.db.status", (True, "DOWN")),
+        ("components.db.details.connections", (True, 7)),
+        ("items[0].count", (True, 42)),
+        ("items[1].name", (True, "beta")),
+        ("items[5].count", (False, None)),
+        ("missing.key", (False, None)),
+        ("", (True, DOC)),  # empty path resolves to the whole document
+    ],
+)
+def test_resolve_path(agent, path, expected):
+    assert agent._resolve_path(DOC, path) == expected
+
+
+def test_split_wildcard(agent):
+    assert agent._split_wildcard("nodes[*].health") == ("nodes", "health")
+    assert agent._split_wildcard("items[*]") == ("items", "")
+    assert agent._split_wildcard("[*].name") == ("", "name")
+    assert agent._split_wildcard("plain.path") is None
+
+
+def test_extract_scalar(agent):
+    specs = [
+        {"path": "status", "service": "Health", "expected": "UP"},
+        {"path": "components.db", "service": "DB"},  # dict -> serialized to JSON text
+        {"path": "missing", "service": "Gone"},
+    ]
+    results = agent._extract(DOC, specs)
+    by_service = {r["service"]: r for r in results}
+
+    assert by_service["Health"]["value"] == "UP"
+    assert by_service["Health"]["found"] is True
+    assert by_service["DB"]["value"] == '{"status": "DOWN", "details": {"connections": 7}}'
+    assert by_service["Gone"]["found"] is False
+    assert by_service["Gone"]["error"] == "path not found in response"
+
+
+def test_extract_wildcard_index_label(agent):
+    specs = [{"path": "items[*].count", "service": "Item"}]
+    results = agent._extract(DOC, specs)
+    assert [(r["service"], r["value"]) for r in results] == [("Item 0", 42), ("Item 1", 99)]
+
+
+def test_extract_wildcard_with_label_path(agent):
+    specs = [{"path": "items[*].count", "service": "Item", "label_path": "name"}]
+    results = agent._extract(DOC, specs)
+    assert [(r["service"], r["value"]) for r in results] == [
+        ("Item alpha", 42),
+        ("Item beta", 99),
+    ]
+
+
+def test_extract_wildcard_scalar_array(agent):
+    specs = [{"path": "nodes[*]", "service": "Node"}]
+    results = agent._extract(DOC, specs)
+    assert [(r["service"], r["value"]) for r in results] == [("Node 0", "n0"), ("Node 1", "n1")]
+
+
+def test_extract_wildcard_not_an_array(agent):
+    specs = [{"path": "status[*]", "service": "X"}]
+    (result,) = agent._extract(DOC, specs)
+    assert result["found"] is False
+    assert result["error"] == "array not found at wildcard path"
+
+
+def test_parse_arguments_no_auth(agent):
+    args = agent.parse_arguments(["--url", "http://x", "--extractions", "[]"])
+    assert args.url == "http://x"
+    assert args.method == "GET"
+    assert args.auth is None
+
+
+def test_build_session_token_auth(agent):
+    args = agent.parse_arguments(
+        ["--url", "http://x", "--extractions", "[]", "auth_token", "--token", "abc"]
+    )
+    _session, headers = agent._build_session(args)
+    assert headers["Authorization"] == "Bearer abc"
+
+
+def test_build_session_basic_auth_and_headers(agent):
+    args = agent.parse_arguments(
+        [
+            "--url",
+            "http://x",
+            "--extractions",
+            "[]",
+            "--header",
+            "X-Api: v1",
+            "auth_login",
+            "--username",
+            "user",
+            "--password",
+            "pw",
+        ]
+    )
+    session, headers = agent._build_session(args)
+    assert session.auth == ("user", "pw")
+    assert headers["X-Api"] == "v1"
