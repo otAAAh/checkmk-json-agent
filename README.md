@@ -1,6 +1,9 @@
 <!-- SPDX-License-Identifier: GPL-2.0-only -->
 # checkmk-json-agent
 
+[![CI](https://github.com/otAAAh/checkmk-json-agent/actions/workflows/ci.yml/badge.svg)](https://github.com/otAAAh/checkmk-json-agent/actions/workflows/ci.yml)
+[![License: GPL v2](https://img.shields.io/badge/License-GPLv2-blue.svg)](LICENSE)
+
 A generic Checkmk **special agent for monitoring any HTTP/JSON API** — query a
 `/health` or `/status` endpoint, extract fields by path, and turn them into
 Checkmk services with thresholds and metrics. No custom Python, no MKP
