@@ -106,6 +106,15 @@ def test_build_session_token_auth(agent):
     assert headers["Authorization"] == "Bearer abc"
 
 
+def test_main_fails_datasource_on_fetch_error(agent, monkeypatch, capsys):
+    monkeypatch.setattr(agent, "_fetch", lambda args: (None, "Request failed: boom"))
+    rc = agent.main(["--url", "http://x", "--extractions", "[]"])
+    captured = capsys.readouterr()
+    assert rc == 1
+    assert "boom" in captured.err
+    assert "<<<json_api" not in captured.out  # no section emitted on failure
+
+
 def test_secret_resolution_24_fallback(agent, monkeypatch):
     # Force the Checkmk 2.4 path: no v1_unstable convenience API.
     monkeypatch.setattr(agent, "_HAVE_PWSTORE_V1", False)

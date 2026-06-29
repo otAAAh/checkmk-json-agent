@@ -85,6 +85,20 @@ def test_check_levels_on_non_numeric_warns(check):
     assert "not numeric" in result.summary
 
 
+def test_check_boolean_rendered_and_matched_as_json(check):
+    # JSON true -> Python True must render/match as "true", not "True".
+    section = _section(check, [_entry("Up", value=True, expected="true")])
+    (result,) = list(check.check_json_api("Up", section))
+    assert result.state == State.OK
+    assert result.summary == "Value: true"
+
+
+def test_check_null_value_rendered_as_json(check):
+    section = _section(check, [_entry("Nothing", value=None)])
+    (result,) = list(check.check_json_api("Nothing", section))
+    assert result.summary == "Value: null"
+
+
 def test_check_missing_path_is_unknown(check):
     section = _section(
         check, [_entry("Gone", found=False, value=None, error="path not found in response")]

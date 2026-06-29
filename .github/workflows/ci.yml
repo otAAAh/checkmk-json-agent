@@ -1,0 +1,28 @@
+# SPDX-License-Identifier: GPL-2.0-only
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  lint-and-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      # Pinned to the ruff version used for local development, for formatting parity.
+      - run: pip install ruff==0.15.8
+      - name: Format check
+        run: ruff format --check cmk_addons scripts tests
+      - name: Lint
+        run: ruff check cmk_addons scripts tests
+      - name: Build MKP (stdlib only)
+        run: python3 scripts/build_mkp.py
+
+# Note: the pytest suite imports the cmk.* plugin APIs, which only exist inside a
+# Checkmk site or dev virtualenv, so it is not run here. Run it locally with:
+#   PYTHON=/path/to/checkmk/.venv/bin/python make test

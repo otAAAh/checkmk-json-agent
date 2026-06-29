@@ -241,11 +241,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     extractions = json.loads(args.extractions)
 
     document, error = _fetch(args)
-    payload = {
-        "url": args.url,
-        "error": error,
-        "results": [] if error else _extract(document, extractions),
-    }
+    if error is not None:
+        # Fail the data source so Checkmk reports one CRIT on the "Check_MK"
+        # service and the JSON services go stale - instead of turning every
+        # configured service CRIT at once.
+        sys.stderr.write(error + "\n")
+        return 1
+
+    payload = {"url": args.url, "results": _extract(document, extractions)}
     sys.stdout.write("<<<json_api:sep(0)>>>\n")
     sys.stdout.write(json.dumps(payload) + "\n")
     return 0

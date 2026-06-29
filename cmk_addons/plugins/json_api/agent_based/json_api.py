@@ -86,6 +86,16 @@ def discover_json_api(section: Section) -> DiscoveryResult:
         yield Service(item=service)
 
 
+def _render_value(value: object) -> str:
+    """Render a value the way it appears in JSON, so 'expected' matches what
+    users see (true/false/null, not Python's True/False/None)."""
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if value is None:
+        return "null"
+    return str(value)
+
+
 def _as_number(value: object) -> float | None:
     if isinstance(value, bool):
         return None
@@ -122,7 +132,7 @@ def check_json_api(item: str, section: Section) -> CheckResult:
         return
 
     if entry.expected is not None:
-        text = str(entry.value)
+        text = _render_value(entry.value)
         try:
             ok = re.fullmatch(entry.expected, text) is not None
         except re.error as exc:
@@ -142,12 +152,14 @@ def check_json_api(item: str, section: Section) -> CheckResult:
         # instead of silently passing.
         yield Result(
             state=State.WARN,
-            summary=f"Value: {entry.value} (levels configured but value is not numeric)",
+            summary=(
+                f"Value: {_render_value(entry.value)} (levels configured but value is not numeric)"
+            ),
         )
         return
 
     # No levels, no expected pattern: surface the value, add a metric if numeric.
-    yield Result(state=State.OK, summary=f"Value: {entry.value}")
+    yield Result(state=State.OK, summary=f"Value: {_render_value(entry.value)}")
     if number is not None:
         yield Metric("json_api_value", number)
 

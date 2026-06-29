@@ -74,8 +74,13 @@ Each **field to monitor** has:
   `json_api_value` metric
 - **Value with an expected regex** → OK if it fully matches, else CRIT
 - **Plain value** → shown in the summary (numeric values still get a metric)
+- **Levels set on a non-numeric value** → WARN (so the misconfig is visible)
 - **Path not found** → UNKNOWN
-- **Request failed / not JSON** → CRIT
+- **Request failed / not JSON** → the data source fails (one CRIT on the host's
+  `Check_MK` service; the JSON services go stale) — not a CRIT on every service
+
+Values are rendered as they appear in JSON, so an `expected` regex matches
+`true` / `false` / `null` — not Python's `True` / `False` / `None`.
 
 ## Examples
 
@@ -118,6 +123,16 @@ web page (open it directly in a browser — nothing is uploaded anywhere). Paste
 sample JSON response, click the fields to monitor, set thresholds/labels, and it
 generates: the agent `--extractions` blob for CLI testing, the rule value for
 `rules.mk`, and a REST API request body + `curl` to create the rule on a site.
+
+## Security notes
+
+- The agent performs **HTTP requests from the Checkmk server** to operator-configured
+  URLs. Treat the rule as trusted input: a URL pointing at internal services (or one
+  that **redirects** there — redirects are followed) can be used as an SSRF vector.
+  Restrict who can edit the rule accordingly.
+- Credentials are stored in the Checkmk **password store** and passed to the agent as
+  a store reference, not in clear text on the command line.
+- TLS verification is **on by default**; disabling it is insecure and opt-in per rule.
 
 ## Building from source
 
