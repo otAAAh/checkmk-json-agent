@@ -1,4 +1,4 @@
-# Copyright (C) 2026 checkmk-json-agent contributors
+# Copyright (C) 2026 Benjamin Knapp
 # SPDX-License-Identifier: GPL-2.0-only
 """Load the plugin modules by file path for testing.
 

@@ -10,7 +10,7 @@ license = "GPL-2.0-only"
 [tool.mkp]
 package_name = "json_api"
 title = "Generic JSON API"
-author = "checkmk-json-agent contributors"
+author = "Benjamin Knapp"
 download_url = "https://github.com/otAAAh/checkmk-json-agent"
 min_required = "2.5.0"
 
