@@ -1,0 +1,372 @@
+<!DOCTYPE html>
+<!-- Copyright (C) 2026 Benjamin Knapp -->
+<!-- SPDX-License-Identifier: GPL-2.0-only -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>JSON API Explorer — checkmk-json-agent</title>
+<style>
+  :root { --bg:#1e2329; --panel:#272d36; --line:#3a424e; --fg:#e6e9ee; --mut:#9aa6b2;
+          --acc:#15d1a0; --warn:#e0b030; --crit:#e05a5a; }
+  * { box-sizing: border-box; }
+  body { margin:0; font:14px/1.5 system-ui, sans-serif; background:var(--bg); color:var(--fg); }
+  header { padding:14px 20px; border-bottom:1px solid var(--line); }
+  header h1 { margin:0; font-size:18px; }
+  header p { margin:4px 0 0; color:var(--mut); font-size:13px; }
+  .wrap { display:grid; grid-template-columns:1fr 1fr 1fr; gap:14px; padding:14px 20px; align-items:start; }
+  @media (max-width:1100px){ .wrap{ grid-template-columns:1fr; } }
+  .panel { background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:12px; }
+  .panel h2 { margin:0 0 8px; font-size:13px; text-transform:uppercase; letter-spacing:.05em; color:var(--mut); }
+  textarea { width:100%; min-height:300px; background:#161a1f; color:var(--fg); border:1px solid var(--line);
+             border-radius:6px; padding:8px; font:12px/1.45 ui-monospace, monospace; resize:vertical; }
+  input, select { background:#161a1f; color:var(--fg); border:1px solid var(--line); border-radius:5px;
+                  padding:4px 6px; font:13px system-ui, sans-serif; }
+  input[type=text]{ width:100%; }
+  button { background:var(--acc); color:#06231c; border:0; border-radius:5px; padding:5px 10px;
+           font-weight:600; cursor:pointer; }
+  button.ghost { background:transparent; color:var(--mut); border:1px solid var(--line); font-weight:500; }
+  button.ghost:hover { color:var(--fg); }
+  .grid2 { display:grid; grid-template-columns:auto 1fr; gap:6px 8px; align-items:center; margin-bottom:10px; }
+  .grid2 label { color:var(--mut); font-size:12px; }
+  /* tree */
+  #tree { font:12px/1.6 ui-monospace, monospace; max-height:520px; overflow:auto; }
+  #tree details { margin-left:12px; }
+  #tree summary { cursor:pointer; list-style:none; }
+  #tree summary::-webkit-details-marker { display:none; }
+  #tree summary::before { content:"▸ "; color:var(--mut); }
+  #tree details[open] > summary::before { content:"▾ "; }
+  .leaf { margin-left:24px; display:flex; gap:8px; align-items:center; }
+  .k { color:#7fb3ff; } .t { color:var(--mut); } .v { color:var(--acc); }
+  .add { background:transparent; border:1px solid var(--line); color:var(--mut); border-radius:4px;
+         padding:0 6px; font-size:11px; cursor:pointer; }
+  .add:hover { color:var(--fg); border-color:var(--acc); }
+  .wild { color:var(--warn); }
+  /* field editors */
+  .field { border:1px solid var(--line); border-radius:6px; padding:8px; margin-bottom:8px; }
+  .field .row { display:grid; grid-template-columns:auto 1fr; gap:4px 8px; align-items:center; margin-bottom:4px; }
+  .field .lvls { display:flex; gap:6px; align-items:center; }
+  .field .lvls input { width:70px; }
+  .field code { color:var(--warn); word-break:break-all; }
+  .field .rm { float:right; }
+  .muted { color:var(--mut); font-size:12px; }
+  pre { background:#161a1f; border:1px solid var(--line); border-radius:6px; padding:10px; overflow:auto;
+        font:12px/1.45 ui-monospace, monospace; white-space:pre; max-height:240px; margin:0 0 6px; }
+  .outblock { margin-bottom:14px; }
+  .outblock .hdr { display:flex; justify-content:space-between; align-items:center; margin-bottom:4px; }
+  .err { color:var(--crit); }
+</style>
+</head>
+<body>
+<header>
+  <h1>JSON API Explorer <span class="muted">· checkmk-json-agent</span></h1>
+  <p>Paste a sample JSON response, pick the fields to monitor, and copy a ready-to-use rule. Runs entirely in your browser — nothing is sent anywhere.</p>
+</header>
+
+<div class="wrap">
+  <!-- LEFT: input -->
+  <div class="panel">
+    <h2>1 · Paste JSON response</h2>
+    <textarea id="json" spellcheck="false"></textarea>
+    <div style="margin-top:8px; display:flex; gap:8px;">
+      <button id="parse">Parse →</button>
+      <button class="ghost" id="sample">Load sample</button>
+    </div>
+    <div id="parse-err" class="err" style="margin-top:6px;"></div>
+
+    <h2 style="margin-top:16px;">Endpoint (for the rule)</h2>
+    <div class="grid2">
+      <label>URL</label><input type="text" id="url" placeholder="https://app.example.com/actuator/health">
+      <label>Method</label><select id="method"><option>GET</option><option>POST</option></select>
+    </div>
+  </div>
+
+  <!-- MIDDLE: tree + fields -->
+  <div class="panel">
+    <h2>2 · Pick fields</h2>
+    <div id="tree" class="muted">Parse some JSON to see its structure.</div>
+    <h2 style="margin-top:14px;">Selected fields</h2>
+    <div id="fields" class="muted">None yet — click <em>monitor</em> on a value above.</div>
+  </div>
+
+  <!-- RIGHT: outputs -->
+  <div class="panel">
+    <h2>3 · Generated output</h2>
+
+    <div class="outblock">
+      <div class="hdr"><span class="muted">Agent <code>--extractions</code> (CLI test)</span>
+        <button class="ghost" data-copy="out-extr">Copy</button></div>
+      <pre id="out-extr"></pre>
+      <div class="muted">Test: <code>agent_json_api --url '&lt;url&gt;' --extractions '&lt;above&gt;'</code></div>
+    </div>
+
+    <div class="outblock">
+      <div class="hdr"><span class="muted">Rule value (rules.mk / reference)</span>
+        <button class="ghost" data-copy="out-value">Copy</button></div>
+      <pre id="out-value"></pre>
+    </div>
+
+    <div class="outblock">
+      <h2>Import via REST API</h2>
+      <div class="grid2">
+        <label>Site base URL</label><input type="text" id="site" placeholder="http://localhost/mysite/">
+        <label>Folder</label><input type="text" id="folder" value="~">
+        <label>Host name</label><input type="text" id="host" placeholder="localhost">
+      </div>
+      <div class="hdr"><span class="muted">Request body — save as <code>rule.json</code></span>
+        <button class="ghost" data-copy="out-rest">Copy</button></div>
+      <pre id="out-rest"></pre>
+      <div class="hdr"><span class="muted">curl</span>
+        <button class="ghost" data-copy="out-curl">Copy</button></div>
+      <pre id="out-curl"></pre>
+      <div class="muted">Conditions schema can vary by Checkmk version — adjust if the API rejects it.</div>
+    </div>
+  </div>
+</div>
+
+<script>
+"use strict";
+const SAMPLE = {
+  status: "UP",
+  components: { db: { status: "UP", details: { connections: 7 } } },
+  nodes: [
+    { name: "web-1", status: "UP", load: 0.4 },
+    { name: "web-2", status: "DOWN", load: 0.9 }
+  ]
+};
+
+const state = { extractions: [] };
+let parsedRoot = null;
+
+const $ = id => document.getElementById(id);
+
+// ---- helpers --------------------------------------------------------------
+function pyStr(s) { return "'" + String(s).replace(/\\/g, "\\\\").replace(/'/g, "\\'") + "'"; }
+
+function resolvePath(root, p) {
+  if (!p) return root;
+  let cur = root;
+  const re = /([^.\[\]]+)|\[(\d+)\]/g;
+  let m;
+  while ((m = re.exec(p))) {
+    if (m[1] !== undefined) {
+      if (cur && typeof cur === "object" && m[1] in cur) cur = cur[m[1]];
+      else return undefined;
+    } else {
+      const i = +m[2];
+      if (Array.isArray(cur) && i < cur.length) cur = cur[i];
+      else return undefined;
+    }
+  }
+  return cur;
+}
+
+function guessLabel(path) {
+  const before = path.split("[*]")[0].replace(/\.$/, "");
+  const arr = resolvePath(parsedRoot, before);
+  if (Array.isArray(arr) && arr.length && arr[0] && typeof arr[0] === "object") {
+    for (const cand of ["name", "id", "title", "key", "host", "hostname"]) {
+      if (cand in arr[0]) return cand;
+    }
+  }
+  return "";
+}
+
+function defaultService(path) {
+  const segs = path.replace(/\[\*\]/g, "").split(".").filter(Boolean);
+  const last = segs[segs.length - 1] || "value";
+  return last.charAt(0).toUpperCase() + last.slice(1);
+}
+
+function preview(v) {
+  if (typeof v === "string") return JSON.stringify(v);
+  return String(v);
+}
+
+// ---- tree -----------------------------------------------------------------
+function leafRow(label, value, path) {
+  const wild = path.includes("[*]");
+  const row = document.createElement("div");
+  row.className = "leaf";
+  row.innerHTML =
+    `<span class="k ${wild ? "wild" : ""}">${label}</span>` +
+    `<span class="t">${Array.isArray(value) ? "array" : typeof value}</span>` +
+    `<span class="v">${preview(value)}</span>`;
+  const btn = document.createElement("button");
+  btn.className = "add";
+  btn.textContent = wild ? "monitor each [*]" : "monitor";
+  btn.onclick = () => addExtraction(path);
+  row.appendChild(btn);
+  return row;
+}
+
+function buildNode(key, value, path) {
+  if (Array.isArray(value)) {
+    const det = document.createElement("details");
+    const sum = document.createElement("summary");
+    sum.innerHTML = `<span class="k">${key}</span> <span class="t">[${value.length}] — one service per element</span>`;
+    det.appendChild(sum);
+    if (value.length) {
+      const el0 = value[0];
+      const wpath = path + "[*]";
+      if (el0 && typeof el0 === "object" && !Array.isArray(el0)) {
+        for (const k of Object.keys(el0)) det.appendChild(buildNode(k, el0[k], wpath + "." + k));
+      } else {
+        det.appendChild(leafRow(key + "[*]", el0, wpath));
+      }
+    }
+    return det;
+  }
+  if (value && typeof value === "object") {
+    const det = document.createElement("details");
+    det.open = true;
+    const sum = document.createElement("summary");
+    sum.innerHTML = `<span class="k">${key}</span> <span class="t">{${Object.keys(value).length}}</span>`;
+    det.appendChild(sum);
+    for (const k of Object.keys(value)) det.appendChild(buildNode(k, value[k], path ? path + "." + k : k));
+    return det;
+  }
+  return leafRow(key, value, path);
+}
+
+function renderTree() {
+  const tree = $("tree");
+  tree.innerHTML = "";
+  if (parsedRoot && typeof parsedRoot === "object" && !Array.isArray(parsedRoot)) {
+    for (const k of Object.keys(parsedRoot)) tree.appendChild(buildNode(k, parsedRoot[k], k));
+  } else if (Array.isArray(parsedRoot)) {
+    tree.appendChild(buildNode("(root)", parsedRoot, ""));
+  } else {
+    tree.textContent = "Top-level JSON must be an object or array.";
+  }
+}
+
+// ---- extraction state -----------------------------------------------------
+function addExtraction(path) {
+  state.extractions.push({
+    service: defaultService(path),
+    path,
+    label_path: path.includes("[*]") ? guessLabel(path) : "",
+    lu_w: "", lu_c: "", ll_w: "", ll_c: "", expected: ""
+  });
+  renderFields();
+  renderOutputs();
+}
+
+function renderFields() {
+  const box = $("fields");
+  if (!state.extractions.length) {
+    box.className = "muted";
+    box.innerHTML = "None yet — click <em>monitor</em> on a value above.";
+    return;
+  }
+  box.className = "";
+  box.innerHTML = "";
+  state.extractions.forEach((e, i) => {
+    const wild = e.path.includes("[*]");
+    const d = document.createElement("div");
+    d.className = "field";
+    d.innerHTML =
+      `<button class="ghost rm" data-rm="${i}">remove</button>` +
+      `<div class="muted">path: <code>${e.path}</code></div>` +
+      `<div class="row"><label>Service</label><input type="text" data-f="service" data-i="${i}" value="${e.service.replace(/"/g,"&quot;")}"></div>` +
+      (wild ? `<div class="row"><label>Label path</label><input type="text" data-f="label_path" data-i="${i}" value="${e.label_path}" placeholder="field in each element, e.g. name"></div>` : "") +
+      `<div class="row"><label>Upper W/C</label><span class="lvls"><input type="text" data-f="lu_w" data-i="${i}" value="${e.lu_w}" placeholder="warn"><input type="text" data-f="lu_c" data-i="${i}" value="${e.lu_c}" placeholder="crit"></span></div>` +
+      `<div class="row"><label>Lower W/C</label><span class="lvls"><input type="text" data-f="ll_w" data-i="${i}" value="${e.ll_w}" placeholder="warn"><input type="text" data-f="ll_c" data-i="${i}" value="${e.ll_c}" placeholder="crit"></span></div>` +
+      `<div class="row"><label>Expected</label><input type="text" data-f="expected" data-i="${i}" value="${e.expected.replace(/"/g,"&quot;")}" placeholder="regex, e.g. UP|ok"></div>`;
+    box.appendChild(d);
+  });
+  box.querySelectorAll("input[data-f]").forEach(inp => {
+    inp.oninput = () => { state.extractions[+inp.dataset.i][inp.dataset.f] = inp.value; renderOutputs(); };
+  });
+  box.querySelectorAll("[data-rm]").forEach(b => {
+    b.onclick = () => { state.extractions.splice(+b.dataset.rm, 1); renderFields(); renderOutputs(); };
+  });
+}
+
+// ---- output generation ----------------------------------------------------
+function levelsPair(w, c) {
+  const wn = parseFloat(w), cn = parseFloat(c);
+  if (Number.isNaN(wn) || Number.isNaN(cn)) return null;
+  return [wn, cn];
+}
+
+function extractionObjs() {
+  return state.extractions.map(e => {
+    const o = { service: e.service, path: e.path };
+    if (e.label_path) o.label_path = e.label_path;
+    const lu = levelsPair(e.lu_w, e.lu_c); if (lu) o.levels_upper = ["fixed", lu];
+    const ll = levelsPair(e.ll_w, e.ll_c); if (ll) o.levels_lower = ["fixed", ll];
+    if (e.expected) o.expected = e.expected;
+    return o;
+  });
+}
+
+function pyExtraction(o) {
+  const p = [`'service': ${pyStr(o.service)}`, `'path': ${pyStr(o.path)}`];
+  if (o.label_path) p.push(`'label_path': ${pyStr(o.label_path)}`);
+  if (o.levels_upper) p.push(`'levels_upper': ('fixed', (${o.levels_upper[1][0]}, ${o.levels_upper[1][1]}))`);
+  if (o.levels_lower) p.push(`'levels_lower': ('fixed', (${o.levels_lower[1][0]}, ${o.levels_lower[1][1]}))`);
+  if (o.expected) p.push(`'expected': ${pyStr(o.expected)}`);
+  return "{" + p.join(", ") + "}";
+}
+
+function valuePy(objs) {
+  const url = $("url").value || "https://app.example.com/health";
+  const method = $("method").value || "GET";
+  const lines = objs.map(o => "        " + pyExtraction(o) + ",").join("\n");
+  return `{\n    'url': ${pyStr(url)},\n    'method': ${pyStr(method)},\n    'verify_cert': True,\n    'extractions': [\n${lines}\n    ],\n}`;
+}
+
+function renderOutputs() {
+  const objs = extractionObjs();
+  $("out-extr").textContent = JSON.stringify(objs);
+  const vpy = valuePy(objs);
+  $("out-value").textContent = vpy;
+
+  const site = ($("site").value || "http://localhost/mysite/").replace(/\/?$/, "/");
+  const host = $("host").value || "localhost";
+  const body = {
+    ruleset: "special_agents:json_api",
+    folder: $("folder").value || "~",
+    properties: { disabled: false },
+    value_raw: vpy,
+    conditions: { host_name: { match_on: [host], operator: "one_of" } }
+  };
+  $("out-rest").textContent = JSON.stringify(body, null, 2);
+  $("out-curl").textContent =
+    `curl -X POST '${site}check_mk/api/1.0/domain-types/rule/collections/all' \\\n` +
+    `  -H 'Authorization: Bearer automation YOUR_SECRET' \\\n` +
+    `  -H 'Accept: application/json' -H 'Content-Type: application/json' \\\n` +
+    `  --data-binary @rule.json`;
+}
+
+// ---- wiring ---------------------------------------------------------------
+function doParse() {
+  $("parse-err").textContent = "";
+  try {
+    parsedRoot = JSON.parse($("json").value);
+  } catch (e) {
+    $("parse-err").textContent = "Invalid JSON: " + e.message;
+    return;
+  }
+  renderTree();
+}
+
+$("parse").onclick = doParse;
+$("sample").onclick = () => { $("json").value = JSON.stringify(SAMPLE, null, 2); doParse(); };
+document.querySelectorAll("[data-copy]").forEach(b => {
+  b.onclick = () => {
+    navigator.clipboard.writeText($(b.dataset.copy).textContent);
+    const t = b.textContent; b.textContent = "copied"; setTimeout(() => (b.textContent = t), 1000);
+  };
+});
+["url", "method", "site", "folder", "host"].forEach(id => $(id).addEventListener("input", renderOutputs));
+
+// boot with the sample loaded
+$("json").value = JSON.stringify(SAMPLE, null, 2);
+doParse();
+renderOutputs();
+</script>
+</body>
+</html>

@@ -111,6 +111,14 @@ Produces `JSON Node web-1` (OK) and `JSON Node web-2` (CRIT). If a label value
 repeats across elements, every occurrence is suffixed with its index so two
 elements never collapse into one service.
 
+## JSON API Explorer
+
+[`explorer/index.html`](explorer/index.html) is a standalone, dependency-free
+web page (open it directly in a browser — nothing is uploaded anywhere). Paste a
+sample JSON response, click the fields to monitor, set thresholds/labels, and it
+generates: the agent `--extractions` blob for CLI testing, the rule value for
+`rules.mk`, and a REST API request body + `curl` to create the rule on a site.
+
 ## Building from source
 
 ```sh
