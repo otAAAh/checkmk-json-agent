@@ -19,7 +19,8 @@ Targets **Checkmk 2.4+** and the current stable plugin APIs
 - **Auth**: none, HTTP basic (username/password), or bearer token — secrets go
   through the Checkmk password store, never onto the command line in clear text
 - **Path extraction** with a dotted syntax: `status`, `components.db.status`,
-  `items[0].count` (leading `$.` optional)
+  `items[0].count` (leading `$.` optional); keys containing `.` or `[` can be
+  bracket-quoted, e.g. `data['foo.bar'].value`
 - **One service per field**, named as you choose
 - **Array auto-discovery**: a `[*]` wildcard (e.g. `nodes[*].health`) creates
   one service per array element, labelled by a field you pick

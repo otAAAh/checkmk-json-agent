@@ -9,6 +9,7 @@ DOC = {
     "components": {"db": {"status": "DOWN", "details": {"connections": 7}}},
     "items": [{"name": "alpha", "count": 42}, {"name": "beta", "count": 99}],
     "nodes": ["n0", "n1"],
+    "data": {"foo.bar": {"value": 5}, "with[bracket]": "yes", "": "empty-key"},
 }
 
 
@@ -24,6 +25,13 @@ DOC = {
         ("items[5].count", (False, None)),
         ("missing.key", (False, None)),
         ("", (True, DOC)),  # empty path resolves to the whole document
+        # Bracket-quoted segments address keys that contain '.' or '['.
+        ("data['foo.bar'].value", (True, 5)),
+        ('data["foo.bar"].value', (True, 5)),
+        ("data['with[bracket]']", (True, "yes")),
+        ("$.data['foo.bar'].value", (True, 5)),
+        ("data['']", (True, "empty-key")),  # empty quoted key
+        ("data['missing.key']", (False, None)),
     ],
 )
 def test_resolve_path(agent, path, expected):
