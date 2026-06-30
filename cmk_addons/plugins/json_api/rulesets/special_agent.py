@@ -110,7 +110,8 @@ def _extraction() -> Dictionary:
                         "'status', 'components.db.status' or 'items[0].count'. "
                         "Use a '[*]' wildcard (e.g. 'nodes[*].health') to create "
                         "one service per array element. A leading '$.' is optional. "
-                        "Keys that themselves contain '.' or '[' cannot be addressed."
+                        "Keys that themselves contain '.' or '[' can be addressed "
+                        "with bracket-quoted segments, e.g. \"data['foo.bar'].value\"."
                     ),
                     prefill=InputHint("status"),
                     custom_validate=(validators.LengthInRange(min_value=1),),
