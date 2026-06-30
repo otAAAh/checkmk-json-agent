@@ -23,7 +23,9 @@ Targets **Checkmk 2.4+** and the current stable plugin APIs
   bracket-quoted, e.g. `data['foo.bar'].value`
 - **One service per field**, named as you choose
 - **Array auto-discovery**: a `[*]` wildcard (e.g. `nodes[*].health`) creates
-  one service per array element, labelled by a field you pick
+  one service per array element, labelled by a field you pick; multiple
+  wildcards (e.g. `pods[*].containers[*].ready`) expand the cartesian product,
+  with composite `<pod> / <container>` labels
 - **Thresholds**: WARN/CRIT upper and lower levels for numeric values, exposed
   as a metric/graph
 - **String matching**: a regex the value must fully match, else CRIT
@@ -173,7 +175,8 @@ cmk_addons/plugins/json_api/
 
 ## Limitations
 
-- A single `[*]` wildcard per path (no multiple/nested wildcards yet)
+- Composite service names from nested `[*]` wildcards can grow long; Checkmk
+  truncates very long service descriptions
 - One shared, unit-less metric (`json_api_value`) for all numeric services
 - `label_path` uniqueness is enforced by index-suffixing at runtime, not
   validated at config time (the JSON isn't known then)

@@ -109,9 +109,12 @@ def _extraction() -> Dictionary:
                         "Dotted path into the JSON response, e.g. "
                         "'status', 'components.db.status' or 'items[0].count'. "
                         "Use a '[*]' wildcard (e.g. 'nodes[*].health') to create "
-                        "one service per array element. A leading '$.' is optional. "
-                        "Keys that themselves contain '.' or '[' can be addressed "
-                        "with bracket-quoted segments, e.g. \"data['foo.bar'].value\"."
+                        "one service per array element; multiple '[*]' wildcards "
+                        "(e.g. 'pods[*].containers[*].ready') expand the cartesian "
+                        "product, one service per combination. A leading '$.' is "
+                        "optional. Keys that themselves contain '.' or '[' can be "
+                        "addressed with bracket-quoted segments, e.g. "
+                        "\"data['foo.bar'].value\"."
                     ),
                     prefill=InputHint("status"),
                     custom_validate=(validators.LengthInRange(min_value=1),),
@@ -125,8 +128,10 @@ def _extraction() -> Dictionary:
                         "When the path contains a '[*]' wildcard, this optional "
                         "path - relative to each array element, e.g. 'name' or "
                         "'id' - provides the label appended to the service name. "
-                        "Defaults to the array index. Pick a field that is unique "
-                        "and stable across runs."
+                        "Defaults to the array index. With multiple '[*]' "
+                        "wildcards it is resolved at every level and the labels "
+                        "are joined with ' / ' (e.g. '<pod> / <container>'). Pick "
+                        "a field that is unique and stable across runs."
                     ),
                 ),
             ),

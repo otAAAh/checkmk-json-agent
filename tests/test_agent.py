@@ -38,11 +38,16 @@ def test_resolve_path(agent, path, expected):
     assert agent._resolve_path(DOC, path) == expected
 
 
-def test_split_wildcard(agent):
-    assert agent._split_wildcard("nodes[*].health") == ("nodes", "health")
-    assert agent._split_wildcard("items[*]") == ("items", "")
-    assert agent._split_wildcard("[*].name") == ("", "name")
-    assert agent._split_wildcard("plain.path") is None
+def test_split_wildcards(agent):
+    assert agent._split_wildcards("nodes[*].health") == ["nodes", "health"]
+    assert agent._split_wildcards("items[*]") == ["items", ""]
+    assert agent._split_wildcards("[*].name") == ["", "name"]
+    assert agent._split_wildcards("plain.path") == ["plain.path"]
+    assert agent._split_wildcards("pods[*].containers[*].ready") == [
+        "pods",
+        "containers",
+        "ready",
+    ]
 
 
 def test_extract_scalar(agent):
@@ -99,11 +104,49 @@ def test_extract_wildcard_not_an_array(agent):
     assert result["error"] == "array not found at wildcard path"
 
 
-def test_extract_nested_wildcard_errors_clearly(agent):
-    doc = {"a": [{"b": [1, 2]}]}
-    (result,) = agent._extract(doc, [{"path": "a[*].b[*]", "service": "X"}])
-    assert result["found"] is False
-    assert "nested" in result["error"]
+def test_extract_nested_wildcard_cartesian_product(agent):
+    doc = {
+        "pods": [
+            {"name": "web", "containers": [{"name": "nginx", "ready": True}]},
+            {
+                "name": "db",
+                "containers": [
+                    {"name": "postgres", "ready": True},
+                    {"name": "exporter", "ready": False},
+                ],
+            },
+        ]
+    }
+    specs = [{"path": "pods[*].containers[*].ready", "service": "Container", "label_path": "name"}]
+    results = agent._extract(doc, specs)
+    assert [(r["service"], r["value"]) for r in results] == [
+        ("Container web / nginx", True),
+        ("Container db / postgres", True),
+        ("Container db / exporter", False),
+    ]
+
+
+def test_extract_nested_wildcard_index_labels(agent):
+    # No label_path: every level falls back to its array index.
+    doc = {"a": [{"b": [10, 11]}, {"b": [20]}]}
+    results = agent._extract(doc, [{"path": "a[*].b[*]", "service": "X"}])
+    assert [(r["service"], r["value"]) for r in results] == [
+        ("X 0 / 0", 10),
+        ("X 0 / 1", 11),
+        ("X 1 / 0", 20),
+    ]
+
+
+def test_extract_nested_wildcard_missing_inner_array(agent):
+    # An element that lacks the inner array yields one error result, labelled
+    # by the level(s) resolved so far.
+    doc = {"a": [{"name": "ok", "b": [1]}, {"name": "broken"}]}
+    results = agent._extract(doc, [{"path": "a[*].b[*]", "service": "X", "label_path": "name"}])
+    assert [(r["service"], r["found"], r["value"]) for r in results] == [
+        ("X ok / 0", True, 1),
+        ("X broken", False, None),
+    ]
+    assert results[-1]["error"] == "array not found at wildcard path"
 
 
 def test_build_session_defaults_json_content_type_for_body(agent):

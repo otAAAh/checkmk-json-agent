@@ -68,7 +68,7 @@ def _resolve_path(data: object, path: str) -> tuple[bool, object]:
     Returns (found, value). Supports e.g. 'a.b', 'a[0].b', leading '$.' is
     stripped. Keys that contain '.' or '[' can be addressed with JSONPath-style
     bracket-quoted segments, e.g. "a['foo.bar'].b" or 'a["foo.bar"].b'. Array
-    wildcards ('[*]') are intentionally not supported yet.
+    wildcards ('[*]') are handled one level up, in _expand_wildcards.
     """
     current = data
     cleaned = path.strip()
@@ -164,20 +164,21 @@ def _fetch(args: argparse.Namespace) -> tuple[object | None, str | None]:
 _WILDCARD = "[*]"
 
 
-def _split_wildcard(path: str) -> tuple[str, str] | None:
-    """Split a path on a single '[*]' wildcard into (before, after).
+def _split_wildcards(path: str) -> list[str]:
+    """Split a path on every '[*]' wildcard into segments.
 
-    'after' is the per-element remainder with a leading '.' stripped. Returns
-    None when there is no wildcard. Only the first '[*]' is honoured.
+    A path with N wildcards yields N+1 segments: the part before the first
+    wildcard, the part between each consecutive pair, and the trailing value
+    path. A leading '.' is stripped from every segment after the first. A path
+    with no wildcard yields a single-element list (the whole path).
+
+    'pods[*].containers[*].ready' -> ['pods', 'containers', 'ready']
+    'nodes[*].health'             -> ['nodes', 'health']
+    'items[*]'                    -> ['items', '']
+    'status'                      -> ['status']
     """
-    index = path.find(_WILDCARD)
-    if index == -1:
-        return None
-    before = path[:index]
-    after = path[index + len(_WILDCARD) :]
-    if after.startswith("."):
-        after = after[1:]
-    return before, after
+    parts = path.split(_WILDCARD)
+    return [parts[0]] + [p[1:] if p.startswith(".") else p for p in parts[1:]]
 
 
 def _result(
@@ -198,39 +199,59 @@ def _result(
     }
 
 
+def _expand_wildcards(
+    node: object, segments: list[str], label_path: str | None
+) -> list[tuple[list[str], bool, object, str]]:
+    """Recursively expand the wildcard segments of a path under ``node``.
+
+    ``segments`` is the output of :func:`_split_wildcards`: one entry per
+    wildcard level plus the trailing value path. Returns one
+    ``(label_segments, found, value, error)`` tuple per leaf - i.e. per element
+    of the cartesian product of all array levels. ``label_segments`` carries one
+    label per wildcard level (joined into the composite service name by the
+    caller); ``label_path`` is resolved relative to each level's element, with
+    the array index as the fallback.
+    """
+    # Base case: no more wildcards, ``segments[0]`` is the value path itself.
+    if len(segments) == 1:
+        value_path = segments[0]
+        if value_path:
+            found, value = _resolve_path(node, value_path)
+        else:
+            found, value = True, node
+        return [([], found, value, "path not found in element")]
+
+    array_path, *rest = segments
+    found_array, array = _resolve_path(node, array_path)
+    if not found_array or not isinstance(array, list):
+        return [([], False, None, "array not found at wildcard path")]
+
+    expanded: list[tuple[list[str], bool, object, str]] = []
+    for label, element in zip(_element_labels(array, label_path), array):
+        for sub_labels, found, value, error in _expand_wildcards(element, rest, label_path):
+            expanded.append(([label, *sub_labels], found, value, error))
+    return expanded
+
+
 def _extract(document: object, extractions: list[dict]) -> list[dict]:
     results = []
     for spec in extractions:
-        split = _split_wildcard(spec["path"])
-        if split is None:
+        segments = _split_wildcards(spec["path"])
+        if len(segments) == 1:
             found, value = _resolve_path(document, spec["path"])
             results.append(
                 _result(spec, spec["service"], found, value, "path not found in response")
             )
             continue
 
-        # Array wildcard: one service per element, labelled by label_path or index.
-        before, after = split
-        if _WILDCARD in after:
-            results.append(
-                _result(spec, spec["service"], False, None, "nested [*] wildcards are not supported")
-            )
-            continue
-        found_array, array = _resolve_path(document, before)
-        if not found_array or not isinstance(array, list):
-            results.append(
-                _result(spec, spec["service"], False, None, "array not found at wildcard path")
-            )
-            continue
-
-        for label, element in zip(_element_labels(array, spec.get("label_path")), array):
-            if after:
-                found, value = _resolve_path(element, after)
-            else:
-                found, value = True, element
-            results.append(
-                _result(spec, f"{spec['service']} {label}", found, value, "path not found in element")
-            )
+        # One or more array wildcards: one service per cartesian-product
+        # element, labelled by a ' / '-joined composite (one segment per level).
+        for label_segments, found, value, error in _expand_wildcards(
+            document, segments, spec.get("label_path")
+        ):
+            label = " / ".join(label_segments)
+            service = f"{spec['service']} {label}" if label else spec["service"]
+            results.append(_result(spec, service, found, value, error))
     return results
 
 
