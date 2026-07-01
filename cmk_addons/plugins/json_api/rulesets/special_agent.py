@@ -231,6 +231,19 @@ def _endpoint() -> Dictionary:
                     prefill=DefaultValue(True),
                 ),
             ),
+            "follow_redirects": DictElement(
+                required=True,
+                parameter_form=BooleanChoice(
+                    label=Label("Follow HTTP redirects"),
+                    help_text=Help(
+                        "On by default. Disable in locked-down environments to "
+                        "harden against SSRF: a target that redirects (e.g. 3xx to "
+                        "an internal address) will then fail instead of being "
+                        "followed to the redirect location."
+                    ),
+                    prefill=DefaultValue(True),
+                ),
+            ),
             "timeout": DictElement(
                 required=False,
                 parameter_form=Float(

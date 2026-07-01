@@ -67,6 +67,7 @@ Each endpoint has:
 | **Additional request headers** | Name/value pairs |
 | **Authentication** | None, basic, or bearer token |
 | **Verify the TLS certificate** | On by default |
+| **Follow HTTP redirects** | On by default; turn off to harden against redirect-based SSRF |
 | **Request timeout (seconds)** | Optional; defaults to 30 |
 | **Fields to monitor** | One entry per service (see below) |
 
@@ -152,8 +153,11 @@ generates: the agent `--extractions` blob for CLI testing, the rule value for
 
 - The agent performs **HTTP requests from the Checkmk server** to operator-configured
   URLs. Treat the rule as trusted input: a URL pointing at internal services (or one
-  that **redirects** there — redirects are followed) can be used as an SSRF vector.
-  Restrict who can edit the rule accordingly.
+  that **redirects** there) can be used as an SSRF vector. Restrict who can edit the
+  rule accordingly.
+- **Follow HTTP redirects** is on by default (for back-compat). In locked-down
+  environments, turn it off per endpoint so a redirect to an internal address fails
+  instead of being followed — closing the redirect-based SSRF amplification path.
 - Credentials are stored in the Checkmk **password store** and passed to the agent as
   a store reference, not in clear text on the command line.
 - TLS verification is **on by default**; disabling it is insecure and opt-in per rule.
