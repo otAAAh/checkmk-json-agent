@@ -169,8 +169,9 @@ def _extraction() -> Dictionary:
     )
 
 
-def _parameter_form() -> Dictionary:
+def _endpoint() -> Dictionary:
     return Dictionary(
+        title=Title("Endpoint"),
         elements={
             "url": DictElement(
                 required=True,
@@ -248,6 +249,37 @@ def _parameter_form() -> Dictionary:
                         "value found at the given JSON path."
                     ),
                     element_template=_extraction(),
+                ),
+            ),
+        },
+    )
+
+
+def _migrate_to_endpoints(value: object) -> dict[str, object]:
+    """Wrap a pre-multi-endpoint rule (flat connection at the top level) into
+    the current single-key ``{"endpoints": [...]}`` shape."""
+    if not isinstance(value, dict):
+        raise TypeError(f"Unexpected rule value: {value!r}")
+    if "endpoints" in value:
+        return value
+    return {"endpoints": [value]}
+
+
+def _parameter_form() -> Dictionary:
+    return Dictionary(
+        migrate=_migrate_to_endpoints,
+        elements={
+            "endpoints": DictElement(
+                required=True,
+                parameter_form=List(
+                    title=Title("Endpoints"),
+                    help_text=Help(
+                        "One or more HTTP/JSON endpoints. Each is fetched with "
+                        "its own connection settings and extractions; all results "
+                        "are merged into one section. An endpoint that cannot be "
+                        "reached only affects its own services."
+                    ),
+                    element_template=_endpoint(),
                 ),
             ),
         },

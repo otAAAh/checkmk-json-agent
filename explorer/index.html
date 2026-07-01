@@ -94,10 +94,10 @@
     <h2>3 · Generated output</h2>
 
     <div class="outblock">
-      <div class="hdr"><span class="muted">Agent <code>--extractions</code> (CLI test)</span>
+      <div class="hdr"><span class="muted">Agent <code>--endpoint</code> (CLI test)</span>
         <button class="ghost" data-copy="out-extr">Copy</button></div>
       <pre id="out-extr"></pre>
-      <div class="muted">Test: <code>agent_json_api --url '&lt;url&gt;' --extractions '&lt;above&gt;'</code></div>
+      <div class="muted">Test: <code>agent_json_api --endpoint '&lt;above&gt;'</code></div>
     </div>
 
     <div class="outblock">
@@ -311,16 +311,32 @@ function pyExtraction(o) {
   return "{" + p.join(", ") + "}";
 }
 
+function endpointObj(objs) {
+  return {
+    url: $("url").value || "https://app.example.com/health",
+    method: $("method").value || "GET",
+    verify_cert: true,
+    extractions: objs,
+  };
+}
+
 function valuePy(objs) {
   const url = $("url").value || "https://app.example.com/health";
   const method = $("method").value || "GET";
-  const lines = objs.map(o => "        " + pyExtraction(o) + ",").join("\n");
-  return `{\n    'url': ${pyStr(url)},\n    'method': ${pyStr(method)},\n    'verify_cert': True,\n    'extractions': [\n${lines}\n    ],\n}`;
+  const lines = objs.map(o => "                " + pyExtraction(o) + ",").join("\n");
+  const endpoint =
+    `        {\n` +
+    `            'url': ${pyStr(url)},\n` +
+    `            'method': ${pyStr(method)},\n` +
+    `            'verify_cert': True,\n` +
+    `            'extractions': [\n${lines}\n            ],\n` +
+    `        },`;
+  return `{\n    'endpoints': [\n${endpoint}\n    ],\n}`;
 }
 
 function renderOutputs() {
   const objs = extractionObjs();
-  $("out-extr").textContent = JSON.stringify(objs);
+  $("out-extr").textContent = JSON.stringify(endpointObj(objs));
   const vpy = valuePy(objs);
   $("out-value").textContent = vpy;
 

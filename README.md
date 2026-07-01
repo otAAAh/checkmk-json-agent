@@ -16,6 +16,9 @@ Targets **Checkmk 2.4+** and the current stable plugin APIs
 ## Features
 
 - HTTP/HTTPS **GET or POST**, custom headers, optional request body
+- **Multiple endpoints per rule**: each with its own method/headers/auth/
+  timeout/fields; their results merge into one section, and an unreachable
+  endpoint only affects its own services
 - **Auth**: none, HTTP basic (username/password), or bearer token — secrets go
   through the Checkmk password store, never onto the command line in clear text
 - **Path extraction** with a dotted syntax: `status`, `components.db.status`,
@@ -30,7 +33,8 @@ Targets **Checkmk 2.4+** and the current stable plugin APIs
   as a metric/graph
 - **String matching**: a regex the value must fully match, else CRIT
 - TLS verification on by default (with an explicit opt-out)
-- Unreachable hosts and non-JSON responses surface as a clear CRIT, not a crash
+- Unreachable endpoints and non-JSON responses surface as UNKNOWN on the
+  affected services, not a crash
 
 ## Requirements
 
@@ -51,8 +55,9 @@ Or upload it in the GUI under **Setup → Extension packages**.
 ## Configuration
 
 Create a rule under **Setup → Agents → Other integrations → Generic JSON API**
-(ruleset `special_agents:json_api`). One rule fully describes a monitored
-endpoint:
+(ruleset `special_agents:json_api`). A rule holds one or more **endpoints**;
+each endpoint is fetched independently and all results merge into one section.
+Each endpoint has:
 
 | Field | Purpose |
 |---|---|
@@ -64,6 +69,9 @@ endpoint:
 | **Verify the TLS certificate** | On by default |
 | **Request timeout (seconds)** | Optional; defaults to 30 |
 | **Fields to monitor** | One entry per service (see below) |
+
+Service names must be unique across the whole rule; if two endpoints produce the
+same name, the check disambiguates the later one with a ` (2)` suffix.
 
 Each **field to monitor** has:
 
@@ -83,8 +91,8 @@ Each **field to monitor** has:
 - **Plain value** → shown in the summary (numeric values still get a metric)
 - **Levels set on a non-numeric value** → WARN (so the misconfig is visible)
 - **Path not found** → UNKNOWN
-- **Request failed / not JSON** → the data source fails (one CRIT on the host's
-  `Check_MK` service; the JSON services go stale) — not a CRIT on every service
+- **Endpoint request failed / not JSON** → that endpoint's services go UNKNOWN
+  with the error; the other endpoints in the rule keep reporting normally
 
 Values are rendered as they appear in JSON, so an `expected` regex matches
 `true` / `false` / `null` — not Python's `True` / `False` / `None`.
@@ -123,6 +131,15 @@ Produces `JSON Node web-1` (OK) and `JSON Node web-2` (CRIT). If a label value
 repeats across elements, every occurrence is suffixed with its index so two
 elements never collapse into one service.
 
+### Multiple endpoints
+
+Add several endpoints to one rule to monitor related APIs together — e.g. a
+frontend `/health` and a backend `/actuator/health`. Each endpoint carries its
+own connection settings and fields; the services from all of them appear under
+the same host. If the backend is unreachable, only its services go UNKNOWN while
+the frontend's stay green. Keep service names unique across endpoints (a
+collision is auto-suffixed with ` (2)`, but explicit names read better).
+
 ## JSON API Explorer
 
 [`explorer/index.html`](explorer/index.html) is a standalone, dependency-free
@@ -158,7 +175,7 @@ Checkmk dev virtualenv. Point the tooling at one:
 ```sh
 make format
 make lint
-PYTHON=/path/to/checkmk/.venv/bin/python make test     # 30 tests
+PYTHON=/path/to/checkmk/.venv/bin/python make test
 ```
 
 Layout:
