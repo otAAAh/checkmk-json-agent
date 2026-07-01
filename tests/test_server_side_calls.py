@@ -46,6 +46,7 @@ def test_basic_command_line(ssc):
             "path": "status",
             "service": "Health",
             "label_path": None,
+            "unit": None,
             "levels_upper": None,
             "levels_lower": None,
             "expected": "UP",
@@ -105,6 +106,23 @@ def test_label_path_passed_through(ssc):
     )
     (endpoint,) = _endpoints(ssc, args)
     assert endpoint["extractions"][0]["label_path"] == "name"
+
+
+def test_unit_passed_through(ssc):
+    args = _command_args(
+        ssc,
+        {
+            "endpoints": [
+                {
+                    "url": "http://x",
+                    "verify_cert": True,
+                    "extractions": [{"path": "mem", "service": "Mem", "unit": "bytes"}],
+                }
+            ]
+        },
+    )
+    (endpoint,) = _endpoints(ssc, args)
+    assert endpoint["extractions"][0]["unit"] == "bytes"
 
 
 def test_multiple_endpoints_each_with_own_config(ssc):

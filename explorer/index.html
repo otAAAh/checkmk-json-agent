@@ -247,7 +247,7 @@ function addExtraction(path) {
     service: defaultService(path),
     path,
     label_path: path.includes("[*]") ? guessLabel(path) : "",
-    lu_w: "", lu_c: "", ll_w: "", ll_c: "", expected: ""
+    unit: "", lu_w: "", lu_c: "", ll_w: "", ll_c: "", expected: ""
   });
   renderFields();
   renderOutputs();
@@ -271,13 +271,18 @@ function renderFields() {
       `<div class="muted">path: <code>${e.path}</code></div>` +
       `<div class="row"><label>Service</label><input type="text" data-f="service" data-i="${i}" value="${e.service.replace(/"/g,"&quot;")}"></div>` +
       (wild ? `<div class="row"><label>Label path</label><input type="text" data-f="label_path" data-i="${i}" value="${e.label_path}" placeholder="field in each element, e.g. name"></div>` : "") +
+      `<div class="row"><label>Unit</label><select data-f="unit" data-i="${i}">` +
+        ["", "count", "bytes", "seconds", "percent"].map(u =>
+          `<option value="${u}"${e.unit === u ? " selected" : ""}>${u || "no unit"}</option>`).join("") +
+      `</select></div>` +
       `<div class="row"><label>Upper W/C</label><span class="lvls"><input type="text" data-f="lu_w" data-i="${i}" value="${e.lu_w}" placeholder="warn"><input type="text" data-f="lu_c" data-i="${i}" value="${e.lu_c}" placeholder="crit"></span></div>` +
       `<div class="row"><label>Lower W/C</label><span class="lvls"><input type="text" data-f="ll_w" data-i="${i}" value="${e.ll_w}" placeholder="warn"><input type="text" data-f="ll_c" data-i="${i}" value="${e.ll_c}" placeholder="crit"></span></div>` +
       `<div class="row"><label>Expected</label><input type="text" data-f="expected" data-i="${i}" value="${e.expected.replace(/"/g,"&quot;")}" placeholder="regex, e.g. UP|ok"></div>`;
     box.appendChild(d);
   });
-  box.querySelectorAll("input[data-f]").forEach(inp => {
-    inp.oninput = () => { state.extractions[+inp.dataset.i][inp.dataset.f] = inp.value; renderOutputs(); };
+  box.querySelectorAll("input[data-f], select[data-f]").forEach(inp => {
+    const evt = inp.tagName === "SELECT" ? "onchange" : "oninput";
+    inp[evt] = () => { state.extractions[+inp.dataset.i][inp.dataset.f] = inp.value; renderOutputs(); };
   });
   box.querySelectorAll("[data-rm]").forEach(b => {
     b.onclick = () => { state.extractions.splice(+b.dataset.rm, 1); renderFields(); renderOutputs(); };
@@ -295,6 +300,7 @@ function extractionObjs() {
   return state.extractions.map(e => {
     const o = { service: e.service, path: e.path };
     if (e.label_path) o.label_path = e.label_path;
+    if (e.unit) o.unit = e.unit;
     const lu = levelsPair(e.lu_w, e.lu_c); if (lu) o.levels_upper = ["fixed", lu];
     const ll = levelsPair(e.ll_w, e.ll_c); if (ll) o.levels_lower = ["fixed", ll];
     if (e.expected) o.expected = e.expected;
@@ -305,6 +311,7 @@ function extractionObjs() {
 function pyExtraction(o) {
   const p = [`'service': ${pyStr(o.service)}`, `'path': ${pyStr(o.path)}`];
   if (o.label_path) p.push(`'label_path': ${pyStr(o.label_path)}`);
+  if (o.unit) p.push(`'unit': ${pyStr(o.unit)}`);
   if (o.levels_upper) p.push(`'levels_upper': ('fixed', (${o.levels_upper[1][0]}, ${o.levels_upper[1][1]}))`);
   if (o.levels_lower) p.push(`'levels_lower': ('fixed', (${o.levels_lower[1][0]}, ${o.levels_lower[1][1]}))`);
   if (o.expected) p.push(`'expected': ${pyStr(o.expected)}`);

@@ -80,13 +80,14 @@ Each **field to monitor** has:
 | **Service name** | Becomes the service (shown as `JSON <name>`) |
 | **JSON path** | Dotted path; use `[*]` for array discovery |
 | **Item label path** | For `[*]`: field within each element to label the service (defaults to the array index) |
+| **Unit** | Optional: `count` / `bytes` / `seconds` / `percent` — renders the metric and graph with that unit (numeric values only) |
 | **Upper / lower levels** | WARN/CRIT for numeric values |
 | **Expected value (regex)** | Value must fully match, else CRIT |
 
 ### Service states
 
-- **Numeric value with levels** → checked against the levels, emitted as the
-  `json_api_value` metric
+- **Numeric value with levels** → checked against the levels, emitted as a
+  metric named for the field's unit (`json_api_value` when no unit is set)
 - **Value with an expected regex** → OK if it fully matches, else CRIT
 - **Plain value** → shown in the summary (numeric values still get a metric)
 - **Levels set on a non-numeric value** → WARN (so the misconfig is visible)
@@ -194,7 +195,8 @@ cmk_addons/plugins/json_api/
 
 - Composite service names from nested `[*]` wildcards can grow long; Checkmk
   truncates very long service descriptions
-- One shared, unit-less metric (`json_api_value`) for all numeric services
+- A fixed set of units (`count` / `bytes` / `seconds` / `percent`); other units
+  fall back to the unit-less `json_api_value` metric
 - `label_path` uniqueness is enforced by index-suffixing at runtime, not
   validated at config time (the JSON isn't known then)
 
