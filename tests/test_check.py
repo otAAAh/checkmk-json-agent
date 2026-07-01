@@ -69,6 +69,32 @@ def test_check_plain_numeric_value_emits_metric(check):
     assert any(isinstance(r, Metric) and r.value == 42.0 for r in results)
 
 
+def test_metric_name_maps_unit_to_metric(check):
+    assert check._metric_name(None) == "json_api_value"
+    assert check._metric_name("count") == "json_api_count"
+    assert check._metric_name("bytes") == "json_api_bytes"
+    assert check._metric_name("seconds") == "json_api_seconds"
+    assert check._metric_name("percent") == "json_api_percent"
+    # Unknown/garbage units fall back to the default metric.
+    assert check._metric_name("nonsense") == "json_api_value"
+
+
+def test_check_unit_names_the_metric_with_levels(check):
+    section = _section(
+        check, [_entry("Mem", value=2048, unit="bytes", levels_upper=["fixed", [5.0, 10.0]])]
+    )
+    (metric,) = [r for r in check.check_json_api("Mem", section) if isinstance(r, Metric)]
+    assert metric.name == "json_api_bytes"
+    assert metric.value == 2048.0
+
+
+def test_check_unit_names_the_metric_without_levels(check):
+    section = _section(check, [_entry("Latency", value=0.5, unit="seconds")])
+    (metric,) = [r for r in check.check_json_api("Latency", section) if isinstance(r, Metric)]
+    assert metric.name == "json_api_seconds"
+    assert metric.value == 0.5
+
+
 def test_check_invalid_regex_is_unknown_not_crash(check):
     section = _section(check, [_entry("Bad", value="UP", expected="(unclosed")])
     (result,) = list(check.check_json_api("Bad", section))

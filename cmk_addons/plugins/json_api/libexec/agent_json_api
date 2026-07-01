@@ -199,6 +199,7 @@ def _result(
         "levels_upper": spec.get("levels_upper"),
         "levels_lower": spec.get("levels_lower"),
         "expected": spec.get("expected"),
+        "unit": spec.get("unit"),
     }
 
 

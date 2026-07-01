@@ -31,6 +31,22 @@ from cmk.agent_based.v2 import (
 _Levels = tuple[str, tuple[float, float] | None] | None
 
 
+# Maps the unit chosen in the rule to the metric defined in graphing/json_api.py.
+# ``None`` (no unit chosen, incl. rules from before units existed) keeps the
+# original unit-less "json_api_value" so existing metric history is preserved.
+_UNIT_METRIC = {
+    None: "json_api_value",
+    "count": "json_api_count",
+    "bytes": "json_api_bytes",
+    "seconds": "json_api_seconds",
+    "percent": "json_api_percent",
+}
+
+
+def _metric_name(unit: object) -> str:
+    return _UNIT_METRIC.get(unit if isinstance(unit, str) else None, "json_api_value")
+
+
 @dataclass(frozen=True)
 class Item:
     found: bool
@@ -39,6 +55,7 @@ class Item:
     levels_upper: _Levels
     levels_lower: _Levels
     expected: str | None
+    metric_name: str
 
 
 @dataclass(frozen=True)
@@ -77,6 +94,7 @@ def parse_json_api(string_table: StringTable) -> Section | None:
             levels_upper=_coerce_levels(result.get("levels_upper")),
             levels_lower=_coerce_levels(result.get("levels_lower")),
             expected=result.get("expected"),
+            metric_name=_metric_name(result.get("unit")),
         )
     return Section(error=payload.get("error"), items=items)
 
@@ -126,7 +144,7 @@ def check_json_api(item: str, section: Section) -> CheckResult:
             number,
             levels_upper=entry.levels_upper,
             levels_lower=entry.levels_lower,
-            metric_name="json_api_value",
+            metric_name=entry.metric_name,
             label="Value",
         )
         return
@@ -161,7 +179,7 @@ def check_json_api(item: str, section: Section) -> CheckResult:
     # No levels, no expected pattern: surface the value, add a metric if numeric.
     yield Result(state=State.OK, summary=f"Value: {_render_value(entry.value)}")
     if number is not None:
-        yield Metric("json_api_value", number)
+        yield Metric(entry.metric_name, number)
 
 
 agent_section_json_api = AgentSection(

@@ -48,3 +48,8 @@ def ssc():
 @pytest.fixture(scope="session")
 def ruleset():
     return _load("ja_ruleset", "rulesets/special_agent.py")
+
+
+@pytest.fixture(scope="session")
+def graphing():
+    return _load("ja_graphing", "graphing/json_api.py")

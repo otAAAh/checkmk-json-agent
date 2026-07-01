@@ -135,6 +135,23 @@ def _extraction() -> Dictionary:
                     ),
                 ),
             ),
+            "unit": DictElement(
+                required=False,
+                parameter_form=SingleChoice(
+                    title=Title("Unit (for numeric values)"),
+                    help_text=Help(
+                        "Renders the metric and graph with this unit. Leave unset "
+                        "for a plain, unit-less value. Only affects numeric values."
+                    ),
+                    elements=[
+                        SingleChoiceElement("count", Title("Count (integer)")),
+                        SingleChoiceElement("bytes", Title("Bytes (IEC: KiB, MiB, ...)")),
+                        SingleChoiceElement("seconds", Title("Seconds (duration)")),
+                        SingleChoiceElement("percent", Title("Percent")),
+                    ],
+                    prefill=InputHint(Title("No unit")),
+                ),
+            ),
             "levels_upper": DictElement(
                 required=False,
                 parameter_form=SimpleLevels(
