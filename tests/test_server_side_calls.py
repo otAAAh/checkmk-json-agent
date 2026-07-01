@@ -89,6 +89,33 @@ def test_timeout_passed_through(ssc):
     assert endpoint["timeout"] == 5.0
 
 
+def test_follow_redirects_passed_through(ssc):
+    args = _command_args(
+        ssc,
+        {
+            "endpoints": [
+                {
+                    "url": "http://x",
+                    "verify_cert": True,
+                    "follow_redirects": False,
+                    "extractions": [],
+                }
+            ]
+        },
+    )
+    (endpoint,) = _endpoints(ssc, args)
+    assert endpoint["follow_redirects"] is False
+
+
+def test_follow_redirects_defaults_true(ssc):
+    args = _command_args(
+        ssc,
+        {"endpoints": [{"url": "http://x", "verify_cert": True, "extractions": []}]},
+    )
+    (endpoint,) = _endpoints(ssc, args)
+    assert endpoint["follow_redirects"] is True
+
+
 def test_label_path_passed_through(ssc):
     args = _command_args(
         ssc,

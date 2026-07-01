@@ -53,6 +53,7 @@ class Endpoint(BaseModel, frozen=True):
     body: str | None = None
     headers: Sequence[Header] = ()
     verify_cert: bool = True
+    follow_redirects: bool = True
     timeout: float | None = None
     auth: (
         tuple[Literal["auth_login"], AuthLogin] | tuple[Literal["auth_token"], AuthToken] | None
@@ -76,6 +77,7 @@ def _endpoint_json(endpoint: Endpoint) -> str:
         "body": endpoint.body,
         "headers": [[h.name, h.value] for h in endpoint.headers],
         "verify_cert": endpoint.verify_cert,
+        "follow_redirects": endpoint.follow_redirects,
         "timeout": endpoint.timeout,
         "auth": endpoint.auth[0] if endpoint.auth else None,
         "extractions": [e.model_dump() for e in endpoint.extractions],

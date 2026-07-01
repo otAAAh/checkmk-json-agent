@@ -178,6 +178,38 @@ def test_build_session_basic_auth_and_headers(agent):
     assert headers["X-Api"] == "v1"
 
 
+def _capture_request(agent, monkeypatch):
+    """Patch the session so _fetch records the kwargs it would send."""
+    captured = {}
+
+    class _FakeResponse:
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {"ok": 1}
+
+    def fake_request(_self, method, url, **kwargs):
+        captured.update(kwargs, method=method, url=url)
+        return _FakeResponse()
+
+    monkeypatch.setattr(agent.requests.Session, "request", fake_request)
+    return captured
+
+
+def test_fetch_disables_redirects_when_configured(agent, monkeypatch):
+    captured = _capture_request(agent, monkeypatch)
+    doc, error = agent._fetch({"url": "http://x", "follow_redirects": False}, None)
+    assert error is None and doc == {"ok": 1}
+    assert captured["allow_redirects"] is False
+
+
+def test_fetch_follows_redirects_by_default(agent, monkeypatch):
+    captured = _capture_request(agent, monkeypatch)
+    agent._fetch({"url": "http://x"}, None)
+    assert captured["allow_redirects"] is True
+
+
 def test_parse_arguments_endpoints_without_auth(agent):
     args = agent.parse_arguments(["--endpoint", '{"url": "http://x"}'])
     assert args.endpoint == ['{"url": "http://x"}']
