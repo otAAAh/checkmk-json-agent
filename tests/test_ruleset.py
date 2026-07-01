@@ -18,3 +18,13 @@ def test_invalid_regex_rejected_at_config_time(ruleset):
 def test_parameter_form_builds(ruleset):
     # Smoke test: the form spec constructs without error.
     assert ruleset._parameter_form() is not None
+
+
+def test_migrate_wraps_flat_rule_into_single_endpoint(ruleset):
+    old = {"url": "http://x", "method": "GET", "verify_cert": True, "extractions": []}
+    assert ruleset._migrate_to_endpoints(old) == {"endpoints": [old]}
+
+
+def test_migrate_leaves_new_shape_untouched(ruleset):
+    new = {"endpoints": [{"url": "http://x", "extractions": []}]}
+    assert ruleset._migrate_to_endpoints(new) is new

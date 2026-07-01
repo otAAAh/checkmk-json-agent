@@ -2,6 +2,8 @@
 # SPDX-License-Identifier: GPL-2.0-only
 """Tests for the special agent: path resolution, extraction, args, auth."""
 
+import json
+
 import pytest
 
 DOC = {
@@ -150,61 +152,47 @@ def test_extract_nested_wildcard_missing_inner_array(agent):
 
 
 def test_build_session_defaults_json_content_type_for_body(agent):
-    args = agent.parse_arguments(
-        ["--url", "http://x", "--method", "POST", "--body", "{}", "--extractions", "[]"]
-    )
-    _session, headers = agent._build_session(args)
+    _session, headers = agent._build_session({"method": "POST", "body": "{}"}, None)
     assert headers["Content-Type"] == "application/json"
 
 
 def test_build_session_keeps_explicit_content_type(agent):
-    args = agent.parse_arguments(
-        [
-            "--url",
-            "http://x",
-            "--method",
-            "POST",
-            "--body",
-            "a=1",
-            "--header",
-            "Content-Type: application/x-www-form-urlencoded",
-            "--extractions",
-            "[]",
-        ]
-    )
-    _session, headers = agent._build_session(args)
+    endpoint = {
+        "method": "POST",
+        "body": "a=1",
+        "headers": [["Content-Type", "application/x-www-form-urlencoded"]],
+    }
+    _session, headers = agent._build_session(endpoint, None)
     assert headers["Content-Type"] == "application/x-www-form-urlencoded"
 
 
-def test_parse_arguments_no_auth(agent):
-    args = agent.parse_arguments(["--url", "http://x", "--extractions", "[]"])
-    assert args.url == "http://x"
-    assert args.method == "GET"
-    assert args.auth is None
-
-
 def test_build_session_token_auth(agent):
-    args = agent.parse_arguments(
-        ["--url", "http://x", "--extractions", "[]", "auth_token", "--token", "abc"]
-    )
-    _session, headers = agent._build_session(args)
+    _session, headers = agent._build_session({"auth": "auth_token"}, "abc")
     assert headers["Authorization"] == "Bearer abc"
 
 
-def test_main_fails_datasource_on_fetch_error(agent, monkeypatch, capsys):
-    monkeypatch.setattr(agent, "_fetch", lambda args: (None, "Request failed: boom"))
-    rc = agent.main(["--url", "http://x", "--extractions", "[]"])
-    captured = capsys.readouterr()
-    assert rc == 1
-    assert "boom" in captured.err
-    assert "<<<json_api" not in captured.out  # no section emitted on failure
+def test_build_session_basic_auth_and_headers(agent):
+    endpoint = {"auth": "auth_login", "username": "user", "headers": [["X-Api", "v1"]]}
+    session, headers = agent._build_session(endpoint, "pw")
+    assert session.auth == ("user", "pw")
+    assert headers["X-Api"] == "v1"
+
+
+def test_parse_arguments_endpoints_without_auth(agent):
+    args = agent.parse_arguments(["--endpoint", '{"url": "http://x"}'])
+    assert args.endpoint == ['{"url": "http://x"}']
 
 
 def test_secret_resolution_24_fallback(agent, monkeypatch):
     # Force the Checkmk 2.4 path: no v1_unstable convenience API.
     monkeypatch.setattr(agent, "_HAVE_PWSTORE_V1", False)
     args = agent.parse_arguments(
-        ["--url", "http://x", "--extractions", "[]", "auth_token", "--token-id", "myid:/var/store"]
+        [
+            "--endpoint",
+            '{"url": "http://x", "auth": "auth_token"}',
+            "--secret_0-id",
+            "myid:/var/store",
+        ]
     )
     captured = {}
     monkeypatch.setattr(
@@ -212,26 +200,56 @@ def test_secret_resolution_24_fallback(agent, monkeypatch):
         "lookup",
         lambda pw_file, pw_id: captured.update(file=str(pw_file), id=pw_id) or "S3CRET",
     )
-    assert agent._reveal_secret(args, "token") == "S3CRET"
+    assert agent._reveal_secret(args, "secret_0") == "S3CRET"
     assert captured == {"file": "/var/store", "id": "myid"}
 
 
-def test_build_session_basic_auth_and_headers(agent):
+def test_secret_resolution_v1_direct(agent):
+    # The Checkmk 2.5+ convenience API: the direct (unsafe) secret form, keyed
+    # per endpoint index. Skipped on a 2.4-only environment.
+    if not agent._HAVE_PWSTORE_V1:
+        pytest.skip("v1_unstable password store API not available")
     args = agent.parse_arguments(
-        [
-            "--url",
-            "http://x",
-            "--extractions",
-            "[]",
-            "--header",
-            "X-Api: v1",
-            "auth_login",
-            "--username",
-            "user",
-            "--password",
-            "pw",
-        ]
+        ["--endpoint", '{"url": "http://x", "auth": "auth_token"}', "--secret_0", "abc"]
     )
-    session, headers = agent._build_session(args)
-    assert session.auth == ("user", "pw")
-    assert headers["X-Api"] == "v1"
+    assert agent._reveal_secret(args, "secret_0") == "abc"
+
+
+def test_main_merges_multiple_endpoints(agent, monkeypatch, capsys):
+    docs = {"http://a": {"s": "UP"}, "http://b": {"s": "DOWN"}}
+    monkeypatch.setattr(agent, "_fetch", lambda endpoint, secret: (docs[endpoint["url"]], None))
+    endpoints = [
+        {"url": "http://a", "extractions": [{"path": "s", "service": "A"}]},
+        {"url": "http://b", "extractions": [{"path": "s", "service": "B"}]},
+    ]
+    argv = []
+    for endpoint in endpoints:
+        argv += ["--endpoint", json.dumps(endpoint)]
+    rc = agent.main(argv)
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert out.startswith("<<<json_api:sep(0)>>>\n")
+    payload = json.loads(out.splitlines()[1])
+    assert [(r["service"], r["value"]) for r in payload["results"]] == [("A", "UP"), ("B", "DOWN")]
+
+
+def test_main_isolates_endpoint_failure(agent, monkeypatch, capsys):
+    def fake_fetch(endpoint, secret):
+        if endpoint["url"] == "http://down":
+            return None, "Request failed: boom"
+        return {"s": "UP"}, None
+
+    monkeypatch.setattr(agent, "_fetch", fake_fetch)
+    argv = [
+        "--endpoint",
+        json.dumps({"url": "http://down", "extractions": [{"path": "s", "service": "Down"}]}),
+        "--endpoint",
+        json.dumps({"url": "http://up", "extractions": [{"path": "s", "service": "Up"}]}),
+    ]
+    rc = agent.main(argv)
+    payload = json.loads(capsys.readouterr().out.splitlines()[1])
+    by_service = {r["service"]: r for r in payload["results"]}
+    assert rc == 0  # one endpoint down does not fail the whole data source
+    assert by_service["Down"]["found"] is False
+    assert by_service["Down"]["error"] == "Request failed: boom"
+    assert by_service["Up"]["found"] is True and by_service["Up"]["value"] == "UP"

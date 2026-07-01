@@ -3,13 +3,19 @@
 # SPDX-License-Identifier: GPL-2.0-only
 """Generic JSON API special agent.
 
-Fetches a JSON document over HTTP(S), extracts the configured fields by path,
-and prints a 'json_api' section. One JSON document per run, on a single line.
+Fetches one or more JSON documents over HTTP(S), extracts the configured fields
+by path, and prints a single 'json_api' section (one line) merging the results
+of every endpoint. Each endpoint carries its own method/headers/auth/timeout and
+its own list of extractions; a single '--endpoint' JSON blob is passed per
+endpoint, with its secret (if any) supplied out-of-band as '--secret_<i>'.
+
+An endpoint that cannot be fetched does not fail the whole data source: each of
+its configured services is emitted as 'not found' with the fetch error, so only
+those services go bad while the other endpoints keep reporting.
 
 The section payload looks like:
 
-    {"url": "...", "error": null,
-     "results": [{"service": "...", "path": "...", "found": true,
+    {"results": [{"service": "...", "path": "...", "found": true,
                   "value": "UP", "error": null,
                   "levels_upper": ["fixed", [80, 90]], "levels_lower": null,
                   "expected": "UP|ok"}, ...]}
@@ -42,16 +48,18 @@ _PATH_TOKEN = re.compile(
 )
 
 
-def _add_secret_option(parser: argparse.ArgumentParser, name: str, help_text: str) -> None:
-    """Register a required secret option, adapting to the available API.
+def _add_secret_option(
+    parser: argparse.ArgumentParser, name: str, help_text: str, required: bool = True
+) -> None:
+    """Register a secret option, adapting to the available API.
 
     Both paths end up reading the same server-side-call rendering: a bare
     ``Secret`` becomes ``--<name>-id "<id>:<password_store_file>"``.
     """
     if _HAVE_PWSTORE_V1:
-        parser_add_secret_option(parser, long=f"--{name}", help=help_text, required=True)
+        parser_add_secret_option(parser, long=f"--{name}", help=help_text, required=required)
     else:
-        parser.add_argument(f"--{name}-id", required=True, help=help_text)
+        parser.add_argument(f"--{name}-id", required=required, help=help_text)
 
 
 def _reveal_secret(args: argparse.Namespace, name: str) -> str:
@@ -98,60 +106,55 @@ def _resolve_path(data: object, path: str) -> tuple[bool, object]:
 
 
 def parse_arguments(argv: Sequence[str]) -> argparse.Namespace:
+    # First pass: learn how many endpoints there are, so we can register one
+    # secret option per endpoint index before the real parse.
+    pre = argparse.ArgumentParser(add_help=False)
+    pre.add_argument("--endpoint", action="append", default=[])
+    known, _ = pre.parse_known_args(argv)
+
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--url", required=True)
-    parser.add_argument("--method", default="GET", choices=["GET", "POST"])
-    parser.add_argument("--body", default=None)
     parser.add_argument(
-        "--header",
+        "--endpoint",
         action="append",
         default=[],
-        metavar="NAME:VALUE",
-        help="Additional request header, repeatable.",
-    )
-    parser.add_argument("--no-cert-check", action="store_true")
-    parser.add_argument("--timeout", type=float, default=30.0)
-    parser.add_argument(
-        "--extractions",
         required=True,
-        help="JSON list of {path, service, levels_upper, levels_lower, expected}.",
+        metavar="JSON",
+        help="JSON endpoint spec, repeatable. One '--secret_<i>' may accompany each.",
     )
-
-    sub = parser.add_subparsers(dest="auth")
-    login = sub.add_parser("auth_login")
-    login.add_argument("--username", required=True)
-    _add_secret_option(login, "password", "API password")
-    token = sub.add_parser("auth_token")
-    _add_secret_option(token, "token", "API bearer token")
+    for index in range(len(known.endpoint)):
+        _add_secret_option(
+            parser, f"secret_{index}", f"Secret for endpoint {index}", required=False
+        )
     return parser.parse_args(argv)
 
 
-def _build_session(args: argparse.Namespace) -> tuple[requests.Session, dict[str, str]]:
+def _build_session(
+    endpoint: dict, secret: str | None
+) -> tuple[requests.Session, dict[str, str]]:
     session = requests.Session()
-    headers: dict[str, str] = {}
-    for raw in args.header:
-        name, _, value = raw.partition(":")
-        headers[name.strip()] = value.strip()
-    match args.auth:
+    headers = {name: value for name, value in endpoint.get("headers", [])}
+    match endpoint.get("auth"):
         case "auth_login":
-            session.auth = (args.username, _reveal_secret(args, "password"))
+            session.auth = (endpoint["username"], secret or "")
         case "auth_token":
-            headers["Authorization"] = "Bearer " + _reveal_secret(args, "token")
-    if args.body is not None and not any(h.lower() == "content-type" for h in headers):
+            headers["Authorization"] = "Bearer " + (secret or "")
+    body = endpoint.get("body")
+    if body is not None and not any(h.lower() == "content-type" for h in headers):
         headers["Content-Type"] = "application/json"
     return session, headers
 
 
-def _fetch(args: argparse.Namespace) -> tuple[object | None, str | None]:
-    session, headers = _build_session(args)
+def _fetch(endpoint: dict, secret: str | None) -> tuple[object | None, str | None]:
+    session, headers = _build_session(endpoint, secret)
+    timeout = endpoint.get("timeout")
     try:
         response = session.request(
-            args.method,
-            args.url,
-            data=args.body,
+            endpoint.get("method", "GET"),
+            endpoint["url"],
+            data=endpoint.get("body"),
             headers=headers,
-            verify=not args.no_cert_check,
-            timeout=args.timeout,
+            verify=endpoint.get("verify_cert", True),
+            timeout=timeout if timeout is not None else 30.0,
         )
         response.raise_for_status()
         return response.json(), None
@@ -279,19 +282,31 @@ def _element_labels(array: list, label_path: str | None) -> list[str]:
     ]
 
 
+def _process_endpoint(args: argparse.Namespace, index: int, endpoint: dict) -> list[dict]:
+    """Fetch one endpoint and return its extraction results.
+
+    A fetch failure is confined to this endpoint: every configured extraction
+    becomes a 'not found' result carrying the error, so the endpoint's own
+    services go bad while the rest of the section stays intact.
+    """
+    secret = _reveal_secret(args, f"secret_{index}") if endpoint.get("auth") else None
+    document, error = _fetch(endpoint, secret)
+    if error is not None:
+        return [
+            _result(spec, spec["service"], False, None, error)
+            for spec in endpoint.get("extractions", [])
+        ]
+    return _extract(document, endpoint.get("extractions", []))
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     args = parse_arguments(sys.argv[1:] if argv is None else argv)
-    extractions = json.loads(args.extractions)
 
-    document, error = _fetch(args)
-    if error is not None:
-        # Fail the data source so Checkmk reports one CRIT on the "Check_MK"
-        # service and the JSON services go stale - instead of turning every
-        # configured service CRIT at once.
-        sys.stderr.write(error + "\n")
-        return 1
+    results: list[dict] = []
+    for index, raw in enumerate(args.endpoint):
+        results.extend(_process_endpoint(args, index, json.loads(raw)))
 
-    payload = {"url": args.url, "results": _extract(document, extractions)}
+    payload = {"results": results}
     sys.stdout.write("<<<json_api:sep(0)>>>\n")
     sys.stdout.write(json.dumps(payload) + "\n")
     return 0

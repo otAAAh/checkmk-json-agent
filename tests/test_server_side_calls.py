@@ -4,7 +4,7 @@
 
 import json
 
-from cmk.server_side_calls.v1 import HostConfig, IPv4Config
+from cmk.server_side_calls.v1 import HostConfig, IPv4Config, Secret
 
 
 def _host():
@@ -17,22 +17,31 @@ def _command_args(ssc, params_dict):
     return command.command_arguments
 
 
+def _endpoints(ssc, args):
+    """Parse all --endpoint JSON blobs from a command line."""
+    return [json.loads(v) for k, v in zip(args, args[1:], strict=False) if k == "--endpoint"]
+
+
 def test_basic_command_line(ssc):
     args = _command_args(
         ssc,
         {
-            "url": "https://example.com/health",
-            "method": "GET",
-            "verify_cert": True,
-            "extractions": [{"path": "status", "service": "Health", "expected": "UP"}],
+            "endpoints": [
+                {
+                    "url": "https://example.com/health",
+                    "method": "GET",
+                    "verify_cert": True,
+                    "extractions": [{"path": "status", "service": "Health", "expected": "UP"}],
+                }
+            ]
         },
     )
-    assert "--url" in args
-    assert args[args.index("--url") + 1] == "https://example.com/health"
-    assert "--method" in args
-    # extractions are passed as a JSON blob
-    blob = json.loads(args[args.index("--extractions") + 1])
-    assert blob == [
+    (endpoint,) = _endpoints(ssc, args)
+    assert endpoint["url"] == "https://example.com/health"
+    assert endpoint["method"] == "GET"
+    assert endpoint["verify_cert"] is True
+    assert endpoint["auth"] is None
+    assert endpoint["extractions"] == [
         {
             "path": "status",
             "service": "Health",
@@ -42,51 +51,115 @@ def test_basic_command_line(ssc):
             "expected": "UP",
         }
     ]
-    # cert verification on -> no --no-cert-check flag
-    assert "--no-cert-check" not in args
 
 
 def test_headers_body_and_cert_flag(ssc):
     args = _command_args(
         ssc,
         {
-            "url": "http://x",
-            "method": "POST",
-            "body": "{}",
-            "verify_cert": False,
-            "headers": [{"name": "X-Api", "value": "v1"}],
-            "extractions": [],
+            "endpoints": [
+                {
+                    "url": "http://x",
+                    "method": "POST",
+                    "body": "{}",
+                    "verify_cert": False,
+                    "headers": [{"name": "X-Api", "value": "v1"}],
+                    "extractions": [],
+                }
+            ]
         },
     )
-    assert "--no-cert-check" in args
-    assert "--body" in args and args[args.index("--body") + 1] == "{}"
-    assert "--header" in args and args[args.index("--header") + 1] == "X-Api:v1"
+    (endpoint,) = _endpoints(ssc, args)
+    assert endpoint["verify_cert"] is False
+    assert endpoint["body"] == "{}"
+    assert endpoint["headers"] == [["X-Api", "v1"]]
 
 
 def test_timeout_passed_through(ssc):
     args = _command_args(
         ssc,
         {
-            "url": "http://x",
-            "method": "GET",
-            "verify_cert": True,
-            "timeout": 5.0,
-            "extractions": [],
+            "endpoints": [
+                {"url": "http://x", "verify_cert": True, "timeout": 5.0, "extractions": []}
+            ]
         },
     )
-    assert "--timeout" in args
-    assert args[args.index("--timeout") + 1] == "5.0"
+    (endpoint,) = _endpoints(ssc, args)
+    assert endpoint["timeout"] == 5.0
 
 
 def test_label_path_passed_through(ssc):
     args = _command_args(
         ssc,
         {
-            "url": "http://x",
-            "method": "GET",
-            "verify_cert": True,
-            "extractions": [{"path": "items[*].count", "service": "Item", "label_path": "name"}],
+            "endpoints": [
+                {
+                    "url": "http://x",
+                    "verify_cert": True,
+                    "extractions": [
+                        {"path": "items[*].count", "service": "Item", "label_path": "name"}
+                    ],
+                }
+            ]
         },
     )
-    blob = json.loads(args[args.index("--extractions") + 1])
-    assert blob[0]["label_path"] == "name"
+    (endpoint,) = _endpoints(ssc, args)
+    assert endpoint["extractions"][0]["label_path"] == "name"
+
+
+def test_multiple_endpoints_each_with_own_config(ssc):
+    args = _command_args(
+        ssc,
+        {
+            "endpoints": [
+                {"url": "http://a", "method": "GET", "verify_cert": True, "extractions": []},
+                {"url": "http://b", "method": "POST", "verify_cert": False, "extractions": []},
+            ]
+        },
+    )
+    first, second = _endpoints(ssc, args)
+    assert (first["url"], first["method"]) == ("http://a", "GET")
+    assert (second["url"], second["method"], second["verify_cert"]) == ("http://b", "POST", False)
+
+
+def test_token_secret_rides_alongside_its_endpoint(ssc):
+    args = _command_args(
+        ssc,
+        {
+            "endpoints": [
+                {
+                    "url": "http://x",
+                    "verify_cert": True,
+                    "auth": ("auth_token", {"token": Secret(0)}),
+                    "extractions": [],
+                }
+            ]
+        },
+    )
+    (endpoint,) = _endpoints(ssc, args)
+    assert endpoint["auth"] == "auth_token"
+    # The secret travels as --secret_0-id, not inside the (loggable) endpoint blob.
+    assert "--secret_0-id" in args
+    assert "token" not in endpoint
+    secret = args[args.index("--secret_0-id") + 1]
+    assert isinstance(secret, Secret)
+
+
+def test_login_secret_keeps_username_in_blob(ssc):
+    args = _command_args(
+        ssc,
+        {
+            "endpoints": [
+                {
+                    "url": "http://x",
+                    "verify_cert": True,
+                    "auth": ("auth_login", {"username": "user", "password": Secret(0)}),
+                    "extractions": [],
+                }
+            ]
+        },
+    )
+    (endpoint,) = _endpoints(ssc, args)
+    assert endpoint["auth"] == "auth_login"
+    assert endpoint["username"] == "user"
+    assert "--secret_0-id" in args

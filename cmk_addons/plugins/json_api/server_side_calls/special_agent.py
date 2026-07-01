@@ -46,7 +46,7 @@ class Extraction(BaseModel, frozen=True):
     expected: str | None = None
 
 
-class Params(BaseModel, frozen=True):
+class Endpoint(BaseModel, frozen=True):
     url: str
     method: Literal["GET", "POST"] = "GET"
     body: str | None = None
@@ -59,33 +59,45 @@ class Params(BaseModel, frozen=True):
     extractions: Sequence[Extraction] = ()
 
 
+class Params(BaseModel, frozen=True):
+    endpoints: Sequence[Endpoint] = ()
+
+
+def _endpoint_json(endpoint: Endpoint) -> str:
+    """Serialize an endpoint for the agent's '--endpoint' argument.
+
+    Secrets are deliberately excluded here; they travel separately as
+    '--secret_<i>' so they never appear inside this (loggable) blob.
+    """
+    spec: dict[str, object] = {
+        "url": endpoint.url,
+        "method": endpoint.method,
+        "body": endpoint.body,
+        "headers": [[h.name, h.value] for h in endpoint.headers],
+        "verify_cert": endpoint.verify_cert,
+        "timeout": endpoint.timeout,
+        "auth": endpoint.auth[0] if endpoint.auth else None,
+        "extractions": [e.model_dump() for e in endpoint.extractions],
+    }
+    if endpoint.auth and endpoint.auth[0] == "auth_login":
+        spec["username"] = endpoint.auth[1].username
+    return json.dumps(spec)
+
+
 def _commands_function(
     params: Params,
     _host_config: HostConfig,
 ) -> Iterable[SpecialAgentCommand]:
-    args: list[str | Secret] = [
-        "--url",
-        params.url,
-        "--method",
-        params.method,
-        "--extractions",
-        json.dumps([e.model_dump() for e in params.extractions]),
-    ]
-    for header in params.headers:
-        args += ["--header", f"{header.name}:{header.value}"]
-    if params.body is not None:
-        args += ["--body", params.body]
-    if params.timeout is not None:
-        args += ["--timeout", str(params.timeout)]
-    if not params.verify_cert:
-        args.append("--no-cert-check")
-    # Auth subcommand must come last: the agent parses it with subparsers that
-    # consume all remaining arguments.
-    match params.auth:
-        case ("auth_login", AuthLogin(username=username, password=password)):
-            args += ["auth_login", "--username", username, "--password-id", password]
-        case ("auth_token", AuthToken(token=token)):
-            args += ["auth_token", "--token-id", token]
+    args: list[str | Secret] = []
+    for index, endpoint in enumerate(params.endpoints):
+        args += ["--endpoint", _endpoint_json(endpoint)]
+        # The secret (a password-store reference) rides alongside its endpoint,
+        # keyed by index so the agent can match them up.
+        match endpoint.auth:
+            case ("auth_login", AuthLogin(password=password)):
+                args += [f"--secret_{index}-id", password]
+            case ("auth_token", AuthToken(token=token)):
+                args += [f"--secret_{index}-id", token]
     yield SpecialAgentCommand(command_arguments=args)
 
 

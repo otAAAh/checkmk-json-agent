@@ -5,8 +5,8 @@ license: GPLv2
 distribution: https://github.com/otAAAh/checkmk-json-agent
 description:
  This check works together with the {Generic JSON API} special agent. The
- agent fetches a JSON document over HTTP(S) and extracts the fields configured
- in the rule. Each configured field becomes one service.
+ agent fetches one or more JSON documents over HTTP(S) and extracts the fields
+ configured in the rule's endpoints. Each configured field becomes one service.
 
  A numeric value with configured levels is checked against those levels and
  exposed as a metric. A value configured with an expected-value regular
@@ -14,7 +14,8 @@ description:
  in the service summary, and a metric is added when it is numeric.
 
  The service goes {UNKNOWN} if the configured path is not present in the
- response, and {CRIT} if the request itself failed or did not return JSON.
+ response, or if its endpoint could not be reached or did not return JSON. An
+ endpoint failure is confined to that endpoint's own services.
 
  Configure it in Setup with the rule {Generic JSON API}.
 
