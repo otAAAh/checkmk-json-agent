@@ -37,6 +37,10 @@ htmlcov/
 # Build artifacts (MKP package output)
 *.mkp
 
+# Generated translation template (regenerate with `make pot`); the .po files
+# under locales/*/LC_MESSAGES/ are the committed source of truth.
+locales/json_api.pot
+
 # AI agent local config
 CLAUDE.md
 /.claude/settings.local.json
