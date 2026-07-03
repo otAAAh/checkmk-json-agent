@@ -99,6 +99,11 @@ Each **field to monitor** has:
 Values are rendered as they appear in JSON, so an `expected` regex matches
 `true` / `false` / `null` — not Python's `True` / `False` / `None`.
 
+The service **Details** view additionally shows where the value came from — the
+JSON path, the source endpoint URL, and the expected pattern (when set) — which
+makes a misconfigured extraction (wrong path or wrong endpoint) easy to spot.
+This is details-only and never changes the summary line or the service state.
+
 ## Examples
 
 ### A Spring Boot Actuator health endpoint

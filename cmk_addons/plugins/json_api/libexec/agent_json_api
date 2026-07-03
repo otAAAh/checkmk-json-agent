@@ -15,8 +15,8 @@ those services go bad while the other endpoints keep reporting.
 
 The section payload looks like:
 
-    {"results": [{"service": "...", "path": "...", "found": true,
-                  "value": "UP", "error": null,
+    {"results": [{"service": "...", "path": "...", "url": "...",
+                  "found": true, "value": "UP", "error": null,
                   "levels_upper": ["fixed", [80, 90]], "levels_lower": null,
                   "expected": "UP|ok"}, ...]}
 """
@@ -128,9 +128,7 @@ def parse_arguments(argv: Sequence[str]) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-def _build_session(
-    endpoint: dict, secret: str | None
-) -> tuple[requests.Session, dict[str, str]]:
+def _build_session(endpoint: dict, secret: str | None) -> tuple[requests.Session, dict[str, str]]:
     session = requests.Session()
     headers = {name: value for name, value in endpoint.get("headers", [])}
     match endpoint.get("auth"):
@@ -185,15 +183,14 @@ def _split_wildcards(path: str) -> list[str]:
     return [parts[0]] + [p[1:] if p.startswith(".") else p for p in parts[1:]]
 
 
-def _result(
-    spec: dict, service: str, found: bool, value: object, error: str
-) -> dict:
+def _result(spec: dict, service: str, found: bool, value: object, error: str, url: str) -> dict:
     # Values that are not JSON scalars (dict/list) are reported as strings.
     if found and isinstance(value, (dict, list)):
         value = json.dumps(value)
     return {
         "service": service,
         "path": spec["path"],
+        "url": url,
         "found": found,
         "value": value if found else None,
         "error": None if found else error,
@@ -238,14 +235,14 @@ def _expand_wildcards(
     return expanded
 
 
-def _extract(document: object, extractions: list[dict]) -> list[dict]:
+def _extract(document: object, extractions: list[dict], url: str) -> list[dict]:
     results = []
     for spec in extractions:
         segments = _split_wildcards(spec["path"])
         if len(segments) == 1:
             found, value = _resolve_path(document, spec["path"])
             results.append(
-                _result(spec, spec["service"], found, value, "path not found in response")
+                _result(spec, spec["service"], found, value, "path not found in response", url)
             )
             continue
 
@@ -256,7 +253,7 @@ def _extract(document: object, extractions: list[dict]) -> list[dict]:
         ):
             label = " / ".join(label_segments)
             service = f"{spec['service']} {label}" if label else spec["service"]
-            results.append(_result(spec, service, found, value, error))
+            results.append(_result(spec, service, found, value, error, url))
     return results
 
 
@@ -279,8 +276,7 @@ def _element_labels(array: list, label_path: str | None) -> list[str]:
     for label in labels:
         counts[label] = counts.get(label, 0) + 1
     return [
-        f"{label} [{index}]" if counts[label] > 1 else label
-        for index, label in enumerate(labels)
+        f"{label} [{index}]" if counts[label] > 1 else label for index, label in enumerate(labels)
     ]
 
 
@@ -292,13 +288,14 @@ def _process_endpoint(args: argparse.Namespace, index: int, endpoint: dict) -> l
     services go bad while the rest of the section stays intact.
     """
     secret = _reveal_secret(args, f"secret_{index}") if endpoint.get("auth") else None
+    url = endpoint["url"]
     document, error = _fetch(endpoint, secret)
     if error is not None:
         return [
-            _result(spec, spec["service"], False, None, error)
+            _result(spec, spec["service"], False, None, error, url)
             for spec in endpoint.get("extractions", [])
         ]
-    return _extract(document, endpoint.get("extractions", []))
+    return _extract(document, endpoint.get("extractions", []), url)
 
 
 def main(argv: Sequence[str] | None = None) -> int:
