@@ -46,8 +46,8 @@ Download the `.mkp` (see [Building](#building-from-source) until releases are
 published), then, as the site user:
 
 ```sh
-mkp add json_api-0.1.0.mkp
-mkp enable json_api 0.1.0
+mkp add json_api-0.3.0.mkp
+mkp enable json_api 0.3.0
 ```
 
 Or upload it in the GUI under **Setup → Extension packages**.
