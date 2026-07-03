@@ -61,10 +61,10 @@ Each endpoint has:
 
 | Field | Purpose |
 |---|---|
-| **URL** | Full endpoint URL incl. scheme, e.g. `https://app.example.com/actuator/health` |
+| **URL** | Full endpoint URL incl. scheme, e.g. `https://app.example.com/actuator/health`. Checkmk macros (`$HOSTNAME$`, `$HOSTADDRESS$`, custom host macros, ...) are resolved against the monitored host, so one rule can be shared across many hosts. |
 | **HTTP method** | `GET` or `POST` |
-| **Request body** | Optional body for `POST` (defaults `Content-Type: application/json` unless you set one) |
-| **Additional request headers** | Name/value pairs |
+| **Request body** | Optional body for `POST` (defaults `Content-Type: application/json` unless you set one). Macros are resolved here too. |
+| **Additional request headers** | Name/value pairs; macros are resolved in the values |
 | **Authentication** | None, basic, or bearer token |
 | **Verify the TLS certificate** | On by default |
 | **Follow HTTP redirects** | On by default; turn off to harden against redirect-based SSRF |

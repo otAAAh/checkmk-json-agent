@@ -8,7 +8,7 @@ The ``name="json_api"`` below makes Checkmk look for and execute
 """
 
 import json
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from typing import Literal
 
 from cmk.server_side_calls.v1 import (
@@ -16,6 +16,7 @@ from cmk.server_side_calls.v1 import (
     Secret,
     SpecialAgentCommand,
     SpecialAgentConfig,
+    replace_macros,
 )
 from pydantic import BaseModel
 
@@ -65,17 +66,21 @@ class Params(BaseModel, frozen=True):
     endpoints: Sequence[Endpoint] = ()
 
 
-def _endpoint_json(endpoint: Endpoint) -> str:
+def _endpoint_json(endpoint: Endpoint, macros: Mapping[str, str]) -> str:
     """Serialize an endpoint for the agent's '--endpoint' argument.
+
+    Checkmk macros (``$HOSTNAME$``, ``$HOSTADDRESS$``, custom host macros, ...)
+    are resolved against the monitored host in the URL, request body and header
+    values, so a single rule can be shared across many hosts.
 
     Secrets are deliberately excluded here; they travel separately as
     '--secret_<i>' so they never appear inside this (loggable) blob.
     """
     spec: dict[str, object] = {
-        "url": endpoint.url,
+        "url": replace_macros(endpoint.url, macros),
         "method": endpoint.method,
-        "body": endpoint.body,
-        "headers": [[h.name, h.value] for h in endpoint.headers],
+        "body": replace_macros(endpoint.body, macros) if endpoint.body is not None else None,
+        "headers": [[h.name, replace_macros(h.value, macros)] for h in endpoint.headers],
         "verify_cert": endpoint.verify_cert,
         "follow_redirects": endpoint.follow_redirects,
         "timeout": endpoint.timeout,
@@ -89,11 +94,11 @@ def _endpoint_json(endpoint: Endpoint) -> str:
 
 def _commands_function(
     params: Params,
-    _host_config: HostConfig,
+    host_config: HostConfig,
 ) -> Iterable[SpecialAgentCommand]:
     args: list[str | Secret] = []
     for index, endpoint in enumerate(params.endpoints):
-        args += ["--endpoint", _endpoint_json(endpoint)]
+        args += ["--endpoint", _endpoint_json(endpoint, host_config.macros)]
         # The secret (a password-store reference) rides alongside its endpoint,
         # keyed by index so the agent can match them up.
         match endpoint.auth:

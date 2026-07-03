@@ -7,13 +7,17 @@ import json
 from cmk.server_side_calls.v1 import HostConfig, IPv4Config, Secret
 
 
-def _host():
-    return HostConfig(name="testhost", ipv4_config=IPv4Config(address="127.0.0.1"))
+def _host(macros=None):
+    return HostConfig(
+        name="testhost",
+        ipv4_config=IPv4Config(address="127.0.0.1"),
+        macros=macros or {},
+    )
 
 
-def _command_args(ssc, params_dict):
+def _command_args(ssc, params_dict, host=None):
     params = ssc.Params.model_validate(params_dict)
-    (command,) = list(ssc._commands_function(params, _host()))
+    (command,) = list(ssc._commands_function(params, host or _host()))
     return command.command_arguments
 
 
@@ -188,6 +192,55 @@ def test_token_secret_rides_alongside_its_endpoint(ssc):
     assert "token" not in endpoint
     secret = args[args.index("--secret_0-id") + 1]
     assert isinstance(secret, Secret)
+
+
+def test_macros_resolved_in_url(ssc):
+    args = _command_args(
+        ssc,
+        {
+            "endpoints": [
+                {
+                    "url": "https://$HOSTNAME$:8080/$HOSTADDRESS$/health",
+                    "verify_cert": True,
+                    "extractions": [],
+                }
+            ]
+        },
+        host=_host({"$HOSTNAME$": "myhost", "$HOSTADDRESS$": "10.0.0.9"}),
+    )
+    (endpoint,) = _endpoints(ssc, args)
+    assert endpoint["url"] == "https://myhost:8080/10.0.0.9/health"
+
+
+def test_macros_resolved_in_body_and_headers(ssc):
+    args = _command_args(
+        ssc,
+        {
+            "endpoints": [
+                {
+                    "url": "http://x",
+                    "method": "POST",
+                    "body": '{"host": "$HOSTNAME$"}',
+                    "verify_cert": True,
+                    "headers": [{"name": "X-Host", "value": "$HOSTADDRESS$"}],
+                    "extractions": [],
+                }
+            ]
+        },
+        host=_host({"$HOSTNAME$": "myhost", "$HOSTADDRESS$": "10.0.0.9"}),
+    )
+    (endpoint,) = _endpoints(ssc, args)
+    assert endpoint["body"] == '{"host": "myhost"}'
+    assert endpoint["headers"] == [["X-Host", "10.0.0.9"]]
+
+
+def test_unknown_macros_left_untouched(ssc):
+    args = _command_args(
+        ssc,
+        {"endpoints": [{"url": "http://$UNSET$/x", "verify_cert": True, "extractions": []}]},
+    )
+    (endpoint,) = _endpoints(ssc, args)
+    assert endpoint["url"] == "http://$UNSET$/x"
 
 
 def test_login_secret_keeps_username_in_blob(ssc):
