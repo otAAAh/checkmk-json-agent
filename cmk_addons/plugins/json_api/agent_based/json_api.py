@@ -56,6 +56,8 @@ class Item:
     levels_lower: _Levels
     expected: str | None
     metric_name: str
+    path: str
+    url: str
 
 
 @dataclass(frozen=True)
@@ -95,6 +97,8 @@ def parse_json_api(string_table: StringTable) -> Section | None:
             levels_lower=_coerce_levels(result.get("levels_lower")),
             expected=result.get("expected"),
             metric_name=_metric_name(result.get("unit")),
+            path=result.get("path", ""),
+            url=result.get("url", ""),
         )
     return Section(error=payload.get("error"), items=items)
 
@@ -127,17 +131,25 @@ def _as_number(value: object) -> float | None:
     return None
 
 
-def check_json_api(item: str, section: Section) -> CheckResult:
-    if section.error:
-        yield Result(state=State.CRIT, summary=f"API error: {section.error}")
-        return
-    entry = section.items.get(item)
-    if entry is None:
-        return
-    if not entry.found:
-        yield Result(state=State.UNKNOWN, summary=entry.error or "not found")
-        return
+def _context(entry: Item) -> CheckResult:
+    """Details-only lines describing where the value came from.
 
+    Emitted as an OK result with ``notice``, so it never touches the summary
+    line or the service state - it just enriches the Details view, which makes a
+    misconfigured extraction (wrong path, wrong endpoint) far easier to debug.
+    """
+    lines = []
+    if entry.path:
+        lines.append(f"JSON path: {entry.path}")
+    if entry.url:
+        lines.append(f"Source: {entry.url}")
+    if entry.expected is not None:
+        lines.append(f"Expected pattern: {entry.expected}")
+    if lines:
+        yield Result(state=State.OK, notice="\n".join(lines))
+
+
+def _value_results(entry: Item) -> CheckResult:
     number = _as_number(entry.value)
     if number is not None and (entry.levels_upper or entry.levels_lower):
         yield from check_levels(
@@ -180,6 +192,22 @@ def check_json_api(item: str, section: Section) -> CheckResult:
     yield Result(state=State.OK, summary=f"Value: {_render_value(entry.value)}")
     if number is not None:
         yield Metric(entry.metric_name, number)
+
+
+def check_json_api(item: str, section: Section) -> CheckResult:
+    if section.error:
+        yield Result(state=State.CRIT, summary=f"API error: {section.error}")
+        return
+    entry = section.items.get(item)
+    if entry is None:
+        return
+    if not entry.found:
+        yield Result(state=State.UNKNOWN, summary=entry.error or "not found")
+        yield from _context(entry)
+        return
+
+    yield from _value_results(entry)
+    yield from _context(entry)
 
 
 agent_section_json_api = AgentSection(

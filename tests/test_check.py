@@ -46,17 +46,18 @@ def test_check_string_expected_ok_and_crit(check):
             _entry("Down", value="DOWN", expected="UP"),
         ],
     )
-    (ok,) = list(check.check_json_api("Up", section))
+    ok = list(check.check_json_api("Up", section))[0]
     assert ok.state == State.OK
 
-    (crit,) = list(check.check_json_api("Down", section))
+    crit = list(check.check_json_api("Down", section))[0]
     assert crit.state == State.CRIT
 
 
 def test_check_numeric_levels_and_metric(check):
     section = _section(check, [_entry("Conns", value=7, levels_upper=["fixed", [5.0, 10.0]])])
     results = list(check.check_json_api("Conns", section))
-    states = [r.state for r in results if isinstance(r, Result)]
+    # Exclude the details-only context result (empty summary) from the state check.
+    states = [r.state for r in results if isinstance(r, Result) and r.summary]
     metrics = [r for r in results if isinstance(r, Metric)]
     assert states == [State.WARN]
     assert metrics and metrics[0].name == "json_api_value"
@@ -97,7 +98,7 @@ def test_check_unit_names_the_metric_without_levels(check):
 
 def test_check_invalid_regex_is_unknown_not_crash(check):
     section = _section(check, [_entry("Bad", value="UP", expected="(unclosed")])
-    (result,) = list(check.check_json_api("Bad", section))
+    result = list(check.check_json_api("Bad", section))[0]
     assert result.state == State.UNKNOWN
     assert "Invalid expected pattern" in result.summary
 
@@ -106,7 +107,7 @@ def test_check_levels_on_non_numeric_warns(check):
     section = _section(
         check, [_entry("Str", value="not-a-number", levels_upper=["fixed", [5.0, 10.0]])]
     )
-    (result,) = list(check.check_json_api("Str", section))
+    result = list(check.check_json_api("Str", section))[0]
     assert result.state == State.WARN
     assert "not numeric" in result.summary
 
@@ -114,14 +115,14 @@ def test_check_levels_on_non_numeric_warns(check):
 def test_check_boolean_rendered_and_matched_as_json(check):
     # JSON true -> Python True must render/match as "true", not "True".
     section = _section(check, [_entry("Up", value=True, expected="true")])
-    (result,) = list(check.check_json_api("Up", section))
+    result = list(check.check_json_api("Up", section))[0]
     assert result.state == State.OK
     assert result.summary == "Value: true"
 
 
 def test_check_null_value_rendered_as_json(check):
     section = _section(check, [_entry("Nothing", value=None)])
-    (result,) = list(check.check_json_api("Nothing", section))
+    result = list(check.check_json_api("Nothing", section))[0]
     assert result.summary == "Value: null"
 
 
@@ -129,8 +130,55 @@ def test_check_missing_path_is_unknown(check):
     section = _section(
         check, [_entry("Gone", found=False, value=None, error="path not found in response")]
     )
-    (result,) = list(check.check_json_api("Gone", section))
+    result = list(check.check_json_api("Gone", section))[0]
     assert result.state == State.UNKNOWN
+
+
+def _details(results):
+    return "\n".join(r.details for r in results if isinstance(r, Result) and r.details)
+
+
+def test_check_details_include_path_and_source(check):
+    section = _section(
+        check,
+        [_entry("Up", value="UP", expected="UP", path="components.db.status", url="http://x/h")],
+    )
+    results = list(check.check_json_api("Up", section))
+    details = _details(results)
+    assert "JSON path: components.db.status" in details
+    assert "Source: http://x/h" in details
+    assert "Expected pattern: UP" in details
+    # The context is details-only: it must not add to the summary line or worsen state.
+    assert all(
+        r.summary == "" for r in results if isinstance(r, Result) and "JSON path" in r.details
+    )
+
+
+def test_check_details_present_on_missing_path(check):
+    section = _section(
+        check,
+        [
+            _entry(
+                "Gone",
+                found=False,
+                value=None,
+                error="path not found in response",
+                path="a.b.c",
+                url="http://x/h",
+            )
+        ],
+    )
+    details = _details(check.check_json_api("Gone", section))
+    assert "JSON path: a.b.c" in details
+    assert "Source: http://x/h" in details
+
+
+def test_check_no_context_result_when_path_and_url_empty(check):
+    # A section built without path/url (e.g. an old agent) must not emit an empty context.
+    section = _section(check, [_entry("Plain", value="ok", path="", url="")])
+    results = list(check.check_json_api("Plain", section))
+    assert len(results) == 1
+    assert results[0].summary == "Value: ok"
 
 
 def test_parse_duplicate_service_names_kept_distinct(check):

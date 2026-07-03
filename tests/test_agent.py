@@ -58,7 +58,7 @@ def test_extract_scalar(agent):
         {"path": "components.db", "service": "DB"},  # dict -> serialized to JSON text
         {"path": "missing", "service": "Gone"},
     ]
-    results = agent._extract(DOC, specs)
+    results = agent._extract(DOC, specs, "http://test/h")
     by_service = {r["service"]: r for r in results}
 
     assert by_service["Health"]["value"] == "UP"
@@ -66,17 +66,20 @@ def test_extract_scalar(agent):
     assert by_service["DB"]["value"] == '{"status": "DOWN", "details": {"connections": 7}}'
     assert by_service["Gone"]["found"] is False
     assert by_service["Gone"]["error"] == "path not found in response"
+    # Every result carries the path and the source URL for the check's Details view.
+    assert by_service["Health"]["path"] == "status"
+    assert all(r["url"] == "http://test/h" for r in results)
 
 
 def test_extract_wildcard_index_label(agent):
     specs = [{"path": "items[*].count", "service": "Item"}]
-    results = agent._extract(DOC, specs)
+    results = agent._extract(DOC, specs, "http://test/h")
     assert [(r["service"], r["value"]) for r in results] == [("Item 0", 42), ("Item 1", 99)]
 
 
 def test_extract_wildcard_with_label_path(agent):
     specs = [{"path": "items[*].count", "service": "Item", "label_path": "name"}]
-    results = agent._extract(DOC, specs)
+    results = agent._extract(DOC, specs, "http://test/h")
     assert [(r["service"], r["value"]) for r in results] == [
         ("Item alpha", 42),
         ("Item beta", 99),
@@ -85,14 +88,14 @@ def test_extract_wildcard_with_label_path(agent):
 
 def test_extract_wildcard_scalar_array(agent):
     specs = [{"path": "nodes[*]", "service": "Node"}]
-    results = agent._extract(DOC, specs)
+    results = agent._extract(DOC, specs, "http://test/h")
     assert [(r["service"], r["value"]) for r in results] == [("Node 0", "n0"), ("Node 1", "n1")]
 
 
 def test_extract_wildcard_duplicate_labels_disambiguated(agent):
     doc = {"pods": [{"app": "web", "v": 1}, {"app": "web", "v": 2}, {"app": "db", "v": 3}]}
     specs = [{"path": "pods[*].v", "service": "Pod", "label_path": "app"}]
-    results = agent._extract(doc, specs)
+    results = agent._extract(doc, specs, "http://test/h")
     names = [r["service"] for r in results]
     # the two "web" pods are disambiguated by index; "db" stays clean
     assert names == ["Pod web [0]", "Pod web [1]", "Pod db"]
@@ -101,7 +104,7 @@ def test_extract_wildcard_duplicate_labels_disambiguated(agent):
 
 def test_extract_wildcard_not_an_array(agent):
     specs = [{"path": "status[*]", "service": "X"}]
-    (result,) = agent._extract(DOC, specs)
+    (result,) = agent._extract(DOC, specs, "http://test/h")
     assert result["found"] is False
     assert result["error"] == "array not found at wildcard path"
 
@@ -120,7 +123,7 @@ def test_extract_nested_wildcard_cartesian_product(agent):
         ]
     }
     specs = [{"path": "pods[*].containers[*].ready", "service": "Container", "label_path": "name"}]
-    results = agent._extract(doc, specs)
+    results = agent._extract(doc, specs, "http://test/h")
     assert [(r["service"], r["value"]) for r in results] == [
         ("Container web / nginx", True),
         ("Container db / postgres", True),
@@ -131,7 +134,7 @@ def test_extract_nested_wildcard_cartesian_product(agent):
 def test_extract_nested_wildcard_index_labels(agent):
     # No label_path: every level falls back to its array index.
     doc = {"a": [{"b": [10, 11]}, {"b": [20]}]}
-    results = agent._extract(doc, [{"path": "a[*].b[*]", "service": "X"}])
+    results = agent._extract(doc, [{"path": "a[*].b[*]", "service": "X"}], "http://test/h")
     assert [(r["service"], r["value"]) for r in results] == [
         ("X 0 / 0", 10),
         ("X 0 / 1", 11),
@@ -143,7 +146,9 @@ def test_extract_nested_wildcard_missing_inner_array(agent):
     # An element that lacks the inner array yields one error result, labelled
     # by the level(s) resolved so far.
     doc = {"a": [{"name": "ok", "b": [1]}, {"name": "broken"}]}
-    results = agent._extract(doc, [{"path": "a[*].b[*]", "service": "X", "label_path": "name"}])
+    results = agent._extract(
+        doc, [{"path": "a[*].b[*]", "service": "X", "label_path": "name"}], "http://test/h"
+    )
     assert [(r["service"], r["found"], r["value"]) for r in results] == [
         ("X ok / 0", True, 1),
         ("X broken", False, None),
