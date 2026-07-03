@@ -23,6 +23,24 @@ jobs:
       - name: Build MKP (stdlib only)
         run: python3 scripts/build_mkp.py
 
-# Note: the pytest suite imports the cmk.* plugin APIs, which only exist inside a
-# Checkmk site or dev virtualenv, so it is not run here. Run it locally with:
+  # The pytest suite imports the cmk.* plugin APIs, which only exist inside a
+  # Checkmk site. We therefore run it inside the official Checkmk container,
+  # whose site Python already ships pytest, requests and pydantic.
+  test:
+    runs-on: ubuntu-latest
+    container:
+      image: checkmk/check-mk-raw:2.4.0-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Locate the Checkmk site Python
+        run: echo "SITE_PY=$(ls /omd/versions/*/bin/python3 | head -1)" >> "$GITHUB_ENV"
+      - name: Show versions
+        run: |
+          "$SITE_PY" --version
+          "$SITE_PY" -m pytest --version
+      - name: Run tests
+        run: |
+          "$SITE_PY" -m pytest tests -q
+
+# To run the suite locally without the container, point make at a Checkmk dev venv:
 #   PYTHON=/path/to/checkmk/.venv/bin/python make test
