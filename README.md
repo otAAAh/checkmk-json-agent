@@ -32,6 +32,11 @@ Targets **Checkmk 2.4+** and the current stable plugin APIs
 - **Thresholds**: WARN/CRIT upper and lower levels for numeric values, exposed
   as a metric/graph
 - **String matching**: a regex the value must fully match, else CRIT
+- **Host macros** in the URL, request body and headers (`$HOSTNAME$`,
+  `$HOSTADDRESS$`, custom macros) resolve per host, so one rule serves many hosts
+- **Self-documenting service details**: the Details view shows the JSON path,
+  source URL and expected pattern behind each value
+- **Localized Setup UI**: ships a German translation (falls back to English)
 - TLS verification on by default (with an explicit opt-out)
 - Unreachable endpoints and non-JSON responses surface as UNKNOWN on the
   affected services, not a crash
@@ -46,8 +51,8 @@ Download the `.mkp` (see [Building](#building-from-source) until releases are
 published), then, as the site user:
 
 ```sh
-mkp add json_api-0.1.0.mkp
-mkp enable json_api 0.1.0
+mkp add json_api-<version>.mkp
+mkp enable json_api <version>
 ```
 
 Or upload it in the GUI under **Setup → Extension packages**.
