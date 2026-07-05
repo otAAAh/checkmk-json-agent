@@ -18,8 +18,9 @@
   @media (max-width:1100px){ .wrap{ grid-template-columns:1fr; } }
   .panel { background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:12px; }
   .panel h2 { margin:0 0 8px; font-size:13px; text-transform:uppercase; letter-spacing:.05em; color:var(--mut); }
-  textarea { width:100%; min-height:300px; background:#161a1f; color:var(--fg); border:1px solid var(--line);
+  textarea { width:100%; min-height:220px; background:#161a1f; color:var(--fg); border:1px solid var(--line);
              border-radius:6px; padding:8px; font:12px/1.45 ui-monospace, monospace; resize:vertical; }
+  textarea.body { min-height:70px; }
   input, select { background:#161a1f; color:var(--fg); border:1px solid var(--line); border-radius:5px;
                   padding:4px 6px; font:13px system-ui, sans-serif; }
   input[type=text]{ width:100%; }
@@ -29,8 +30,22 @@
   button.ghost:hover { color:var(--fg); }
   .grid2 { display:grid; grid-template-columns:auto 1fr; gap:6px 8px; align-items:center; margin-bottom:10px; }
   .grid2 label { color:var(--mut); font-size:12px; }
+  /* endpoint tabs */
+  #tabs { display:flex; flex-wrap:wrap; gap:6px; margin-bottom:10px; }
+  .tab { display:flex; align-items:center; gap:6px; background:#161a1f; border:1px solid var(--line);
+         border-radius:5px; padding:3px 8px; cursor:pointer; color:var(--mut); font-size:12px; }
+  .tab.active { border-color:var(--acc); color:var(--fg); }
+  .tab .x { color:var(--mut); font-weight:700; padding:0 2px; border-radius:3px; }
+  .tab .x:hover { color:var(--crit); }
+  .tab.addtab { color:var(--acc); border-style:dashed; }
+  /* connection */
+  .toggles { display:flex; gap:16px; align-items:center; margin:4px 0 10px; flex-wrap:wrap; }
+  .toggles label { color:var(--fg); font-size:13px; display:flex; gap:6px; align-items:center; cursor:pointer; }
+  .hrow { display:grid; grid-template-columns:1fr 1fr auto; gap:6px; margin-bottom:4px; }
+  .hrow .rm { padding:2px 8px; }
+  .subnote { color:var(--mut); font-size:12px; margin:2px 0 8px; }
   /* tree */
-  #tree { font:12px/1.6 ui-monospace, monospace; max-height:520px; overflow:auto; }
+  #tree { font:12px/1.6 ui-monospace, monospace; max-height:420px; overflow:auto; }
   #tree details { margin-left:12px; }
   #tree summary { cursor:pointer; list-style:none; }
   #tree summary::-webkit-details-marker { display:none; }
@@ -55,35 +70,36 @@
   .outblock { margin-bottom:14px; }
   .outblock .hdr { display:flex; justify-content:space-between; align-items:center; margin-bottom:4px; }
   .err { color:var(--crit); }
+  hr { border:0; border-top:1px solid var(--line); margin:12px 0; }
 </style>
 </head>
 <body>
 <header>
   <h1>JSON API Explorer <span class="muted">· checkmk-json-agent</span></h1>
-  <p>Paste a sample JSON response, pick the fields to monitor, and copy a ready-to-use rule. Runs entirely in your browser — nothing is sent anywhere.</p>
+  <p>Configure one or more endpoints, paste each one's sample JSON, pick the fields to monitor, and copy a ready-to-use rule. Runs entirely in your browser — nothing is sent anywhere.</p>
 </header>
 
 <div class="wrap">
-  <!-- LEFT: input -->
+  <!-- LEFT: endpoints, connection, input -->
   <div class="panel">
-    <h2>1 · Paste JSON response</h2>
+    <h2>1 · Endpoints</h2>
+    <div id="tabs"></div>
+
+    <div id="conn"></div>
+
+    <hr>
+    <h2>Sample JSON response (this endpoint)</h2>
     <textarea id="json" spellcheck="false"></textarea>
     <div style="margin-top:8px; display:flex; gap:8px;">
       <button id="parse">Parse →</button>
       <button class="ghost" id="sample">Load sample</button>
     </div>
     <div id="parse-err" class="err" style="margin-top:6px;"></div>
-
-    <h2 style="margin-top:16px;">Endpoint (for the rule)</h2>
-    <div class="grid2">
-      <label>URL</label><input type="text" id="url" placeholder="https://app.example.com/actuator/health">
-      <label>Method</label><select id="method"><option>GET</option><option>POST</option></select>
-    </div>
   </div>
 
   <!-- MIDDLE: tree + fields -->
   <div class="panel">
-    <h2>2 · Pick fields</h2>
+    <h2>2 · Pick fields <span class="muted" id="which-ep"></span></h2>
     <div id="tree" class="muted">Parse some JSON to see its structure.</div>
     <h2 style="margin-top:14px;">Selected fields</h2>
     <div id="fields" class="muted">None yet — click <em>monitor</em> on a value above.</div>
@@ -91,19 +107,20 @@
 
   <!-- RIGHT: outputs -->
   <div class="panel">
-    <h2>3 · Generated output</h2>
+    <h2>3 · Generated output <span class="muted">(all endpoints)</span></h2>
 
     <div class="outblock">
-      <div class="hdr"><span class="muted">Agent <code>--endpoint</code> (CLI test)</span>
+      <div class="hdr"><span class="muted">Agent CLI test</span>
         <button class="ghost" data-copy="out-extr">Copy</button></div>
       <pre id="out-extr"></pre>
-      <div class="muted">Test: <code>agent_json_api --endpoint '&lt;above&gt;'</code></div>
+      <div class="muted" id="cli-note"></div>
     </div>
 
     <div class="outblock">
       <div class="hdr"><span class="muted">Rule value (rules.mk / reference)</span>
         <button class="ghost" data-copy="out-value">Copy</button></div>
       <pre id="out-value"></pre>
+      <div class="muted" id="auth-note"></div>
     </div>
 
     <div class="outblock">
@@ -135,35 +152,71 @@ const SAMPLE = {
   ]
 };
 
-const state = { extractions: [] };
-let parsedRoot = null;
+// ---- state ----------------------------------------------------------------
+function makeEndpoint(withSample) {
+  return {
+    url: "", method: "GET", body: "",
+    headers: [],                 // [{name, value}]
+    auth: { type: "none", username: "", pwid: "" },  // none | login | token
+    verify_cert: true, follow_redirects: true, timeout: "",
+    json: withSample ? JSON.stringify(SAMPLE, null, 2) : "",
+    parsedRoot: null, parseErr: "",
+    extractions: [],
+  };
+}
+const state = { endpoints: [makeEndpoint(true)], active: 0 };
+const ep = () => state.endpoints[state.active];
 
 const $ = id => document.getElementById(id);
 
 // ---- helpers --------------------------------------------------------------
 function pyStr(s) { return "'" + String(s).replace(/\\/g, "\\\\").replace(/'/g, "\\'") + "'"; }
+function floatPy(n) { return Number.isInteger(n) ? n.toFixed(1) : String(n); }
+function esc(s) { return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;"); }
+function escAttr(s) { return String(s).replace(/"/g, "&quot;"); }
+
+// Mirror the agent's _PATH_TOKEN grammar: ['key'] | ["key"] | [idx] | plain.
+const PATH_TOKEN = /\['([^']*)'\]|\["([^"]*)"\]|\[(\d+)\]|([^.\[\]]+)/g;
 
 function resolvePath(root, p) {
   if (!p) return root;
   let cur = root;
-  const re = /([^.\[\]]+)|\[(\d+)\]/g;
+  let cleaned = p.trim();
+  if (cleaned.startsWith("$.")) cleaned = cleaned.slice(2);
+  else if (cleaned.startsWith("$")) cleaned = cleaned.slice(1);
+  PATH_TOKEN.lastIndex = 0;
   let m;
-  while ((m = re.exec(p))) {
-    if (m[1] !== undefined) {
-      if (cur && typeof cur === "object" && m[1] in cur) cur = cur[m[1]];
+  while ((m = PATH_TOKEN.exec(cleaned))) {
+    if (m[3] !== undefined) {
+      const i = +m[3];
+      if (Array.isArray(cur) && i < cur.length) cur = cur[i];
       else return undefined;
     } else {
-      const i = +m[2];
-      if (Array.isArray(cur) && i < cur.length) cur = cur[i];
+      const key = m[1] !== undefined ? m[1] : (m[2] !== undefined ? m[2] : m[4]);
+      if (cur && typeof cur === "object" && !Array.isArray(cur) && key in cur) cur = cur[key];
       else return undefined;
     }
   }
   return cur;
 }
 
+// A key that contains '.', '[' or ']' (or is empty) must be bracket-quoted so
+// the agent's path parser reads it as one segment. The agent grammar has no
+// escaping inside quotes, so pick the quote style the key doesn't contain.
+function segFor(key) {
+  if (!/[.\[\]]/.test(key) && key !== "") return "." + key; // plain, dotted
+  if (!key.includes("'")) return "['" + key + "']";
+  return '["' + key + '"]';
+}
+function joinKey(parent, key) {
+  const seg = segFor(key);
+  if (!parent) return seg.startsWith(".") ? seg.slice(1) : seg;
+  return parent + seg;
+}
+
 function guessLabel(path) {
-  const before = path.split("[*]")[0].replace(/\.$/, "");
-  const arr = resolvePath(parsedRoot, before);
+  const before = path.split("[*]")[0].replace(/[.\[]$/, "").replace(/\.$/, "");
+  const arr = resolvePath(ep().parsedRoot, before);
   if (Array.isArray(arr) && arr.length && arr[0] && typeof arr[0] === "object") {
     for (const cand of ["name", "id", "title", "key", "host", "hostname"]) {
       if (cand in arr[0]) return cand;
@@ -173,8 +226,13 @@ function guessLabel(path) {
 }
 
 function defaultService(path) {
-  const segs = path.replace(/\[\*\]/g, "").split(".").filter(Boolean);
-  const last = segs[segs.length - 1] || "value";
+  const p = path.replace(/\[\*\]/g, "");
+  PATH_TOKEN.lastIndex = 0;
+  let last = "value", m;
+  while ((m = PATH_TOKEN.exec(p))) {
+    const seg = m[1] !== undefined ? m[1] : (m[2] !== undefined ? m[2] : m[4]);
+    if (seg) last = seg;
+  }
   return last.charAt(0).toUpperCase() + last.slice(1);
 }
 
@@ -183,15 +241,131 @@ function preview(v) {
   return String(v);
 }
 
+// ---- endpoint tabs --------------------------------------------------------
+function renderTabs() {
+  const box = $("tabs");
+  box.innerHTML = "";
+  state.endpoints.forEach((e, i) => {
+    const t = document.createElement("div");
+    t.className = "tab" + (i === state.active ? " active" : "");
+    const label = e.url ? e.url.replace(/^https?:\/\//, "") : `endpoint ${i + 1}`;
+    t.innerHTML = `<span>${esc(label.length > 26 ? label.slice(0, 25) + "…" : label)}</span>`;
+    t.onclick = () => { state.active = i; renderAll(); };
+    if (state.endpoints.length > 1) {
+      const x = document.createElement("span");
+      x.className = "x"; x.textContent = "×"; x.title = "Remove endpoint";
+      x.onclick = (ev) => {
+        ev.stopPropagation();
+        state.endpoints.splice(i, 1);
+        if (state.active >= state.endpoints.length) state.active = state.endpoints.length - 1;
+        renderAll();
+      };
+      t.appendChild(x);
+    }
+    box.appendChild(t);
+  });
+  const add = document.createElement("div");
+  add.className = "tab addtab";
+  add.textContent = "+ add endpoint";
+  add.onclick = () => { state.endpoints.push(makeEndpoint(false)); state.active = state.endpoints.length - 1; renderAll(); };
+  box.appendChild(add);
+}
+
+// ---- connection form ------------------------------------------------------
+function renderConn() {
+  const e = ep();
+  const box = $("conn");
+  const authRows =
+    e.auth.type === "login"
+      ? `<div class="grid2">
+           <label>Username</label><input type="text" id="c-user" value="${escAttr(e.auth.username)}">
+           <label>Password (store ID)</label><input type="text" id="c-pwid" value="${escAttr(e.auth.pwid)}" placeholder="ID from Setup → Passwords">
+         </div>`
+      : e.auth.type === "token"
+      ? `<div class="grid2">
+           <label>Token (store ID)</label><input type="text" id="c-pwid" value="${escAttr(e.auth.pwid)}" placeholder="ID from Setup → Passwords">
+         </div>`
+      : "";
+  const bodyRow =
+    e.method === "POST"
+      ? `<label>Request body</label><textarea class="body" id="c-body" spellcheck="false">${esc(e.body)}</textarea>`
+      : "";
+
+  box.innerHTML =
+    `<div class="grid2">
+       <label>URL</label><input type="text" id="c-url" value="${escAttr(e.url)}" placeholder="https://app.example.com/actuator/health">
+       <label>Method</label><select id="c-method">
+         <option${e.method === "GET" ? " selected" : ""}>GET</option>
+         <option${e.method === "POST" ? " selected" : ""}>POST</option>
+       </select>
+       <label>Authentication</label><select id="c-authtype">
+         <option value="none"${e.auth.type === "none" ? " selected" : ""}>None</option>
+         <option value="login"${e.auth.type === "login" ? " selected" : ""}>Basic (username / password)</option>
+         <option value="token"${e.auth.type === "token" ? " selected" : ""}>Bearer token</option>
+       </select>
+       ${bodyRow}
+     </div>
+     ${authRows}
+     <div class="muted" style="margin-bottom:6px;">Additional request headers</div>
+     <div id="c-headers"></div>
+     <button class="ghost" id="c-addheader" style="margin-bottom:10px;">+ header</button>
+     <div class="grid2">
+       <label>Timeout (s)</label><input type="text" id="c-timeout" value="${escAttr(e.timeout)}" placeholder="30">
+     </div>
+     <div class="toggles">
+       <label><input type="checkbox" id="c-verify" ${e.verify_cert ? "checked" : ""}> Verify TLS certificate</label>
+       <label><input type="checkbox" id="c-redir" ${e.follow_redirects ? "checked" : ""}> Follow HTTP redirects</label>
+     </div>
+     <div class="subnote">URL, body and header values may contain Checkmk macros (<code>$HOSTNAME$</code>, <code>$HOSTADDRESS$</code>, …).</div>`;
+
+  renderHeaders();
+
+  // text/select bindings (no re-render → keep focus)
+  const bind = (id, fn) => { const el = $(id); if (el) el.oninput = fn; };
+  bind("c-url", () => { e.url = $("c-url").value; renderTabs(); renderOutputs(); });
+  bind("c-timeout", () => { e.timeout = $("c-timeout").value; renderOutputs(); });
+  bind("c-user", () => { e.auth.username = $("c-user").value; renderOutputs(); });
+  bind("c-pwid", () => { e.auth.pwid = $("c-pwid").value; renderOutputs(); });
+  if ($("c-body")) $("c-body").oninput = () => { e.body = $("c-body").value; renderOutputs(); };
+
+  // structural selects → re-render the form
+  $("c-method").onchange = () => { e.method = $("c-method").value; renderConn(); renderOutputs(); };
+  $("c-authtype").onchange = () => { e.auth.type = $("c-authtype").value; renderConn(); renderOutputs(); };
+  $("c-verify").onchange = () => { e.verify_cert = $("c-verify").checked; renderOutputs(); };
+  $("c-redir").onchange = () => { e.follow_redirects = $("c-redir").checked; renderOutputs(); };
+  $("c-addheader").onclick = () => { e.headers.push({ name: "", value: "" }); renderConn(); renderOutputs(); };
+}
+
+function renderHeaders() {
+  const e = ep();
+  const box = $("c-headers");
+  box.innerHTML = "";
+  e.headers.forEach((h, i) => {
+    const row = document.createElement("div");
+    row.className = "hrow";
+    row.innerHTML =
+      `<input type="text" data-h="name" data-i="${i}" value="${escAttr(h.name)}" placeholder="Header">` +
+      `<input type="text" data-h="value" data-i="${i}" value="${escAttr(h.value)}" placeholder="Value">` +
+      `<button class="ghost rm" data-rmh="${i}">×</button>`;
+    box.appendChild(row);
+  });
+  box.querySelectorAll("input[data-h]").forEach(inp => {
+    inp.oninput = () => { e.headers[+inp.dataset.i][inp.dataset.h] = inp.value; renderOutputs(); };
+  });
+  box.querySelectorAll("[data-rmh]").forEach(b => {
+    b.onclick = () => { e.headers.splice(+b.dataset.rmh, 1); renderConn(); renderOutputs(); };
+  });
+}
+
 // ---- tree -----------------------------------------------------------------
 function leafRow(label, value, path) {
   const wild = path.includes("[*]");
   const row = document.createElement("div");
   row.className = "leaf";
   row.innerHTML =
-    `<span class="k ${wild ? "wild" : ""}">${label}</span>` +
+    `<span class="k ${wild ? "wild" : ""}">${esc(label)}</span>` +
     `<span class="t">${Array.isArray(value) ? "array" : typeof value}</span>` +
-    `<span class="v">${preview(value)}</span>`;
+    `<span class="v">${esc(preview(value))}</span>`;
   const btn = document.createElement("button");
   btn.className = "add";
   btn.textContent = wild ? "monitor each [*]" : "monitor";
@@ -204,13 +378,13 @@ function buildNode(key, value, path) {
   if (Array.isArray(value)) {
     const det = document.createElement("details");
     const sum = document.createElement("summary");
-    sum.innerHTML = `<span class="k">${key}</span> <span class="t">[${value.length}] — one service per element</span>`;
+    sum.innerHTML = `<span class="k">${esc(key)}</span> <span class="t">[${value.length}] — one service per element</span>`;
     det.appendChild(sum);
     if (value.length) {
       const el0 = value[0];
       const wpath = path + "[*]";
       if (el0 && typeof el0 === "object" && !Array.isArray(el0)) {
-        for (const k of Object.keys(el0)) det.appendChild(buildNode(k, el0[k], wpath + "." + k));
+        for (const k of Object.keys(el0)) det.appendChild(buildNode(k, el0[k], joinKey(wpath, k)));
       } else {
         det.appendChild(leafRow(key + "[*]", el0, wpath));
       }
@@ -221,9 +395,9 @@ function buildNode(key, value, path) {
     const det = document.createElement("details");
     det.open = true;
     const sum = document.createElement("summary");
-    sum.innerHTML = `<span class="k">${key}</span> <span class="t">{${Object.keys(value).length}}</span>`;
+    sum.innerHTML = `<span class="k">${esc(key)}</span> <span class="t">{${Object.keys(value).length}}</span>`;
     det.appendChild(sum);
-    for (const k of Object.keys(value)) det.appendChild(buildNode(k, value[k], path ? path + "." + k : k));
+    for (const k of Object.keys(value)) det.appendChild(buildNode(k, value[k], joinKey(path, k)));
     return det;
   }
   return leafRow(key, value, path);
@@ -231,19 +405,24 @@ function buildNode(key, value, path) {
 
 function renderTree() {
   const tree = $("tree");
+  const root = ep().parsedRoot;
   tree.innerHTML = "";
-  if (parsedRoot && typeof parsedRoot === "object" && !Array.isArray(parsedRoot)) {
-    for (const k of Object.keys(parsedRoot)) tree.appendChild(buildNode(k, parsedRoot[k], k));
-  } else if (Array.isArray(parsedRoot)) {
-    tree.appendChild(buildNode("(root)", parsedRoot, ""));
+  if (root && typeof root === "object" && !Array.isArray(root)) {
+    for (const k of Object.keys(root)) tree.appendChild(buildNode(k, root[k], joinKey("", k)));
+  } else if (Array.isArray(root)) {
+    tree.appendChild(buildNode("(root)", root, ""));
+  } else if (ep().parseErr) {
+    tree.className = "err"; tree.textContent = ep().parseErr;
   } else {
-    tree.textContent = "Top-level JSON must be an object or array.";
+    tree.className = "muted"; tree.textContent = "Parse some JSON to see its structure.";
+    return;
   }
+  if (!(tree.className === "err")) tree.className = "";
 }
 
 // ---- extraction state -----------------------------------------------------
 function addExtraction(path) {
-  state.extractions.push({
+  ep().extractions.push({
     service: defaultService(path),
     path,
     label_path: path.includes("[*]") ? guessLabel(path) : "",
@@ -255,37 +434,38 @@ function addExtraction(path) {
 
 function renderFields() {
   const box = $("fields");
-  if (!state.extractions.length) {
+  const exs = ep().extractions;
+  if (!exs.length) {
     box.className = "muted";
     box.innerHTML = "None yet — click <em>monitor</em> on a value above.";
     return;
   }
   box.className = "";
   box.innerHTML = "";
-  state.extractions.forEach((e, i) => {
+  exs.forEach((e, i) => {
     const wild = e.path.includes("[*]");
     const d = document.createElement("div");
     d.className = "field";
     d.innerHTML =
       `<button class="ghost rm" data-rm="${i}">remove</button>` +
-      `<div class="muted">path: <code>${e.path}</code></div>` +
-      `<div class="row"><label>Service</label><input type="text" data-f="service" data-i="${i}" value="${e.service.replace(/"/g,"&quot;")}"></div>` +
-      (wild ? `<div class="row"><label>Label path</label><input type="text" data-f="label_path" data-i="${i}" value="${e.label_path}" placeholder="field in each element, e.g. name"></div>` : "") +
+      `<div class="muted">path: <code>${esc(e.path)}</code></div>` +
+      `<div class="row"><label>Service</label><input type="text" data-f="service" data-i="${i}" value="${escAttr(e.service)}"></div>` +
+      (wild ? `<div class="row"><label>Label path</label><input type="text" data-f="label_path" data-i="${i}" value="${escAttr(e.label_path)}" placeholder="field in each element, e.g. name"></div>` : "") +
       `<div class="row"><label>Unit</label><select data-f="unit" data-i="${i}">` +
         ["", "count", "bytes", "seconds", "percent"].map(u =>
           `<option value="${u}"${e.unit === u ? " selected" : ""}>${u || "no unit"}</option>`).join("") +
       `</select></div>` +
-      `<div class="row"><label>Upper W/C</label><span class="lvls"><input type="text" data-f="lu_w" data-i="${i}" value="${e.lu_w}" placeholder="warn"><input type="text" data-f="lu_c" data-i="${i}" value="${e.lu_c}" placeholder="crit"></span></div>` +
-      `<div class="row"><label>Lower W/C</label><span class="lvls"><input type="text" data-f="ll_w" data-i="${i}" value="${e.ll_w}" placeholder="warn"><input type="text" data-f="ll_c" data-i="${i}" value="${e.ll_c}" placeholder="crit"></span></div>` +
-      `<div class="row"><label>Expected</label><input type="text" data-f="expected" data-i="${i}" value="${e.expected.replace(/"/g,"&quot;")}" placeholder="regex, e.g. UP|ok"></div>`;
+      `<div class="row"><label>Upper W/C</label><span class="lvls"><input type="text" data-f="lu_w" data-i="${i}" value="${escAttr(e.lu_w)}" placeholder="warn"><input type="text" data-f="lu_c" data-i="${i}" value="${escAttr(e.lu_c)}" placeholder="crit"></span></div>` +
+      `<div class="row"><label>Lower W/C</label><span class="lvls"><input type="text" data-f="ll_w" data-i="${i}" value="${escAttr(e.ll_w)}" placeholder="warn"><input type="text" data-f="ll_c" data-i="${i}" value="${escAttr(e.ll_c)}" placeholder="crit"></span></div>` +
+      `<div class="row"><label>Expected</label><input type="text" data-f="expected" data-i="${i}" value="${escAttr(e.expected)}" placeholder="regex, e.g. UP|ok"></div>`;
     box.appendChild(d);
   });
   box.querySelectorAll("input[data-f], select[data-f]").forEach(inp => {
     const evt = inp.tagName === "SELECT" ? "onchange" : "oninput";
-    inp[evt] = () => { state.extractions[+inp.dataset.i][inp.dataset.f] = inp.value; renderOutputs(); };
+    inp[evt] = () => { ep().extractions[+inp.dataset.i][inp.dataset.f] = inp.value; renderOutputs(); };
   });
   box.querySelectorAll("[data-rm]").forEach(b => {
-    b.onclick = () => { state.extractions.splice(+b.dataset.rm, 1); renderFields(); renderOutputs(); };
+    b.onclick = () => { ep().extractions.splice(+b.dataset.rm, 1); renderFields(); renderOutputs(); };
   });
 }
 
@@ -296,14 +476,14 @@ function levelsPair(w, c) {
   return [wn, cn];
 }
 
-function extractionObjs() {
-  return state.extractions.map(e => {
-    const o = { service: e.service, path: e.path };
-    if (e.label_path) o.label_path = e.label_path;
-    if (e.unit) o.unit = e.unit;
-    const lu = levelsPair(e.lu_w, e.lu_c); if (lu) o.levels_upper = ["fixed", lu];
-    const ll = levelsPair(e.ll_w, e.ll_c); if (ll) o.levels_lower = ["fixed", ll];
-    if (e.expected) o.expected = e.expected;
+function extractionObjs(e) {
+  return e.extractions.map(x => {
+    const o = { service: x.service, path: x.path };
+    if (x.label_path) o.label_path = x.label_path;
+    if (x.unit) o.unit = x.unit;
+    const lu = levelsPair(x.lu_w, x.lu_c); if (lu) o.levels_upper = ["fixed", lu];
+    const ll = levelsPair(x.ll_w, x.ll_c); if (ll) o.levels_lower = ["fixed", ll];
+    if (x.expected) o.expected = x.expected;
     return o;
   });
 }
@@ -318,34 +498,75 @@ function pyExtraction(o) {
   return "{" + p.join(", ") + "}";
 }
 
-function endpointObj(objs) {
-  return {
-    url: $("url").value || "https://app.example.com/health",
-    method: $("method").value || "GET",
-    verify_cert: true,
-    extractions: objs,
-  };
+function pyAuth(auth) {
+  if (!auth || auth.type === "none") return null;
+  const ref = `('cmk_postprocessed', 'stored_password', (${pyStr(auth.pwid || "")}, ''))`;
+  if (auth.type === "login") {
+    return `('auth_login', {'username': ${pyStr(auth.username || "")}, 'password': ${ref}})`;
+  }
+  return `('auth_token', {'token': ${ref}})`;
 }
 
-function valuePy(objs) {
-  const url = $("url").value || "https://app.example.com/health";
-  const method = $("method").value || "GET";
-  const lines = objs.map(o => "                " + pyExtraction(o) + ",").join("\n");
-  const endpoint =
-    `        {\n` +
-    `            'url': ${pyStr(url)},\n` +
-    `            'method': ${pyStr(method)},\n` +
-    `            'verify_cert': True,\n` +
-    `            'extractions': [\n${lines}\n            ],\n` +
-    `        },`;
-  return `{\n    'endpoints': [\n${endpoint}\n    ],\n}`;
+function anyAuth() { return state.endpoints.some(e => e.auth.type !== "none"); }
+
+function pyEndpoint(e, indent) {
+  const i = " ".repeat(indent);
+  const ei = " ".repeat(indent + 4);
+  const lines = [];
+  lines.push(`${i}'url': ${pyStr(e.url || "https://app.example.com/health")},`);
+  lines.push(`${i}'method': ${pyStr(e.method || "GET")},`);
+  if (e.body && e.body.trim()) lines.push(`${i}'body': ${pyStr(e.body)},`);
+  const hs = e.headers.filter(h => h.name).map(h => `{'name': ${pyStr(h.name)}, 'value': ${pyStr(h.value)}}`);
+  if (hs.length) lines.push(`${i}'headers': [${hs.join(", ")}],`);
+  const authPy = pyAuth(e.auth);
+  if (authPy) lines.push(`${i}'auth': ${authPy},`);
+  lines.push(`${i}'verify_cert': ${e.verify_cert ? "True" : "False"},`);
+  lines.push(`${i}'follow_redirects': ${e.follow_redirects ? "True" : "False"},`);
+  const t = parseFloat(e.timeout);
+  if (!Number.isNaN(t)) lines.push(`${i}'timeout': ${floatPy(t)},`);
+  const exLines = extractionObjs(e).map(o => `${ei}${pyExtraction(o)},`).join("\n");
+  lines.push(`${i}'extractions': [` + (exLines ? `\n${exLines}\n${i}]` : "]") + ",");
+  return lines.join("\n");
+}
+
+function valuePy() {
+  const eps = state.endpoints.map(e => `        {\n${pyEndpoint(e, 12)}\n        },`).join("\n");
+  return `{\n    'endpoints': [\n${eps}\n    ],\n}`;
+}
+
+// The CLI '--endpoint' JSON mirrors the special agent's own serialization
+// (server_side_calls _endpoint_json): auth becomes a bare type string and the
+// secret travels separately as --secret_<i>.
+function endpointCliObj(e) {
+  const o = {
+    url: e.url || "https://app.example.com/health",
+    method: e.method || "GET",
+    body: (e.body && e.body.trim()) ? e.body : null,
+    headers: e.headers.filter(h => h.name).map(h => [h.name, h.value]),
+    verify_cert: !!e.verify_cert,
+    follow_redirects: !!e.follow_redirects,
+    timeout: Number.isNaN(parseFloat(e.timeout)) ? null : parseFloat(e.timeout),
+    auth: e.auth.type === "none" ? null : (e.auth.type === "login" ? "auth_login" : "auth_token"),
+    extractions: extractionObjs(e),
+  };
+  if (e.auth.type === "login") o.username = e.auth.username || "";
+  return o;
 }
 
 function renderOutputs() {
-  const objs = extractionObjs();
-  $("out-extr").textContent = JSON.stringify(endpointObj(objs));
-  const vpy = valuePy(objs);
+  const cli = state.endpoints
+    .map(e => `  --endpoint '${JSON.stringify(endpointCliObj(e))}'`)
+    .join(" \\\n");
+  $("out-extr").textContent = `agent_json_api \\\n${cli}`;
+  $("cli-note").innerHTML = anyAuth()
+    ? "Endpoints with auth also need <code>--secret_&lt;i&gt;-id \"&lt;id&gt;:&lt;store_file&gt;\"</code> (index-matched)."
+    : "";
+
+  const vpy = valuePy();
   $("out-value").textContent = vpy;
+  $("auth-note").innerHTML = anyAuth()
+    ? "Auth references a password-store entry by ID — create it under <b>Setup → Passwords</b> first."
+    : "";
 
   const site = ($("site").value || "http://localhost/mysite/").replace(/\/?$/, "/");
   const host = $("host").value || "localhost";
@@ -364,32 +585,48 @@ function renderOutputs() {
     `  --data-binary @rule.json`;
 }
 
-// ---- wiring ---------------------------------------------------------------
+// ---- parse / render-all ---------------------------------------------------
 function doParse() {
   $("parse-err").textContent = "";
+  const e = ep();
+  e.json = $("json").value;
   try {
-    parsedRoot = JSON.parse($("json").value);
-  } catch (e) {
-    $("parse-err").textContent = "Invalid JSON: " + e.message;
-    return;
+    e.parsedRoot = JSON.parse(e.json);
+    e.parseErr = "";
+  } catch (err) {
+    e.parsedRoot = null;
+    e.parseErr = "Invalid JSON: " + err.message;
+    $("parse-err").textContent = e.parseErr;
   }
   renderTree();
 }
 
+function renderAll() {
+  renderTabs();
+  renderConn();
+  $("json").value = ep().json;
+  $("parse-err").textContent = ep().parseErr;
+  $("which-ep").textContent = `· endpoint ${state.active + 1}`;
+  renderTree();
+  renderFields();
+  renderOutputs();
+}
+
+// ---- wiring ---------------------------------------------------------------
 $("parse").onclick = doParse;
 $("sample").onclick = () => { $("json").value = JSON.stringify(SAMPLE, null, 2); doParse(); };
+$("json").addEventListener("input", () => { ep().json = $("json").value; });
 document.querySelectorAll("[data-copy]").forEach(b => {
   b.onclick = () => {
     navigator.clipboard.writeText($(b.dataset.copy).textContent);
     const t = b.textContent; b.textContent = "copied"; setTimeout(() => (b.textContent = t), 1000);
   };
 });
-["url", "method", "site", "folder", "host"].forEach(id => $(id).addEventListener("input", renderOutputs));
+["site", "folder", "host"].forEach(id => $(id).addEventListener("input", renderOutputs));
 
-// boot with the sample loaded
-$("json").value = JSON.stringify(SAMPLE, null, 2);
+// boot with the sample loaded on the first endpoint
+renderAll();
 doParse();
-renderOutputs();
 </script>
 </body>
 </html>

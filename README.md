@@ -150,10 +150,13 @@ collision is auto-suffixed with ` (2)`, but explicit names read better).
 ## JSON API Explorer
 
 [`explorer/index.html`](explorer/index.html) is a standalone, dependency-free
-web page (open it directly in a browser — nothing is uploaded anywhere). Paste a
-sample JSON response, click the fields to monitor, set thresholds/labels, and it
-generates: the agent `--extractions` blob for CLI testing, the rule value for
-`rules.mk`, and a REST API request body + `curl` to create the rule on a site.
+web page (open it directly in a browser — nothing is uploaded anywhere).
+Configure one or more endpoints (URL, method, auth, request body, headers,
+timeout, TLS/redirect toggles), paste each endpoint's sample JSON response,
+click the fields to monitor, set thresholds/labels, and it generates: the agent
+`--endpoint` command line for CLI testing, the rule value for `rules.mk`, and a
+REST API request body + `curl` to create the rule on a site. Auth is emitted as
+a password-store reference (create the entry under **Setup → Passwords**).
 
 ## Security notes
 
