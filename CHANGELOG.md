@@ -3,6 +3,13 @@
 All notable changes to this project, one section per released version.
 Generated from the git history by `scripts/gen_changelog.py`.
 
+## [0.5.0] - 2026-07-06
+
+- Surface misconfigured levels even on a failed 'expected' match ([`8e0eb35`](https://github.com/otAAAh/checkmk-json-agent/commit/8e0eb35))
+- Confine malformed-blob and extraction errors to their endpoint ([`cc8c59a`](https://github.com/otAAAh/checkmk-json-agent/commit/cc8c59a))
+- Do not send Content-Type for a body that a GET never sends ([`659164d`](https://github.com/otAAAh/checkmk-json-agent/commit/659164d))
+- Accept case-insensitive URL schemes in ruleset validation ([`bd551e7`](https://github.com/otAAAh/checkmk-json-agent/commit/bd551e7))
+
 ## [0.4.0] - 2026-07-06
 
 - Fix check/ruleset edge cases: URL scheme, non-numeric levels, inf/nan ([`0f0284e`](https://github.com/otAAAh/checkmk-json-agent/commit/0f0284e))
