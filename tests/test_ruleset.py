@@ -15,6 +15,17 @@ def test_invalid_regex_rejected_at_config_time(ruleset):
         ruleset._validate_regex("(unclosed")
 
 
+def test_valid_url_passes(ruleset):
+    ruleset._validate_url("https://app.example.com/health")  # must not raise
+    ruleset._validate_url("http://10.0.0.1:8080/status")  # must not raise
+
+
+@pytest.mark.parametrize("bad", ["app.example.com/health", "ftp://x", "/relative", ""])
+def test_url_without_http_scheme_rejected(ruleset, bad):
+    with pytest.raises(ValidationError):
+        ruleset._validate_url(bad)
+
+
 def test_parameter_form_builds(ruleset):
     # Smoke test: the form spec constructs without error.
     assert ruleset._parameter_form() is not None
