@@ -161,6 +161,12 @@ def test_build_session_defaults_json_content_type_for_body(agent):
     assert headers["Content-Type"] == "application/json"
 
 
+def test_build_session_omits_json_content_type_for_get_with_body(agent):
+    # A GET never sends the configured body, so it must not advertise one either.
+    _session, headers = agent._build_session({"method": "GET", "body": "{}"}, None)
+    assert "Content-Type" not in headers
+
+
 def test_build_session_keeps_explicit_content_type(agent):
     endpoint = {
         "method": "POST",

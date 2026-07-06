@@ -152,6 +152,18 @@ def _read_capped(response: requests.Response, limit: int) -> bytes:
     return b"".join(chunks)
 
 
+def _effective_body(endpoint: dict) -> object | None:
+    """The request body actually sent with this endpoint's request.
+
+    A request body only makes sense for POST; never smuggle one onto a GET. Both
+    the Content-Type defaulting in ``_build_session`` and the request itself in
+    ``_fetch`` route through here, so the two can never disagree about whether a
+    body is present (e.g. defaulting Content-Type for a body that is then never
+    sent).
+    """
+    return endpoint.get("body") if endpoint.get("method", "GET") == "POST" else None
+
+
 def _build_session(endpoint: dict, secret: str | None) -> tuple[requests.Session, dict[str, str]]:
     session = requests.Session()
     headers = {name: value for name, value in endpoint.get("headers", [])}
@@ -160,8 +172,9 @@ def _build_session(endpoint: dict, secret: str | None) -> tuple[requests.Session
             session.auth = (endpoint["username"], secret or "")
         case "auth_token":
             headers["Authorization"] = "Bearer " + (secret or "")
-    body = endpoint.get("body")
-    if body is not None and not any(h.lower() == "content-type" for h in headers):
+    if _effective_body(endpoint) is not None and not any(
+        h.lower() == "content-type" for h in headers
+    ):
         headers["Content-Type"] = "application/json"
     return session, headers
 
@@ -171,8 +184,7 @@ def _fetch(endpoint: dict, secret: str | None) -> tuple[object | None, str | Non
     timeout = endpoint.get("timeout")
     method = endpoint.get("method", "GET")
     allow_redirects = endpoint.get("follow_redirects", True)
-    # A request body only makes sense for POST; never smuggle one onto a GET.
-    body = endpoint.get("body") if method == "POST" else None
+    body = _effective_body(endpoint)
     try:
         response = session.request(
             method,
