@@ -327,27 +327,35 @@ def _element_labels(array: list, label_path: str | None) -> list[str]:
 def _process_endpoint(args: argparse.Namespace, index: int, endpoint: dict) -> list[dict]:
     """Fetch one endpoint and return its extraction results.
 
-    A fetch *or secret-resolution* failure is confined to this endpoint: every
-    configured extraction becomes a 'not found' result carrying the error, so the
-    endpoint's own services go bad while the rest of the section stays intact.
+    Any failure is confined to this endpoint: secret resolution, the fetch, and
+    the extraction (including a malformed endpoint blob, e.g. one missing 'url')
+    all fall back to a 'not found' result carrying the error, so the endpoint's
+    own services go bad while the rest of the section stays intact.
     """
-    url = endpoint["url"]
+    url = endpoint.get("url", "?")
 
     def _fail(error: str) -> list[dict]:
-        return [
-            _result(spec, spec["service"], False, None, error, url)
+        results = [
+            _result({"path": spec.get("path", "?")}, spec.get("service", "?"), False, None, error, url)
             for spec in endpoint.get("extractions", [])
+            if isinstance(spec, dict)
         ]
+        # Guarantee the failure is visible even when the blob carries no usable
+        # extractions to hang it on (otherwise it would silently vanish).
+        return results or [_result({"path": "?"}, url, False, None, error, url)]
 
     try:
         secret = _reveal_secret(args, f"secret_{index}") if endpoint.get("auth") else None
     except Exception as exc:  # e.g. a stale/missing password-store reference
         return _fail(f"Secret resolution failed: {exc}")
 
-    document, error = _fetch(endpoint, secret)
-    if error is not None:
-        return _fail(error)
-    return _extract(document, endpoint.get("extractions", []), url)
+    try:
+        document, error = _fetch(endpoint, secret)
+        if error is not None:
+            return _fail(error)
+        return _extract(document, endpoint.get("extractions", []), url)
+    except Exception as exc:  # malformed endpoint blob, unexpected extraction error, ...
+        return _fail(f"Endpoint processing failed: {exc}")
 
 
 def main(argv: Sequence[str] | None = None) -> int:
