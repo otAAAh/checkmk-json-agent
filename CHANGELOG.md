@@ -7,6 +7,7 @@ Generated from the git history by `scripts/gen_changelog.py`.
 
 ### Other
 
+- Add release pipeline: tag-triggered MKP build + per-version changelog (ee3cfae)
 - Bring JSON API Explorer up to 0.3.0 feature parity (cd37fb3)
 - Ship localized Setup UI strings (German) (0e56e1a)
 
@@ -27,6 +28,11 @@ Generated from the git history by `scripts/gen_changelog.py`.
 - Support multiple endpoints per rule (c4fe4e6)
 - Support nested [*] array wildcards via cartesian-product expansion (2e8cda9)
 - Support bracket-quoted path segments for keys containing '.' or '[' (4acf1ab)
+
+## [0.1.0] - 2026-06-29
+
+### Other
+
 - Add SVG icon (repo logo / social image) (7076450)
 - Tighten Exchange listing copy (more concise, sales-forward) (2c6b366)
 - README: add CI and license badges (053f319)
