@@ -10,10 +10,10 @@ jobs:
   lint-and-build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           fetch-depth: 0 # full history + tags so the changelog check can diff versions
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: "3.12"
       # Pinned to the versions used for local development, for parity.
@@ -49,7 +49,7 @@ jobs:
     container:
       image: checkmk/check-mk-raw:2.4.0-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - name: Locate the Checkmk site Python
         run: echo "SITE_PY=$(ls /omd/versions/*/bin/python3 | head -1)" >> "$GITHUB_ENV"
       - name: Show versions
