@@ -60,5 +60,20 @@ jobs:
         run: |
           "$SITE_PY" -m pytest tests -q
 
+  # The standalone Explorer (explorer/index.html) is a hand-written mirror of the
+  # config schema; this drives its real output generators (via Node) and checks
+  # they still cover every required ruleset field. Runs on a plain runner - it
+  # needs Node and only AST-parses the ruleset, so no Checkmk site is required.
+  explorer:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: "3.12"
+      - run: pip install pytest==8.3.4
+      - name: Explorer stays in sync with the ruleset schema
+        run: python3 -m pytest tests/test_explorer.py -q
+
 # To run the suite locally without the container, point make at a Checkmk dev venv:
 #   PYTHON=/path/to/checkmk/.venv/bin/python make test
