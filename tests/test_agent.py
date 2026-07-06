@@ -183,20 +183,33 @@ def test_build_session_basic_auth_and_headers(agent):
     assert headers["X-Api"] == "v1"
 
 
-def _capture_request(agent, monkeypatch):
+class _FakeResponse:
+    def __init__(self, body=b'{"ok": 1}', status_code=200, headers=None):
+        self._body = body
+        self.status_code = status_code
+        self.headers = headers or {}
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_exc):
+        return False
+
+    def raise_for_status(self):
+        pass
+
+    def iter_content(self, chunk_size=65536):
+        for start in range(0, len(self._body), chunk_size):
+            yield self._body[start : start + chunk_size]
+
+
+def _capture_request(agent, monkeypatch, response=None):
     """Patch the session so _fetch records the kwargs it would send."""
     captured = {}
 
-    class _FakeResponse:
-        def raise_for_status(self):
-            pass
-
-        def json(self):
-            return {"ok": 1}
-
     def fake_request(_self, method, url, **kwargs):
         captured.update(kwargs, method=method, url=url)
-        return _FakeResponse()
+        return response or _FakeResponse()
 
     monkeypatch.setattr(agent.requests.Session, "request", fake_request)
     return captured
@@ -213,6 +226,56 @@ def test_fetch_follows_redirects_by_default(agent, monkeypatch):
     captured = _capture_request(agent, monkeypatch)
     agent._fetch({"url": "http://x"}, None)
     assert captured["allow_redirects"] is True
+
+
+def test_fetch_get_does_not_send_a_body(agent, monkeypatch):
+    captured = _capture_request(agent, monkeypatch)
+    agent._fetch({"url": "http://x", "method": "GET", "body": "should-be-ignored"}, None)
+    assert captured["data"] is None
+
+
+def test_fetch_post_sends_the_body(agent, monkeypatch):
+    captured = _capture_request(agent, monkeypatch)
+    agent._fetch({"url": "http://x", "method": "POST", "body": "payload"}, None)
+    assert captured["data"] == "payload"
+
+
+def test_fetch_rejects_oversized_response(agent, monkeypatch):
+    monkeypatch.setattr(agent, "_MAX_RESPONSE_BYTES", 8)
+    _capture_request(agent, monkeypatch, response=_FakeResponse(body=b"0123456789" * 2))
+    doc, error = agent._fetch({"url": "http://x"}, None)
+    assert doc is None
+    assert "exceeds" in error
+
+
+def test_fetch_reports_unexpected_redirect_when_disabled(agent, monkeypatch):
+    response = _FakeResponse(body=b"", status_code=302, headers={"Location": "http://internal"})
+    _capture_request(agent, monkeypatch, response=response)
+    doc, error = agent._fetch({"url": "http://x", "follow_redirects": False}, None)
+    assert doc is None
+    assert "Unexpected 302 redirect to http://internal" in error
+
+
+def test_fetch_non_json_response_is_reported(agent, monkeypatch):
+    _capture_request(agent, monkeypatch, response=_FakeResponse(body=b"<html>nope</html>"))
+    doc, error = agent._fetch({"url": "http://x"}, None)
+    assert doc is None
+    assert error.startswith("Response is not valid JSON")
+
+
+def test_process_endpoint_isolates_secret_failure(agent, monkeypatch):
+    def boom(_args, _name):
+        raise RuntimeError("password store entry gone")
+
+    monkeypatch.setattr(agent, "_reveal_secret", boom)
+    endpoint = {
+        "url": "http://x",
+        "auth": "auth_token",
+        "extractions": [{"path": "s", "service": "S"}],
+    }
+    (result,) = agent._process_endpoint(agent.parse_arguments(["--endpoint", "{}"]), 0, endpoint)
+    assert result["found"] is False
+    assert result["error"].startswith("Secret resolution failed")
 
 
 def test_parse_arguments_endpoints_without_auth(agent):

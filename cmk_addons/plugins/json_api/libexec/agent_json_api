@@ -26,6 +26,7 @@ import json
 import re
 import sys
 from collections.abc import Sequence
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import requests
@@ -128,6 +129,29 @@ def parse_arguments(argv: Sequence[str]) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
+# Cap the response body we buffer and parse, so a monitored endpoint returning
+# a huge (or endless) body cannot exhaust memory on the Checkmk server.
+_MAX_RESPONSE_BYTES = 50 * 1024 * 1024  # 50 MiB
+# Endpoints are fetched concurrently, but with a modest ceiling.
+_MAX_FETCH_WORKERS = 8
+
+
+class _ResponseTooLarge(Exception):
+    """The response body exceeded ``_MAX_RESPONSE_BYTES``."""
+
+
+def _read_capped(response: requests.Response, limit: int) -> bytes:
+    """Read the response body, refusing to buffer more than ``limit`` bytes."""
+    chunks: list[bytes] = []
+    total = 0
+    for chunk in response.iter_content(chunk_size=65536):
+        total += len(chunk)
+        if total > limit:
+            raise _ResponseTooLarge(f"Response exceeds the {limit}-byte limit")
+        chunks.append(chunk)
+    return b"".join(chunks)
+
+
 def _build_session(endpoint: dict, secret: str | None) -> tuple[requests.Session, dict[str, str]]:
     session = requests.Session()
     headers = {name: value for name, value in endpoint.get("headers", [])}
@@ -145,20 +169,40 @@ def _build_session(endpoint: dict, secret: str | None) -> tuple[requests.Session
 def _fetch(endpoint: dict, secret: str | None) -> tuple[object | None, str | None]:
     session, headers = _build_session(endpoint, secret)
     timeout = endpoint.get("timeout")
+    method = endpoint.get("method", "GET")
+    allow_redirects = endpoint.get("follow_redirects", True)
+    # A request body only makes sense for POST; never smuggle one onto a GET.
+    body = endpoint.get("body") if method == "POST" else None
     try:
         response = session.request(
-            endpoint.get("method", "GET"),
+            method,
             endpoint["url"],
-            data=endpoint.get("body"),
+            data=body,
             headers=headers,
             verify=endpoint.get("verify_cert", True),
-            allow_redirects=endpoint.get("follow_redirects", True),
+            allow_redirects=allow_redirects,
             timeout=timeout if timeout is not None else 30.0,
+            stream=True,  # so _read_capped can bound the buffered body
         )
-        response.raise_for_status()
-        return response.json(), None
+        with response:
+            response.raise_for_status()
+            # With redirects disabled a 3xx is not an error to requests, but it
+            # is not the JSON we asked for - report it clearly (this is the SSRF
+            # hardening path, where a silent "not valid JSON" would mislead).
+            if not allow_redirects and 300 <= response.status_code < 400:
+                location = response.headers.get("Location", "?")
+                return None, (
+                    f"Unexpected {response.status_code} redirect to {location} "
+                    "(redirects disabled)"
+                )
+            raw = _read_capped(response, _MAX_RESPONSE_BYTES)
+    except _ResponseTooLarge as exc:
+        return None, str(exc)
     except requests.exceptions.RequestException as exc:
         return None, f"Request failed: {exc}"
+
+    try:
+        return json.loads(raw), None
     except ValueError as exc:
         return None, f"Response is not valid JSON: {exc}"
 
@@ -283,27 +327,45 @@ def _element_labels(array: list, label_path: str | None) -> list[str]:
 def _process_endpoint(args: argparse.Namespace, index: int, endpoint: dict) -> list[dict]:
     """Fetch one endpoint and return its extraction results.
 
-    A fetch failure is confined to this endpoint: every configured extraction
-    becomes a 'not found' result carrying the error, so the endpoint's own
-    services go bad while the rest of the section stays intact.
+    A fetch *or secret-resolution* failure is confined to this endpoint: every
+    configured extraction becomes a 'not found' result carrying the error, so the
+    endpoint's own services go bad while the rest of the section stays intact.
     """
-    secret = _reveal_secret(args, f"secret_{index}") if endpoint.get("auth") else None
     url = endpoint["url"]
-    document, error = _fetch(endpoint, secret)
-    if error is not None:
+
+    def _fail(error: str) -> list[dict]:
         return [
             _result(spec, spec["service"], False, None, error, url)
             for spec in endpoint.get("extractions", [])
         ]
+
+    try:
+        secret = _reveal_secret(args, f"secret_{index}") if endpoint.get("auth") else None
+    except Exception as exc:  # e.g. a stale/missing password-store reference
+        return _fail(f"Secret resolution failed: {exc}")
+
+    document, error = _fetch(endpoint, secret)
+    if error is not None:
+        return _fail(error)
     return _extract(document, endpoint.get("extractions", []), url)
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = parse_arguments(sys.argv[1:] if argv is None else argv)
 
+    endpoints = [json.loads(raw) for raw in args.endpoint]
     results: list[dict] = []
-    for index, raw in enumerate(args.endpoint):
-        results.extend(_process_endpoint(args, index, json.loads(raw)))
+    if endpoints:
+        # Fetch endpoints concurrently so total runtime is the slowest endpoint,
+        # not the sum. pool.map preserves input order, keeping the merged section
+        # (and thus service-name disambiguation) deterministic across runs.
+        with ThreadPoolExecutor(max_workers=min(len(endpoints), _MAX_FETCH_WORKERS)) as pool:
+            per_endpoint = pool.map(
+                lambda item: _process_endpoint(args, item[0], item[1]),
+                enumerate(endpoints),
+            )
+            for endpoint_results in per_endpoint:
+                results.extend(endpoint_results)
 
     payload = {"results": results}
     sys.stdout.write("<<<json_api:sep(0)>>>\n")
