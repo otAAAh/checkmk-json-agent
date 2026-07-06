@@ -68,7 +68,7 @@ class Section:
 
 def _coerce_levels(raw: object) -> _Levels:
     match raw:
-        case ["fixed", [warn, crit]]:
+        case ["fixed", [(int() | float()) as warn, (int() | float()) as crit]]:
             return ("fixed", (float(warn), float(crit)))
         case ["no_levels", _] | None:
             return None

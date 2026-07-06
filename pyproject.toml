@@ -28,3 +28,9 @@ warn_redundant_casts = true
 disallow_untyped_defs = true
 # The cmk.* plugin APIs are only present inside a Checkmk site.
 ignore_missing_imports = true
+# The plugin ships several same-named modules (agent_based/json_api.py,
+# graphing/json_api.py, ...) that are distinct plugin files in a site, not one
+# package. These let mypy resolve them by their full path-derived name instead
+# of colliding on the bare "json_api" module name.
+namespace_packages = true
+explicit_package_bases = true

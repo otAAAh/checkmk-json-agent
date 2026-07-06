@@ -3,10 +3,25 @@ name: Release
 
 # Cut a release by pushing an annotated version tag:
 #   git tag -a vX.Y.Z -m "Release X.Y.Z" && git push origin vX.Y.Z
+#
+# Or rehearse/re-run against an existing tag from the Actions tab
+# (workflow_dispatch): pick the tag and leave "dry_run" on to build the mkp and
+# render the notes without publishing.
 on:
   push:
     tags:
       - "v[0-9]+.[0-9]+.[0-9]+"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing version tag to build, e.g. v0.3.0"
+        required: true
+        type: string
+      dry_run:
+        description: "Build and render notes but do NOT publish the release"
+        required: false
+        type: boolean
+        default: true
 
 permissions:
   contents: write # needed to create the GitHub Release
@@ -15,36 +30,83 @@ jobs:
   release:
     runs-on: ubuntu-latest
     steps:
+      - name: Resolve the release tag
+        id: tag
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            ref="${{ inputs.tag }}"
+          else
+            ref="${GITHUB_REF_NAME}"
+          fi
+          case "$ref" in
+            v[0-9]*.[0-9]*.[0-9]*) : ;;
+            *) echo "::error::'$ref' is not a vX.Y.Z tag"; exit 1 ;;
+          esac
+          echo "ref=$ref" >> "$GITHUB_OUTPUT"
+          echo "version=${ref#v}" >> "$GITHUB_OUTPUT"
+
       - uses: actions/checkout@v4
         with:
+          ref: ${{ steps.tag.outputs.ref }}
           fetch-depth: 0 # full history + tags so the changelog can diff versions
 
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
 
-      - name: Derive version from the tag
-        run: echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
-
       - name: Verify the tag matches the pyproject version
+        env:
+          VERSION: ${{ steps.tag.outputs.version }}
         run: |
           pyproject_version="$(python3 -c 'import tomllib,pathlib; print(tomllib.loads(pathlib.Path("pyproject.toml").read_text())["project"]["version"])')"
           if [ "$pyproject_version" != "$VERSION" ]; then
-            echo "::error::Tag $GITHUB_REF_NAME does not match pyproject version $pyproject_version"
+            echo "::error::Tag ${{ steps.tag.outputs.ref }} does not match pyproject version $pyproject_version"
             exit 1
           fi
 
-      - name: Build the MKP
-        run: python3 scripts/build_mkp.py
+      - name: Build the MKP and its checksum
+        env:
+          VERSION: ${{ steps.tag.outputs.version }}
+        run: |
+          python3 scripts/build_mkp.py
+          sha256sum "json_api-$VERSION.mkp" > SHA256SUMS
+          cat SHA256SUMS
 
-      - name: Generate the release notes
-        run: python3 scripts/gen_changelog.py --version "$VERSION" > release-notes.md
+      - name: Render the release notes
+        env:
+          VERSION: ${{ steps.tag.outputs.version }}
+        run: |
+          python3 scripts/gen_changelog.py --version "$VERSION" | tee release-notes.md
 
-      - name: Create the GitHub Release
+      - name: Decide whether this tag is the latest
+        id: latest
+        run: |
+          newest="$(git tag -l 'v[0-9]*.[0-9]*.[0-9]*' | sort -V | tail -1)"
+          if [ "${{ steps.tag.outputs.ref }}" = "$newest" ]; then
+            echo "flag=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "flag=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Publish the GitHub Release (idempotent)
+        if: ${{ github.event_name != 'workflow_dispatch' || !inputs.dry_run }}
         env:
           GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.tag.outputs.ref }}
+          VERSION: ${{ steps.tag.outputs.version }}
+          LATEST: ${{ steps.latest.outputs.flag }}
         run: |
-          gh release create "$GITHUB_REF_NAME" \
-            --title "$GITHUB_REF_NAME" \
-            --notes-file release-notes.md \
-            json_api-"$VERSION".mkp
+          assets="json_api-$VERSION.mkp SHA256SUMS"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG exists — updating notes and assets."
+            gh release edit "$TAG" --title "$TAG" --notes-file release-notes.md --latest="$LATEST"
+            gh release upload "$TAG" $assets --clobber
+          else
+            gh release create "$TAG" --title "$TAG" --notes-file release-notes.md --latest="$LATEST" $assets
+          fi
+
+      - name: Dry-run summary
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
+        run: |
+          echo "Dry run for ${{ steps.tag.outputs.ref }} — nothing published." >> "$GITHUB_STEP_SUMMARY"
+          echo "Built json_api-${{ steps.tag.outputs.version }}.mkp; notes rendered above." >> "$GITHUB_STEP_SUMMARY"

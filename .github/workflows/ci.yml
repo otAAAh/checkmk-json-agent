@@ -11,17 +11,33 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # full history + tags so the changelog check can diff versions
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      # Pinned to the ruff version used for local development, for formatting parity.
-      - run: pip install ruff==0.15.8
+      # Pinned to the versions used for local development, for parity.
+      - run: pip install ruff==0.15.8 mypy==1.13.0
       - name: Format check
         run: ruff format --check cmk_addons scripts tests
       - name: Lint
         run: ruff check cmk_addons scripts tests
+      - name: Type check
+        run: mypy cmk_addons scripts
       - name: Build MKP (stdlib only)
         run: python3 scripts/build_mkp.py
+      - name: Changelog is current (released sections)
+        run: |
+          python3 scripts/gen_changelog.py --stdout > /tmp/fresh-changelog.md
+          # Compare from the first version header onward, ignoring the volatile
+          # [Unreleased] section and the preamble. Released sections are derived
+          # purely from tags, so they should never drift from the committed file.
+          sed -n '/^## \[[0-9]/,$p' CHANGELOG.md > /tmp/committed-released.md
+          sed -n '/^## \[[0-9]/,$p' /tmp/fresh-changelog.md > /tmp/fresh-released.md
+          if ! diff -u /tmp/committed-released.md /tmp/fresh-released.md; then
+            echo "::error::CHANGELOG.md released sections are stale — run 'make changelog' and commit."
+            exit 1
+          fi
 
   # The pytest suite imports the cmk.* plugin APIs, which only exist inside a
   # Checkmk site. We therefore run it inside the official Checkmk container,
