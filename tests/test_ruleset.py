@@ -20,6 +20,12 @@ def test_valid_url_passes(ruleset):
     ruleset._validate_url("http://10.0.0.1:8080/status")  # must not raise
 
 
+@pytest.mark.parametrize("url", ["HTTP://host/x", "HTTPS://host/x", "Https://host/x"])
+def test_url_scheme_is_case_insensitive(ruleset, url):
+    # Schemes are case-insensitive per RFC 3986; requests accepts these.
+    ruleset._validate_url(url)  # must not raise
+
+
 @pytest.mark.parametrize("bad", ["app.example.com/health", "ftp://x", "/relative", ""])
 def test_url_without_http_scheme_rejected(ruleset, bad):
     with pytest.raises(ValidationError):
