@@ -278,6 +278,35 @@ def test_process_endpoint_isolates_secret_failure(agent, monkeypatch):
     assert result["error"].startswith("Secret resolution failed")
 
 
+def test_process_endpoint_isolates_extraction_failure(agent, monkeypatch):
+    def boom(*_args):
+        raise RuntimeError("bad path")
+
+    monkeypatch.setattr(agent, "_extract", boom)
+    monkeypatch.setattr(agent, "_fetch", lambda *_a: ({"ok": 1}, None))
+    endpoint = {"url": "http://x", "extractions": [{"path": "s", "service": "S"}]}
+    (result,) = agent._process_endpoint(agent.parse_arguments(["--endpoint", "{}"]), 0, endpoint)
+    assert result["found"] is False
+    assert result["error"].startswith("Endpoint processing failed")
+
+
+def test_process_endpoint_isolates_malformed_blob(agent):
+    # An endpoint blob missing 'url' must not take down the whole data source.
+    endpoint = {"extractions": [{"path": "s", "service": "S"}]}
+    (result,) = agent._process_endpoint(agent.parse_arguments(["--endpoint", "{}"]), 0, endpoint)
+    assert result["found"] is False
+    assert result["error"].startswith("Endpoint processing failed")
+
+
+def test_process_endpoint_failure_is_visible_without_extractions(agent, monkeypatch):
+    # Even with no extractions to hang it on, a failure must surface as a result.
+    monkeypatch.setattr(agent, "_fetch", lambda *_a: (None, "boom"))
+    endpoint = {"url": "http://x"}
+    (result,) = agent._process_endpoint(agent.parse_arguments(["--endpoint", "{}"]), 0, endpoint)
+    assert result["found"] is False
+    assert result["error"] == "boom"
+
+
 def test_parse_arguments_endpoints_without_auth(agent):
     args = agent.parse_arguments(["--endpoint", '{"url": "http://x"}'])
     assert args.endpoint == ['{"url": "http://x"}']
