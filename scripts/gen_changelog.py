@@ -21,6 +21,7 @@ full changelog instead of writing the file.
 from __future__ import annotations
 
 import argparse
+import functools
 import re
 import subprocess
 import sys
@@ -34,6 +35,17 @@ _VERSION_TAG = re.compile(r"^v(\d+)\.(\d+)\.(\d+)$")
 # Conventional-commit style prefix, e.g. "fix:", "feat(agent):", "ci!:".
 _PREFIX = re.compile(r"^(?P<type>[a-z]+)(?:\([^)]*\))?!?:\s*(?P<rest>.*)$")
 _SKIP_SUBJECT = re.compile(r"^(Merge |Bump version\b)")
+# A trailing "(#123)" PR reference, as GitHub's squash-merge appends.
+_PR_REF = re.compile(r"\s*\(#(\d+)\)\s*$")
+
+# Conventional-commit types we recognise. A leading token from this set is
+# stripped from the rendered line regardless of which section it maps to (so
+# "ci: run tests" renders as "Run tests", not "Ci: run tests"). An unrecognised
+# "word:" prefix (e.g. "Support X: Y") is left untouched.
+_KNOWN_TYPES = {
+    "feat", "feature", "fix", "bugfix", "ci", "docs", "doc", "test", "tests",
+    "refactor", "chore", "perf", "build", "style", "revert",
+}  # fmt: skip
 
 # Which section a commit's prefix maps to. Anything unrecognised -> "Other".
 _SECTIONS: tuple[tuple[str, set[str]], ...] = (
@@ -41,6 +53,13 @@ _SECTIONS: tuple[tuple[str, set[str]], ...] = (
     ("Fixes", {"fix", "bugfix"}),
     ("Other", set()),  # catch-all, keep last
 )
+
+
+@functools.lru_cache(maxsize=1)
+def _repo_url() -> str:
+    """The project's GitHub URL, from pyproject, for commit/PR links."""
+    data = tomllib.loads((REPO / "pyproject.toml").read_text())
+    return data["tool"]["mkp"]["download_url"].rstrip("/")
 
 
 def _git(*args: str) -> str:
@@ -83,16 +102,36 @@ def _commits(revrange: str) -> list[tuple[str, str]]:
     return commits
 
 
+def _cap(text: str) -> str:
+    return text[:1].upper() + text[1:]
+
+
 def _bucket(subject: str) -> tuple[str, str]:
-    """Return (section, cleaned-subject) for a commit subject."""
+    """Return (section, cleaned-subject) for a commit subject.
+
+    A recognised conventional-commit prefix is stripped and maps the commit to a
+    section; feat/fix get their own, every other known type falls under "Other".
+    An unrecognised "word:" prefix is preserved verbatim.
+    """
     match = _PREFIX.match(subject)
-    if match:
+    if match and match.group("type") in _KNOWN_TYPES:
         ctype = match.group("type")
         rest = match.group("rest") or subject
         for section, types in _SECTIONS:
             if ctype in types:
-                return section, rest[:1].upper() + rest[1:]
-    return "Other", subject[:1].upper() + subject[1:]
+                return section, _cap(rest)
+        return "Other", _cap(rest)
+    return "Other", _cap(subject)
+
+
+def _bullet(short: str, cleaned: str) -> str:
+    """A changelog bullet linking the commit (and a trailing PR ref, if any)."""
+    repo = _repo_url()
+    pr = _PR_REF.search(cleaned)
+    if pr:
+        number = pr.group(1)
+        cleaned = f"{cleaned[: pr.start()]} ([#{number}]({repo}/pull/{number}))"
+    return f"- {cleaned} ([`{short}`]({repo}/commit/{short}))"
 
 
 def _render_version(version: str, date: str | None, commits: list[tuple[str, str]]) -> str:
@@ -105,15 +144,22 @@ def _render_version(version: str, date: str | None, commits: list[tuple[str, str
     grouped: dict[str, list[str]] = {name: [] for name, _ in _SECTIONS}
     for short, subject in commits:
         section, cleaned = _bucket(subject)
-        grouped[section].append(f"- {cleaned} ({short})")
+        grouped[section].append(_bullet(short, cleaned))
 
+    # Only emit section headers when there's more than just "Other" to show;
+    # otherwise a repo that doesn't use conventional commits gets a pointless
+    # "### Other" under every version.
+    nonempty = [name for name, _ in _SECTIONS if grouped[name]]
+    show_headers = nonempty != ["Other"]
     for section, _ in _SECTIONS:
         entries = grouped[section]
-        if entries:
+        if not entries:
+            continue
+        if show_headers:
             lines.append(f"### {section}")
             lines.append("")
-            lines.extend(entries)
-            lines.append("")
+        lines.extend(entries)
+        lines.append("")
     return "\n".join(lines)
 
 

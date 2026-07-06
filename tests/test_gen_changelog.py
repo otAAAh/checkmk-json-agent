@@ -25,13 +25,36 @@ def test_bucket_feat_and_fix_are_stripped_and_capitalised():
     assert gen_changelog._bucket("bugfix: another") == ("Fixes", "Another")
 
 
+def test_bucket_other_known_prefixes_are_stripped_too():
+    # Regression for the "Ci: run tests" bug: a recognised non-feat/fix prefix
+    # must still be stripped, landing under Other without its type token.
+    assert gen_changelog._bucket("ci: run tests") == ("Other", "Run tests")
+    assert gen_changelog._bucket("docs: update readme") == ("Other", "Update readme")
+    assert gen_changelog._bucket("chore(deps): bump") == ("Other", "Bump")
+
+
 def test_bucket_plain_subject_falls_through_to_other():
     assert gen_changelog._bucket("Add a plain feature") == ("Other", "Add a plain feature")
     # A leading lowercase word without a colon is not a conventional prefix.
     assert gen_changelog._bucket("tighten copy") == ("Other", "Tighten copy")
+    # An unrecognised "word:" prefix is preserved verbatim (not stripped).
+    assert gen_changelog._bucket("Support X: do Y") == ("Other", "Support X: do Y")
 
 
-def test_render_version_groups_sections_in_order():
+def test_bullet_links_commit_and_trailing_pr(monkeypatch):
+    monkeypatch.setattr(gen_changelog, "_repo_url", lambda: "https://example.com/o/r")
+    assert (
+        gen_changelog._bullet("abc1234", "A change")
+        == "- A change ([`abc1234`](https://example.com/o/r/commit/abc1234))"
+    )
+    bullet = gen_changelog._bullet("abc1234", "Squashed thing (#42)")
+    assert "([#42](https://example.com/o/r/pull/42))" in bullet
+    assert "([`abc1234`](https://example.com/o/r/commit/abc1234))" in bullet
+    assert "(#42)" not in bullet.replace("[#42]", "")  # the raw ref was rewritten
+
+
+def test_render_version_groups_sections_in_order(monkeypatch):
+    monkeypatch.setattr(gen_changelog, "_repo_url", lambda: "https://example.com/o/r")
     rendered = gen_changelog._render_version(
         "1.2.3",
         "2026-01-01",
@@ -39,11 +62,19 @@ def test_render_version_groups_sections_in_order():
     )
     assert "## [1.2.3] - 2026-01-01" in rendered
     assert "### Features" in rendered
-    assert "- Shiny (aaa1111)" in rendered
+    assert "- Shiny (" in rendered
     assert "### Other" in rendered
-    assert "- Just a change (bbb2222)" in rendered
+    assert "- Just a change (" in rendered
     # Features must be rendered before Other.
     assert rendered.index("### Features") < rendered.index("### Other")
+
+
+def test_render_version_omits_headers_when_only_other(monkeypatch):
+    monkeypatch.setattr(gen_changelog, "_repo_url", lambda: "https://example.com/o/r")
+    rendered = gen_changelog._render_version("1.0.0", "2026-01-01", [("aaa1111", "just a change")])
+    assert "### Other" not in rendered
+    assert "### Features" not in rendered
+    assert "- Just a change (" in rendered
 
 
 def test_render_version_without_date_and_without_commits():
