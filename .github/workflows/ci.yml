@@ -42,23 +42,47 @@ jobs:
           fi
 
   # The pytest suite imports the cmk.* plugin APIs, which only exist inside a
-  # Checkmk site. We therefore run it inside the official Checkmk container,
-  # whose site Python already ships pytest, requests and pydantic.
+  # Checkmk site, so we run it inside the official Checkmk container(s), whose
+  # site Python already ships pytest, requests and pydantic.
+  #
+  # The plugin targets 2.4+, and the agent branches on the password-store API
+  # (public cmk.password_store.v1_unstable on 2.5+, internal fallback on 2.4),
+  # so we exercise BOTH lines: the stable 2.4 image and the newest 2.5 build.
+  # 2.5 has no floating '-latest' tag yet and its dated dailies are eventually
+  # pruned, so the 2.5 tag is resolved at run time instead of hard-coded.
   test:
     runs-on: ubuntu-latest
-    container:
-      image: checkmk/check-mk-raw:2.4.0-latest
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-      - name: Locate the Checkmk site Python
-        run: echo "SITE_PY=$(ls /omd/versions/*/bin/python3 | head -1)" >> "$GITHUB_ENV"
-      - name: Show versions
+      - name: Resolve the Checkmk images to test against
+        id: images
         run: |
-          "$SITE_PY" --version
-          "$SITE_PY" -m pytest --version
-      - name: Run tests
+          set -euo pipefail
+          newest_daily() {
+            curl -fsSL "https://hub.docker.com/v2/repositories/checkmk/check-mk-raw/tags/?page_size=100&name=$1" \
+              | python3 -c "import sys, json; ts=[t['name'] for t in json.load(sys.stdin)['results'] if t['name'].startswith('$1')]; print(sorted(ts)[-1] if ts else '')"
+          }
+          images="checkmk/check-mk-raw:2.4.0-latest"
+          v25="$(newest_daily 2.5.0-2 || true)"
+          [ -n "$v25" ] && images="$images checkmk/check-mk-raw:$v25"
+          echo "list=$images" >> "$GITHUB_OUTPUT"
+          echo "Testing against: $images"
+      - name: Run pytest inside each Checkmk site Python
         run: |
-          "$SITE_PY" -m pytest tests -q
+          set -uo pipefail
+          rc=0
+          for img in ${{ steps.images.outputs.list }}; do
+            echo "::group::$img"
+            docker run --rm --entrypoint bash -v "$PWD:/w" -w /w "$img" -c '
+              set -e
+              SITE_PY="$(ls /omd/versions/*/bin/python3 | head -1)"
+              "$SITE_PY" --version
+              "$SITE_PY" -m pytest --version
+              "$SITE_PY" -m pytest tests -q
+            ' || { echo "::error::tests failed on $img"; rc=1; }
+            echo "::endgroup::"
+          done
+          exit $rc
 
 # To run the suite locally without the container, point make at a Checkmk dev venv:
 #   PYTHON=/path/to/checkmk/.venv/bin/python make test
