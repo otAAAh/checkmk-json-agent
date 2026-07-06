@@ -25,6 +25,8 @@ on:
 
 permissions:
   contents: write # needed to create the GitHub Release
+  id-token: write # OIDC token for build-provenance attestation
+  attestations: write # write the provenance attestation for the mkp
 
 jobs:
   release:
@@ -71,6 +73,16 @@ jobs:
           python3 scripts/build_mkp.py
           sha256sum "json_api-$VERSION.mkp" > SHA256SUMS
           cat SHA256SUMS
+
+      # Cryptographically attest that this mkp was built by this workflow from
+      # this commit, so consumers can verify its provenance with
+      # `gh attestation verify json_api-X.Y.Z.mkp --repo otAAAh/checkmk-json-agent`.
+      # Only on a real publish (a dry run builds but must not attest).
+      - name: Attest build provenance for the MKP
+        if: ${{ github.event_name != 'workflow_dispatch' || !inputs.dry_run }}
+        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
+        with:
+          subject-path: json_api-${{ steps.tag.outputs.version }}.mkp
 
       - name: Render the release notes
         env:
