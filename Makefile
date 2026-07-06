@@ -4,10 +4,10 @@ PYTHON ?= python3
 
 XGETTEXT ?= xgettext
 
-.PHONY: help format lint typecheck test mkp pot clean
+.PHONY: help format lint typecheck test mkp pot changelog release-notes clean
 
 help:
-	@echo "Targets: format | lint | typecheck | test | mkp | pot | clean"
+	@echo "Targets: format | lint | typecheck | test | mkp | pot | changelog | release-notes | clean"
 
 format:
 	$(RUFF) format cmk_addons scripts
@@ -34,6 +34,14 @@ pot:
 		-o locales/json_api.pot \
 		cmk_addons/plugins/json_api/rulesets/special_agent.py \
 		cmk_addons/plugins/json_api/graphing/json_api.py
+
+# Regenerate CHANGELOG.md from the git history (one section per version).
+changelog:
+	$(PYTHON) scripts/gen_changelog.py
+
+# Print the release notes for the current pyproject version (release body).
+release-notes:
+	$(PYTHON) scripts/gen_changelog.py --version $$($(PYTHON) -c 'import tomllib,pathlib; print(tomllib.loads(pathlib.Path("pyproject.toml").read_text())["project"]["version"])')
 
 clean:
 	rm -f *.mkp
