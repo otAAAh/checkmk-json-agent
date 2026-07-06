@@ -42,6 +42,13 @@ def _validate_regex(value: str) -> None:
         ) from exc
 
 
+def _validate_url(value: str) -> None:
+    if not re.match(r"^https?://", value):
+        raise validators.ValidationError(
+            Message("The URL must start with 'http://' or 'https://'.")
+        )
+
+
 def _authentication() -> CascadingSingleChoice:
     return CascadingSingleChoice(
         title=Title("Authentication"),
@@ -198,7 +205,7 @@ def _endpoint() -> Dictionary:
                         "Full URL of the JSON endpoint, including scheme, "
                         "e.g. 'https://app.example.com/actuator/health'."
                     ),
-                    custom_validate=(validators.LengthInRange(min_value=1),),
+                    custom_validate=(validators.LengthInRange(min_value=1), _validate_url),
                 ),
             ),
             "method": DictElement(

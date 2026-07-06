@@ -112,6 +112,33 @@ def test_check_levels_on_non_numeric_warns(check):
     assert "not numeric" in result.summary
 
 
+def test_check_levels_on_non_numeric_warns_even_with_expected(check):
+    # The expected regex matches, but the meaningless levels config is still
+    # surfaced (previously it was hidden behind the OK regex result).
+    section = _section(
+        check,
+        [_entry("Str", value="UP", expected="UP", levels_upper=["fixed", [5.0, 10.0]])],
+    )
+    result = list(check.check_json_api("Str", section))[0]
+    assert result.state == State.WARN
+    assert "not numeric" in result.summary
+
+
+def test_as_number_rejects_non_finite(check):
+    assert check._as_number("inf") is None
+    assert check._as_number("nan") is None
+    assert check._as_number("-inf") is None
+    assert check._as_number(3) == 3.0
+    assert check._as_number("2.5") == 2.5
+
+
+def test_check_non_finite_value_is_not_treated_as_metric(check):
+    # "inf" is not a usable number: no metric, and levels don't apply to it.
+    section = _section(check, [_entry("Inf", value="inf")])
+    results = list(check.check_json_api("Inf", section))
+    assert not any(isinstance(r, Metric) for r in results)
+
+
 def test_check_boolean_rendered_and_matched_as_json(check):
     # JSON true -> Python True must render/match as "true", not "True".
     section = _section(check, [_entry("Up", value=True, expected="true")])

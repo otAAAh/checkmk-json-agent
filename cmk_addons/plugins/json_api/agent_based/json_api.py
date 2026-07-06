@@ -8,6 +8,7 @@ values get levels + a metric; string values get an optional regex match.
 """
 
 import json
+import math
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -122,13 +123,17 @@ def _as_number(value: object) -> float | None:
     if isinstance(value, bool):
         return None
     if isinstance(value, (int, float)):
-        return float(value)
-    if isinstance(value, str):
+        number = float(value)
+    elif isinstance(value, str):
         try:
-            return float(value)
+            number = float(value)
         except ValueError:
             return None
-    return None
+    else:
+        return None
+    # Reject inf/nan: float("inf")/"nan" parse but make no sense as a metric or
+    # a levels comparison, and would render confusingly.
+    return number if math.isfinite(number) else None
 
 
 def _context(entry: Item) -> CheckResult:
@@ -151,7 +156,9 @@ def _context(entry: Item) -> CheckResult:
 
 def _value_results(entry: Item) -> CheckResult:
     number = _as_number(entry.value)
-    if number is not None and (entry.levels_upper or entry.levels_lower):
+    has_levels = bool(entry.levels_upper or entry.levels_lower)
+
+    if number is not None and has_levels:
         yield from check_levels(
             number,
             levels_upper=entry.levels_upper,
@@ -160,6 +167,12 @@ def _value_results(entry: Item) -> CheckResult:
             label="Value",
         )
         return
+
+    # Levels configured on a value that is not numeric: a misconfiguration we
+    # surface rather than silently pass - even when an 'expected' regex is also
+    # set (otherwise it would be hidden behind the regex result).
+    misconfigured_levels = has_levels and number is None
+    misconfig_note = " (levels configured but value is not numeric)"
 
     if entry.expected is not None:
         text = _render_value(entry.value)
@@ -171,20 +184,17 @@ def _value_results(entry: Item) -> CheckResult:
                 summary=f"Invalid expected pattern '{entry.expected}': {exc}",
             )
             return
-        yield Result(
-            state=State.OK if ok else State.CRIT,
-            summary=f"Value: {text}" + ("" if ok else f" (expected to match '{entry.expected}')"),
-        )
+        summary = f"Value: {text}" + ("" if ok else f" (expected to match '{entry.expected}')")
+        if ok and misconfigured_levels:
+            # The regex matched, but flag the meaningless levels config.
+            yield Result(state=State.WARN, summary=f"Value: {text}{misconfig_note}")
+        else:
+            yield Result(state=State.OK if ok else State.CRIT, summary=summary)
         return
 
-    if entry.levels_upper or entry.levels_lower:
-        # Levels were configured but the value is not numeric - surface it
-        # instead of silently passing.
+    if misconfigured_levels:
         yield Result(
-            state=State.WARN,
-            summary=(
-                f"Value: {_render_value(entry.value)} (levels configured but value is not numeric)"
-            ),
+            state=State.WARN, summary=f"Value: {_render_value(entry.value)}{misconfig_note}"
         )
         return
 
