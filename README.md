@@ -42,8 +42,8 @@ Targets **Checkmk 2.4+** and the current stable plugin APIs
 
 ## Installation
 
-Download the `.mkp` (see [Building](#building-from-source) until releases are
-published), then, as the site user:
+Download the `.mkp` from the [Releases](https://github.com/otAAAh/checkmk-json-agent/releases)
+page (or [build it](#building-from-source)), then, as the site user:
 
 ```sh
 mkp add json_api-0.3.0.mkp
@@ -213,6 +213,26 @@ msgmerge --update locales/de/LC_MESSAGES/multisite.po locales/json_api.pot
 
 Then edit the `msgstr` entries and rebuild with `make mkp` — no manual `.mo`
 compilation needed.
+
+## Releasing
+
+Releases are cut from annotated version tags. See [`CHANGELOG.md`](CHANGELOG.md)
+for the per-version history.
+
+1. Bump `version` in `pyproject.toml` and the `mkp add`/`mkp enable` examples above.
+2. `make changelog` to refresh `CHANGELOG.md`, then commit both.
+3. Tag and push:
+
+   ```sh
+   git tag -a vX.Y.Z -m "Release X.Y.Z"
+   git push origin main vX.Y.Z
+   ```
+
+The [`Release` workflow](.github/workflows/release.yml) triggers on the tag: it
+verifies the tag matches `pyproject.toml`, builds the MKP, generates that
+version's notes with `scripts/gen_changelog.py --version X.Y.Z`, and publishes a
+GitHub Release with the `.mkp` attached. Preview the notes locally with
+`make release-notes`.
 
 ## Development
 
