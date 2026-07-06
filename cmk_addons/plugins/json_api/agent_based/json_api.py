@@ -184,12 +184,20 @@ def _value_results(entry: Item) -> CheckResult:
                 summary=f"Invalid expected pattern '{entry.expected}': {exc}",
             )
             return
-        summary = f"Value: {text}" + ("" if ok else f" (expected to match '{entry.expected}')")
-        if ok and misconfigured_levels:
-            # The regex matched, but flag the meaningless levels config.
-            yield Result(state=State.WARN, summary=f"Value: {text}{misconfig_note}")
+        # A non-matching value is CRIT; a match is OK, downgraded to WARN when
+        # levels were also (meaninglessly) configured. Either way the
+        # levels-misconfig note is appended, so it is never hidden behind the
+        # regex result - CRIT still wins over WARN in the failed-match case.
+        note = misconfig_note if misconfigured_levels else ""
+        if not ok:
+            yield Result(
+                state=State.CRIT,
+                summary=f"Value: {text} (expected to match '{entry.expected}'){note}",
+            )
+        elif misconfigured_levels:
+            yield Result(state=State.WARN, summary=f"Value: {text}{note}")
         else:
-            yield Result(state=State.OK if ok else State.CRIT, summary=summary)
+            yield Result(state=State.OK, summary=f"Value: {text}")
         return
 
     if misconfigured_levels:

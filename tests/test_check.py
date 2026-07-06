@@ -124,6 +124,19 @@ def test_check_levels_on_non_numeric_warns_even_with_expected(check):
     assert "not numeric" in result.summary
 
 
+def test_check_failed_match_still_surfaces_misconfigured_levels(check):
+    # The regex fails (CRIT) and levels are also misconfigured: the value stays
+    # CRIT but the levels-misconfig note is appended, not hidden behind it.
+    section = _section(
+        check,
+        [_entry("Str", value="DOWN", expected="UP", levels_upper=["fixed", [5.0, 10.0]])],
+    )
+    result = list(check.check_json_api("Str", section))[0]
+    assert result.state == State.CRIT
+    assert "expected to match 'UP'" in result.summary
+    assert "not numeric" in result.summary
+
+
 def test_as_number_rejects_non_finite(check):
     assert check._as_number("inf") is None
     assert check._as_number("nan") is None
