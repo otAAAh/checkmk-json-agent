@@ -1,16 +1,15 @@
-# German translation for the checkmk-json-agent Setup UI strings.
+# Portuguese (Portugal) translation for the checkmk-json-agent Setup UI strings.
 # Copyright (C) 2026 Benjamin Knapp
 # This file is distributed under the same license as the checkmk-json-agent package.
 #
 msgid ""
 msgstr ""
-"Project-Id-Version: checkmk-json-agent 0.2.0\n"
+"Project-Id-Version: checkmk-json-agent\n"
 "Report-Msgid-Bugs-To: https://github.com/otAAAh/checkmk-json-agent/issues\n"
-"POT-Creation-Date: 2026-07-06 13:52+0200\n"
-"PO-Revision-Date: 2026-07-03 10:30+0200\n"
-"Last-Translator: Benjamin Knapp\n"
-"Language-Team: German\n"
-"Language: de\n"
+"PO-Revision-Date: 2026-07-06 12:00+0000\n"
+"Last-Translator: checkmk-json-agent contributors\n"
+"Language-Team: Portuguese (Portugal)\n"
+"Language: pt_PT\n"
 "MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
@@ -18,31 +17,31 @@ msgstr ""
 #: cmk_addons/plugins/json_api/rulesets/special_agent.py:41
 #, python-format
 msgid "Invalid regular expression: %s"
-msgstr "Ungültiger regulärer Ausdruck: %s"
+msgstr "Expressão regular inválida: %s"
 
 #: cmk_addons/plugins/json_api/rulesets/special_agent.py:49
 msgid "The URL must start with 'http://' or 'https://'."
-msgstr "Die URL muss mit 'http://' oder 'https://' beginnen."
+msgstr "O URL deve começar por 'http://' ou 'https://'."
 
 #: cmk_addons/plugins/json_api/rulesets/special_agent.py:55
 msgid "Authentication"
-msgstr "Authentifizierung"
+msgstr "Autenticação"
 
 #: cmk_addons/plugins/json_api/rulesets/special_agent.py:60
 msgid "Basic authentication (username / password)"
-msgstr "Basis-Authentifizierung (Benutzername / Passwort)"
+msgstr "Autenticação básica (nome de utilizador / palavra-passe)"
 
 #: cmk_addons/plugins/json_api/rulesets/special_agent.py:66
 msgid "Username"
-msgstr "Benutzername"
+msgstr "Nome de utilizador"
 
 #: cmk_addons/plugins/json_api/rulesets/special_agent.py:73
 msgid "Password"
-msgstr "Passwort"
+msgstr "Palavra-passe"
 
 #: cmk_addons/plugins/json_api/rulesets/special_agent.py:82
 msgid "Bearer token"
-msgstr "Bearer-Token"
+msgstr "Token Bearer"
 
 #: cmk_addons/plugins/json_api/rulesets/special_agent.py:88
 msgid "Token"
@@ -50,23 +49,23 @@ msgstr "Token"
 
 #: cmk_addons/plugins/json_api/rulesets/special_agent.py:89
 msgid "Sent as 'Authorization: Bearer <token>'."
-msgstr "Wird als 'Authorization: Bearer <token>' gesendet."
+msgstr "Enviado como 'Authorization: Bearer <token>'."
 
 #: cmk_addons/plugins/json_api/rulesets/special_agent.py:102
 msgid "Field to monitor"
-msgstr "Zu überwachendes Feld"
+msgstr "Campo a monitorizar"
 
 #: cmk_addons/plugins/json_api/rulesets/special_agent.py:107
 msgid "Service name"
-msgstr "Dienstname"
+msgstr "Nome do serviço"
 
 #: cmk_addons/plugins/json_api/rulesets/special_agent.py:108
 msgid "Becomes the Checkmk service description for this field."
-msgstr "Wird zur Checkmk-Dienstbeschreibung für dieses Feld."
+msgstr "Torna-se a descrição do serviço Checkmk para este campo."
 
 #: cmk_addons/plugins/json_api/rulesets/special_agent.py:115
 msgid "JSON path"
-msgstr "JSON-Pfad"
+msgstr "Caminho JSON"
 
 #: cmk_addons/plugins/json_api/rulesets/special_agent.py:117
 msgid ""
@@ -78,18 +77,17 @@ msgid ""
 "'[' can be addressed with bracket-quoted segments, e.g. \"data['foo.bar']."
 "value\"."
 msgstr ""
-"Punktnotierter Pfad in die JSON-Antwort, z. B. 'status', 'components.db."
-"status' oder 'items[0].count'. Verwenden Sie einen '[*]'-Platzhalter (z. B. "
-"'nodes[*].health'), um einen Dienst pro Array-Element zu erzeugen; mehrere "
-"'[*]'-Platzhalter (z. B. 'pods[*].containers[*].ready') bilden das "
-"kartesische Produkt, also einen Dienst pro Kombination. Ein führendes '$.' "
-"ist optional. Schlüssel, die selbst '.' oder '[' enthalten, können mit in "
-"Anführungszeichen gesetzten Segmenten in eckigen Klammern angesprochen "
-"werden, z. B. \"data['foo.bar'].value\"."
+"Caminho com pontos para a resposta JSON, p. ex. 'status', 'components.db."
+"status' ou 'items[0].count'. Utilize um carácter universal '[*]' (p. ex. "
+"'nodes[*].health') para criar um serviço por elemento do array; vários "
+"caracteres universais '[*]' (p. ex. 'pods[*].containers[*].ready') expandem "
+"o produto cartesiano, um serviço por combinação. Um '$.' inicial é opcional. "
+"As chaves que contêm '.' ou '[' podem ser referenciadas com segmentos entre "
+"parênteses retos e aspas, p. ex. \"data['foo.bar'].value\"."
 
 #: cmk_addons/plugins/json_api/rulesets/special_agent.py:134
 msgid "Item label path (for '[*]' wildcards)"
-msgstr "Beschriftungspfad für Elemente (bei '[*]'-Platzhaltern)"
+msgstr "Caminho da etiqueta do item (para caracteres universais '[*]')"
 
 #: cmk_addons/plugins/json_api/rulesets/special_agent.py:136
 msgid ""
@@ -99,29 +97,28 @@ msgid ""
 "is resolved at every level and the labels are joined with ' / ' (e.g. "
 "'<pod> / <container>'). Pick a field that is unique and stable across runs."
 msgstr ""
-"Wenn der Pfad einen '[*]'-Platzhalter enthält, liefert dieser optionale Pfad "
-"- relativ zu jedem Array-Element, z. B. 'name' oder 'id' - die Beschriftung, "
-"die an den Dienstnamen angehängt wird. Standardmäßig wird der Array-Index "
-"verwendet. Bei mehreren '[*]'-Platzhaltern wird er auf jeder Ebene aufgelöst "
-"und die Beschriftungen werden mit ' / ' verbunden (z. B. '<pod> / "
-"<container>'). Wählen Sie ein Feld, das eindeutig und über Läufe hinweg "
-"stabil ist."
+"Quando o caminho contém um carácter universal '[*]', este caminho opcional - "
+"relativo a cada elemento do array, p. ex. 'name' ou 'id' - fornece a "
+"etiqueta acrescentada ao nome do serviço. Por predefinição, utiliza o índice "
+"do array. Com vários caracteres universais '[*]', é resolvido em cada nível "
+"e as etiquetas são unidas com ' / ' (p. ex. '<pod> / <container>'). Escolha "
+"um campo que seja único e estável entre execuções."
 
 #: cmk_addons/plugins/json_api/rulesets/special_agent.py:149
 msgid "Unit (for numeric values)"
-msgstr "Einheit (für numerische Werte)"
+msgstr "Unidade (para valores numéricos)"
 
 #: cmk_addons/plugins/json_api/rulesets/special_agent.py:151
 msgid ""
 "Renders the metric and graph with this unit. Leave unset for a plain, unit-"
 "less value. Only affects numeric values."
 msgstr ""
-"Stellt die Metrik und den Graphen mit dieser Einheit dar. Für einen "
-"einfachen, einheitenlosen Wert leer lassen. Betrifft nur numerische Werte."
+"Representa a métrica e o gráfico com esta unidade. Deixe por definir para um "
+"valor simples, sem unidade. Afeta apenas valores numéricos."
 
 #: cmk_addons/plugins/json_api/rulesets/special_agent.py:155
 msgid "Count (integer)"
-msgstr "Anzahl (Ganzzahl)"
+msgstr "Contagem (inteiro)"
 
 #: cmk_addons/plugins/json_api/rulesets/special_agent.py:156
 msgid "Bytes (IEC: KiB, MiB, ...)"
@@ -129,39 +126,39 @@ msgstr "Bytes (IEC: KiB, MiB, ...)"
 
 #: cmk_addons/plugins/json_api/rulesets/special_agent.py:157
 msgid "Seconds (duration)"
-msgstr "Sekunden (Dauer)"
+msgstr "Segundos (duração)"
 
 #: cmk_addons/plugins/json_api/rulesets/special_agent.py:158
 msgid "Percent"
-msgstr "Prozent"
+msgstr "Percentagem"
 
 #: cmk_addons/plugins/json_api/rulesets/special_agent.py:160
 msgid "No unit"
-msgstr "Keine Einheit"
+msgstr "Sem unidade"
 
 #: cmk_addons/plugins/json_api/rulesets/special_agent.py:166
 msgid "Upper levels (for numeric values)"
-msgstr "Obergrenzen (für numerische Werte)"
+msgstr "Níveis superiores (para valores numéricos)"
 
 #: cmk_addons/plugins/json_api/rulesets/special_agent.py:175
 msgid "Lower levels (for numeric values)"
-msgstr "Untergrenzen (für numerische Werte)"
+msgstr "Níveis inferiores (para valores numéricos)"
 
 #: cmk_addons/plugins/json_api/rulesets/special_agent.py:184
 msgid "Expected value (regex)"
-msgstr "Erwarteter Wert (regulärer Ausdruck)"
+msgstr "Valor esperado (regex)"
 
 #: cmk_addons/plugins/json_api/rulesets/special_agent.py:186
 msgid ""
 "For string values: the service is OK only if the value fully matches this "
 "regular expression (e.g. 'UP|ok'). Otherwise CRIT."
 msgstr ""
-"Für Zeichenketten-Werte: Der Dienst ist nur OK, wenn der Wert vollständig "
-"auf diesen regulären Ausdruck passt (z. B. 'UP|ok'). Andernfalls CRIT."
+"Para valores de texto: o serviço fica OK apenas se o valor corresponder "
+"totalmente a esta expressão regular (p. ex. 'UP|ok'). Caso contrário, CRIT."
 
 #: cmk_addons/plugins/json_api/rulesets/special_agent.py:199
 msgid "Endpoint"
-msgstr "Endpunkt"
+msgstr "Endpoint"
 
 #: cmk_addons/plugins/json_api/rulesets/special_agent.py:204
 msgid "URL"
@@ -172,12 +169,12 @@ msgid ""
 "Full URL of the JSON endpoint, including scheme, e.g. 'https://app.example."
 "com/actuator/health'."
 msgstr ""
-"Vollständige URL des JSON-Endpunkts, einschließlich Schema, z. B. 'https://"
-"app.example.com/actuator/health'."
+"URL completo do endpoint JSON, incluindo o esquema, p. ex. 'https://app."
+"example.com/actuator/health'."
 
 #: cmk_addons/plugins/json_api/rulesets/special_agent.py:215
 msgid "HTTP method"
-msgstr "HTTP-Methode"
+msgstr "Método HTTP"
 
 #: cmk_addons/plugins/json_api/rulesets/special_agent.py:217
 msgid "GET"
@@ -189,31 +186,31 @@ msgstr "POST"
 
 #: cmk_addons/plugins/json_api/rulesets/special_agent.py:226
 msgid "Request body (for POST)"
-msgstr "Anfrage-Body (für POST)"
+msgstr "Corpo do pedido (para POST)"
 
 #: cmk_addons/plugins/json_api/rulesets/special_agent.py:232
 msgid "Additional request headers"
-msgstr "Zusätzliche Anfrage-Header"
+msgstr "Cabeçalhos de pedido adicionais"
 
 #: cmk_addons/plugins/json_api/rulesets/special_agent.py:237
 msgid "Header name"
-msgstr "Header-Name"
+msgstr "Nome do cabeçalho"
 
 #: cmk_addons/plugins/json_api/rulesets/special_agent.py:241
 msgid "Header value"
-msgstr "Header-Wert"
+msgstr "Valor do cabeçalho"
 
 #: cmk_addons/plugins/json_api/rulesets/special_agent.py:254
 msgid "Verify the TLS certificate"
-msgstr "TLS-Zertifikat überprüfen"
+msgstr "Verificar o certificado TLS"
 
 #: cmk_addons/plugins/json_api/rulesets/special_agent.py:255
 msgid "Disabling certificate verification is insecure."
-msgstr "Das Deaktivieren der Zertifikatsprüfung ist unsicher."
+msgstr "Desativar a verificação do certificado é inseguro."
 
 #: cmk_addons/plugins/json_api/rulesets/special_agent.py:262
 msgid "Follow HTTP redirects"
-msgstr "HTTP-Weiterleitungen folgen"
+msgstr "Seguir redirecionamentos HTTP"
 
 #: cmk_addons/plugins/json_api/rulesets/special_agent.py:264
 msgid ""
@@ -221,33 +218,34 @@ msgid ""
 "target that redirects (e.g. 3xx to an internal address) will then fail "
 "instead of being followed to the redirect location."
 msgstr ""
-"Standardmäßig aktiviert. In abgesicherten Umgebungen deaktivieren, um gegen "
-"SSRF zu härten: Ein Ziel, das weiterleitet (z. B. 3xx auf eine interne "
-"Adresse), schlägt dann fehl, anstatt zum Weiterleitungsziel zu folgen."
+"Ativado por predefinição. Desative em ambientes restritos para reforçar a "
+"proteção contra SSRF: um destino que redireciona (p. ex. 3xx para um "
+"endereço interno) passa a falhar em vez de ser seguido até ao local de "
+"redirecionamento."
 
 #: cmk_addons/plugins/json_api/rulesets/special_agent.py:275
 msgid "Request timeout (seconds)"
-msgstr "Anfrage-Zeitüberschreitung (Sekunden)"
+msgstr "Tempo limite do pedido (segundos)"
 
 #: cmk_addons/plugins/json_api/rulesets/special_agent.py:276
 msgid "Per-request timeout. Defaults to 30 seconds."
-msgstr "Zeitüberschreitung pro Anfrage. Standardwert: 30 Sekunden."
+msgstr "Tempo limite por pedido. Por predefinição, 30 segundos."
 
 #: cmk_addons/plugins/json_api/rulesets/special_agent.py:284
 msgid "Fields to monitor"
-msgstr "Zu überwachende Felder"
+msgstr "Campos a monitorizar"
 
 #: cmk_addons/plugins/json_api/rulesets/special_agent.py:286
 msgid ""
 "Each entry becomes one Checkmk service, built from the value found at the "
 "given JSON path."
 msgstr ""
-"Jeder Eintrag wird zu einem Checkmk-Dienst, gebildet aus dem Wert am "
-"angegebenen JSON-Pfad."
+"Cada entrada torna-se um serviço Checkmk, criado a partir do valor "
+"encontrado no caminho JSON indicado."
 
 #: cmk_addons/plugins/json_api/rulesets/special_agent.py:313
 msgid "Endpoints"
-msgstr "Endpunkte"
+msgstr "Endpoints"
 
 #: cmk_addons/plugins/json_api/rulesets/special_agent.py:315
 msgid ""
@@ -255,31 +253,31 @@ msgid ""
 "settings and extractions; all results are merged into one section. An "
 "endpoint that cannot be reached only affects its own services."
 msgstr ""
-"Ein oder mehrere HTTP/JSON-Endpunkte. Jeder wird mit eigenen "
-"Verbindungseinstellungen und Extraktionen abgerufen; alle Ergebnisse werden "
-"zu einem Abschnitt zusammengeführt. Ein nicht erreichbarer Endpunkt betrifft "
-"nur seine eigenen Dienste."
+"Um ou mais endpoints HTTP/JSON. Cada um é obtido com as suas próprias "
+"definições de ligação e extrações; todos os resultados são combinados numa "
+"única secção. Um endpoint que não possa ser alcançado afeta apenas os seus "
+"próprios serviços."
 
 #: cmk_addons/plugins/json_api/rulesets/special_agent.py:329
 msgid "Generic JSON API"
-msgstr "Generische JSON-API"
+msgstr "API JSON genérica"
 
 #: cmk_addons/plugins/json_api/graphing/json_api.py:19
 msgid "Value"
-msgstr "Wert"
+msgstr "Valor"
 
 #: cmk_addons/plugins/json_api/graphing/json_api.py:26
 msgid "Count"
-msgstr "Anzahl"
+msgstr "Contagem"
 
 #: cmk_addons/plugins/json_api/graphing/json_api.py:33
 msgid "Size"
-msgstr "Größe"
+msgstr "Tamanho"
 
 #: cmk_addons/plugins/json_api/graphing/json_api.py:40
 msgid "Duration"
-msgstr "Dauer"
+msgstr "Duração"
 
 #: cmk_addons/plugins/json_api/graphing/json_api.py:47
 msgid "Percentage"
-msgstr "Prozentsatz"
+msgstr "Percentagem"
