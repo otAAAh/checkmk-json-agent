@@ -17,7 +17,9 @@ jobs:
         with:
           python-version: "3.12"
       # Pinned to the versions used for local development, for parity.
-      - run: pip install ruff==0.15.8 mypy==1.13.0
+      # pydantic is needed for mypy to type-check the server-side call; the other
+      # runtime deps (cmk.*, requests) stay covered by ignore_missing_imports.
+      - run: pip install ruff==0.15.8 mypy==1.13.0 pydantic==2.11.7
       - name: Format check
         run: ruff format --check cmk_addons scripts tests
       - name: Lint
