@@ -4,10 +4,10 @@ PYTHON ?= python3
 
 XGETTEXT ?= xgettext
 
-.PHONY: help format lint typecheck test mkp pot changelog release-notes clean
+.PHONY: help format lint typecheck test mkp pot check-po changelog release-notes clean
 
 help:
-	@echo "Targets: format | lint | typecheck | test | mkp | pot | changelog | release-notes | clean"
+	@echo "Targets: format | lint | typecheck | test | mkp | pot | check-po | changelog | release-notes | clean"
 
 format:
 	$(RUFF) format cmk_addons scripts
@@ -34,6 +34,20 @@ pot:
 		-o locales/json_api.pot \
 		cmk_addons/plugins/json_api/rulesets/special_agent.py \
 		cmk_addons/plugins/json_api/graphing/json_api.py
+
+# Verify every shipped catalog is in sync with the current source strings.
+# Regenerates the template, then checks each .po has exactly the template's
+# msgids (catches a catalog that fell behind after a code change).
+check-po: pot
+	@rc=0; \
+	for po in locales/*/LC_MESSAGES/multisite.po; do \
+		echo "checking $$po"; \
+		msgcmp "$$po" locales/json_api.pot || rc=1; \
+	done; \
+	if [ $$rc -ne 0 ]; then \
+		echo "A catalog is out of sync — run 'make pot' then 'msgmerge --update <po> locales/json_api.pot' and translate the new strings." >&2; \
+		exit 1; \
+	fi
 
 # Regenerate CHANGELOG.md from the git history (one section per version).
 changelog:

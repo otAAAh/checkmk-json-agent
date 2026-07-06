@@ -6,6 +6,12 @@ on:
     branches: [main]
   pull_request:
 
+# Cancel an in-progress run when the same ref is pushed again (e.g. a new commit
+# on a PR), so superseded runs don't pile up and contend for runners.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   lint-and-build:
     runs-on: ubuntu-latest
@@ -16,10 +22,9 @@ jobs:
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
         with:
           python-version: "3.12"
-      # Pinned to the versions used for local development, for parity.
-      # pydantic is needed for mypy to type-check the server-side call; the other
-      # runtime deps (cmk.*, requests) stay covered by ignore_missing_imports.
-      - run: pip install ruff==0.15.8 mypy==1.13.0 pydantic==2.11.7
+      # Dev tooling is pinned in requirements-dev.txt (Dependabot-tracked). The
+      # runtime deps (cmk.*, requests) stay covered by mypy's ignore_missing_imports.
+      - run: pip install -r requirements-dev.txt
       - name: Format check
         run: ruff format --check cmk_addons scripts tests
       - name: Lint
@@ -40,6 +45,10 @@ jobs:
             echo "::error::CHANGELOG.md released sections are stale — run 'make changelog' and commit."
             exit 1
           fi
+      - name: Install gettext (for translation checks)
+        run: sudo apt-get update && sudo apt-get install -y gettext
+      - name: Translation catalogs are in sync with the source strings
+        run: make check-po
 
   # The pytest suite imports the cmk.* plugin APIs, which only exist inside a
   # Checkmk site, so we run it inside the official Checkmk container(s), whose
@@ -95,7 +104,7 @@ jobs:
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
         with:
           python-version: "3.12"
-      - run: pip install pytest==8.3.4
+      - run: pip install -r requirements-dev.txt
       - name: Explorer stays in sync with the ruleset schema
         run: python3 -m pytest tests/test_explorer.py -q
 
