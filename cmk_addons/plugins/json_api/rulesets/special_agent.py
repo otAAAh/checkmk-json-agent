@@ -43,7 +43,8 @@ def _validate_regex(value: str) -> None:
 
 
 def _validate_url(value: str) -> None:
-    if not re.match(r"^https?://", value):
+    # URL schemes are case-insensitive per RFC 3986 (requests accepts 'HTTP://').
+    if not re.match(r"^https?://", value, re.IGNORECASE):
         raise validators.ValidationError(
             Message("The URL must start with 'http://' or 'https://'.")
         )
