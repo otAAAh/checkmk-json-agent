@@ -3,6 +3,16 @@
 All notable changes to this project, one section per released version.
 Generated from the git history by `scripts/gen_changelog.py`.
 
+## [0.6.0] - 2026-07-08
+
+- Deps: bump pytest from 8.3.4 to 9.0.3 ([`27472a4`](https://github.com/otAAAh/checkmk-json-agent/commit/27472a4))
+- CI/repo maintenance hardening ([`10d7623`](https://github.com/otAAAh/checkmk-json-agent/commit/10d7623))
+- Localize the Setup UI into all Checkmk-supported languages ([`898e29c`](https://github.com/otAAAh/checkmk-json-agent/commit/898e29c))
+- Add CI guard that the Explorer stays in sync with the ruleset schema ([`8c4929b`](https://github.com/otAAAh/checkmk-json-agent/commit/8c4929b))
+- CI: test on Checkmk 2.4 + 2.5; attest mkp build provenance ([`e35e211`](https://github.com/otAAAh/checkmk-json-agent/commit/e35e211))
+- Bump the actions group with 4 updates ([`30d5569`](https://github.com/otAAAh/checkmk-json-agent/commit/30d5569))
+- Harden GitHub Actions: pin action SHAs, add CodeQL + Dependabot ([`3273e98`](https://github.com/otAAAh/checkmk-json-agent/commit/3273e98))
+
 ## [0.5.0] - 2026-07-06
 
 - Surface misconfigured levels even on a failed 'expected' match ([`8e0eb35`](https://github.com/otAAAh/checkmk-json-agent/commit/8e0eb35))
