@@ -1,0 +1,12 @@
+# SPDX-License-Identifier: GPL-2.0-only
+blank_issues_enabled: false
+contact_links:
+  - name: 💬 Question / how do I monitor X?
+    url: https://github.com/otAAAh/checkmk-json-agent/discussions/categories/q-a
+    about: For usage questions, JSON-path help, or "how do I…" — please ask in Discussions, not as an issue.
+  - name: 💡 Idea / feature request
+    url: https://github.com/otAAAh/checkmk-json-agent/discussions/categories/ideas
+    about: Float a feature idea in Discussions first so it can be discussed before any code.
+  - name: 🔒 Security vulnerability
+    url: https://github.com/otAAAh/checkmk-json-agent/security/advisories/new
+    about: Please report security problems privately — do NOT open a public issue. See SECURITY.md.

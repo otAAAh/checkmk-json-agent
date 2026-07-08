@@ -1,0 +1,76 @@
+# SPDX-License-Identifier: GPL-2.0-only
+name: 🐞 Bug report
+description: Something isn't working the way the docs say it should.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a bug! Please fill in as much as you can — it makes
+        reproduction far faster. **Redact any secrets** (tokens, passwords,
+        internal hostnames) from URLs, headers and sample responses.
+
+        For usage questions or "how do I…", please use
+        [Discussions → Q&A](https://github.com/otAAAh/checkmk-json-agent/discussions/categories/q-a)
+        instead. For security problems, see
+        [SECURITY.md](https://github.com/otAAAh/checkmk-json-agent/blob/main/SECURITY.md).
+  - type: checkboxes
+    attributes:
+      label: Preflight
+      options:
+        - label: I searched existing issues and this isn't a duplicate.
+          required: true
+        - label: I reproduced this against the latest release (or `main`).
+          required: true
+  - type: input
+    id: cmk-version
+    attributes:
+      label: Checkmk version and edition
+      placeholder: "e.g. 2.4.0p5 (Raw / Enterprise / Cloud)"
+    validations:
+      required: true
+  - type: input
+    id: plugin-version
+    attributes:
+      label: Plugin version
+      description: The version of the json_api MKP (see Setup → Extension packages, or the .mkp filename).
+      placeholder: "e.g. 0.6.0"
+    validations:
+      required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What did you see, and what did you expect instead?
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: How can someone else trigger this?
+      placeholder: |
+        1. Create a rule with endpoint …
+        2. Field to monitor: path `…`, levels `…`
+        3. Run the service / discovery …
+        4. Observe …
+    validations:
+      required: true
+  - type: textarea
+    id: rule
+    attributes:
+      label: Rule configuration (redacted)
+      description: The relevant endpoint/field settings — or the rule value from `rules.mk`. Redact secrets.
+      render: text
+  - type: textarea
+    id: sample-json
+    attributes:
+      label: Sample JSON response (redacted)
+      description: A minimal snippet of the API response that triggers the problem.
+      render: json
+  - type: textarea
+    id: output
+    attributes:
+      label: Service output / error
+      description: The service summary and details, or the agent output (`agent_json_api --endpoint …`), or any crash/traceback.
+      render: text
