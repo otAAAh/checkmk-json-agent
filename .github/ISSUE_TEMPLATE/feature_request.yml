@@ -1,0 +1,41 @@
+# SPDX-License-Identifier: GPL-2.0-only
+name: 💡 Feature request
+description: Suggest a new capability or an improvement.
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Have an idea? For open-ended brainstorming, the
+        [Ideas discussion](https://github.com/otAAAh/checkmk-json-agent/discussions/categories/ideas)
+        is often the better first stop. If your request is concrete, go ahead here.
+  - type: checkboxes
+    attributes:
+      label: Preflight
+      options:
+        - label: I searched existing issues and discussions for the same idea.
+          required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem does this solve?
+      description: What are you trying to monitor or achieve that isn't possible today?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: What would you like the plugin to do? A rough sketch of the config/behaviour is enough.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Any workarounds you're using now, or other approaches you thought about.
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Sample API response, links, or anything else that helps.
