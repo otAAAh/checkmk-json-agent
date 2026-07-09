@@ -25,10 +25,12 @@ Targets **Checkmk 2.4+** and the current stable plugin APIs
   `items[0].count` (leading `$.` optional); keys containing `.` or `[` can be
   bracket-quoted, e.g. `data['foo.bar'].value`
 - **One service per field**, named as you choose
-- **Array auto-discovery**: a `[*]` wildcard (e.g. `nodes[*].health`) creates
-  one service per array element, labelled by a field you pick; multiple
-  wildcards (e.g. `pods[*].containers[*].ready`) expand the cartesian product,
-  with composite `<pod> / <container>` labels
+- **Array & object auto-discovery**: a `[*]` wildcard (e.g. `nodes[*].health`)
+  creates one service per array element - or per key when it lands on a JSON
+  object/map, such as a Spring Boot Actuator `/health` `components[*].status` -
+  labelled by a field you pick (or the index/key); multiple wildcards
+  (e.g. `pods[*].containers[*].ready`) expand the cartesian product, with
+  composite `<pod> / <container>` labels
 - **Thresholds**: WARN/CRIT upper and lower levels for numeric values, exposed
   as a metric/graph
 - **String matching**: a regex the value must fully match, else CRIT

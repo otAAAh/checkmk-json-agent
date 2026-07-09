@@ -257,6 +257,22 @@ def _result(spec: dict, service: str, found: bool, value: object, error: str, ur
     }
 
 
+def _iter_container(container: object) -> list[tuple[str, object]] | None:
+    """(default_label, element) pairs for a wildcard-expandable container.
+
+    A JSON array expands element-by-element with the index as the default label;
+    a JSON object (map) expands entry-by-entry with the key as the default label
+    - so a Spring Boot Actuator '/health' 'components' map, keyed by component
+    name, iterates just like an array. Returns None for a scalar (or a missing
+    node), letting the caller report 'array or object not found'.
+    """
+    if isinstance(container, list):
+        return [(str(index), element) for index, element in enumerate(container)]
+    if isinstance(container, dict):
+        return [(str(key), value) for key, value in container.items()]
+    return None
+
+
 def _expand_wildcards(
     node: object, segments: list[str], label_path: str | None
 ) -> list[tuple[list[str], bool, object, str]]:
@@ -265,10 +281,10 @@ def _expand_wildcards(
     ``segments`` is the output of :func:`_split_wildcards`: one entry per
     wildcard level plus the trailing value path. Returns one
     ``(label_segments, found, value, error)`` tuple per leaf - i.e. per element
-    of the cartesian product of all array levels. ``label_segments`` carries one
-    label per wildcard level (joined into the composite service name by the
+    of the cartesian product of all wildcard levels. ``label_segments`` carries
+    one label per wildcard level (joined into the composite service name by the
     caller); ``label_path`` is resolved relative to each level's element, with
-    the array index as the fallback.
+    the array index (or object key) as the fallback.
     """
     # Base case: no more wildcards, ``segments[0]`` is the value path itself.
     if len(segments) == 1:
@@ -279,13 +295,15 @@ def _expand_wildcards(
             found, value = True, node
         return [([], found, value, "path not found in element")]
 
-    array_path, *rest = segments
-    found_array, array = _resolve_path(node, array_path)
-    if not found_array or not isinstance(array, list):
-        return [([], False, None, "array not found at wildcard path")]
+    container_path, *rest = segments
+    found_container, container = _resolve_path(node, container_path)
+    pairs = _iter_container(container) if found_container else None
+    if pairs is None:
+        return [([], False, None, "array or object not found at wildcard path")]
 
     expanded: list[tuple[list[str], bool, object, str]] = []
-    for label, element in zip(_element_labels(array, label_path), array):
+    elements = [element for _default, element in pairs]
+    for label, element in zip(_element_labels(pairs, label_path), elements):
         for sub_labels, found, value, error in _expand_wildcards(element, rest, label_path):
             expanded.append(([label, *sub_labels], found, value, error))
     return expanded
@@ -313,21 +331,21 @@ def _extract(document: object, extractions: list[dict], url: str) -> list[dict]:
     return results
 
 
-def _element_labels(array: list, label_path: str | None) -> list[str]:
-    """One label per array element, guaranteed unique.
+def _element_labels(pairs: list[tuple[str, object]], label_path: str | None) -> list[str]:
+    """One label per (default_label, element) pair, guaranteed unique.
 
-    The label comes from label_path within each element (falling back to the
-    index). If a label value repeats across elements, every occurrence of it is
-    suffixed with its index, so two elements can never collapse into one
-    service.
+    The label comes from label_path within each element, falling back to the
+    default label (an array index or object key). If a label value repeats
+    across elements, every occurrence of it is suffixed with its position, so
+    two elements can never collapse into one service.
     """
     labels = []
-    for index, element in enumerate(array):
+    for position, (default_label, element) in enumerate(pairs):
         if label_path:
             found, value = _resolve_path(element, label_path)
-            labels.append(str(value) if found else str(index))
+            labels.append(str(value) if found else default_label)
         else:
-            labels.append(str(index))
+            labels.append(default_label)
     counts: dict[str, int] = {}
     for label in labels:
         counts[label] = counts.get(label, 0) + 1
