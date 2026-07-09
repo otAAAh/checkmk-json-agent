@@ -145,7 +145,10 @@
 "use strict";
 const SAMPLE = {
   status: "UP",
-  components: { db: { status: "UP", details: { connections: 7 } } },
+  components: {
+    db: { status: "UP", details: { connections: 7 } },
+    cache: { status: "DOWN", details: { connections: 0 } }
+  },
   nodes: [
     { name: "web-1", status: "UP", load: 0.4 },
     { name: "web-2", status: "DOWN", load: 0.9 }
@@ -397,10 +400,33 @@ function buildNode(key, value, path) {
     const sum = document.createElement("summary");
     sum.innerHTML = `<span class="k">${esc(key)}</span> <span class="t">{${Object.keys(value).length}}</span>`;
     det.appendChild(sum);
+    // A '[*]' wildcard iterates a keyed object (map of records) just like an
+    // array, one service per key - e.g. a Spring Boot /health 'components[*]'.
+    // Offer it alongside navigating the individual keys.
+    const mapNode = objectMapNode(key, value, path);
+    if (mapNode) det.appendChild(mapNode);
     for (const k of Object.keys(value)) det.appendChild(buildNode(k, value[k], joinKey(path, k)));
     return det;
   }
   return leafRow(key, value, path);
+}
+
+// When every value of an object is itself a (non-array) object, the object is a
+// map of records the agent's '[*]' wildcard can iterate, with the key as the
+// item label. Returns a '[*]' subtree built from the first entry, or null when
+// the object is a plain record (heterogeneous / scalar values) to just navigate.
+function objectMapNode(key, obj, path) {
+  const keys = Object.keys(obj);
+  if (!keys.length) return null;
+  if (!keys.every(k => obj[k] && typeof obj[k] === "object" && !Array.isArray(obj[k]))) return null;
+  const wpath = path + "[*]";
+  const first = obj[keys[0]];
+  const det = document.createElement("details");
+  const sum = document.createElement("summary");
+  sum.innerHTML = `<span class="k wild">${esc(key)}[*]</span> <span class="t">{${keys.length}} — one service per key</span>`;
+  det.appendChild(sum);
+  for (const k of Object.keys(first)) det.appendChild(buildNode(k, first[k], joinKey(wpath, k)));
+  return det;
 }
 
 function renderTree() {

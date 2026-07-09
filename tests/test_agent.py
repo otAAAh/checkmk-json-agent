@@ -102,11 +102,42 @@ def test_extract_wildcard_duplicate_labels_disambiguated(agent):
     assert len(set(names)) == len(names)  # all unique
 
 
-def test_extract_wildcard_not_an_array(agent):
+def test_extract_wildcard_not_a_container(agent):
     specs = [{"path": "status[*]", "service": "X"}]
     (result,) = agent._extract(DOC, specs, "http://test/h")
     assert result["found"] is False
-    assert result["error"] == "array not found at wildcard path"
+    assert result["error"] == "array or object not found at wildcard path"
+
+
+def test_extract_wildcard_over_object_keys(agent):
+    # Spring Boot Actuator '/health' shape: 'components' is an object keyed by
+    # component name, not an array. The key becomes the item label.
+    doc = {
+        "status": "UP",
+        "components": {
+            "module1": {"status": "UP"},
+            "module2": {"status": "DOWN"},
+            "module3": {"status": "UNKNOWN"},
+        },
+    }
+    specs = [{"path": "components[*].status", "service": "Health"}]
+    results = agent._extract(doc, specs, "http://test/h")
+    assert [(r["service"], r["value"]) for r in results] == [
+        ("Health module1", "UP"),
+        ("Health module2", "DOWN"),
+        ("Health module3", "UNKNOWN"),
+    ]
+
+
+def test_extract_wildcard_over_object_with_label_path(agent):
+    # A field inside each value can still override the key as the label.
+    doc = {"nodes": {"a": {"name": "web", "up": True}, "b": {"name": "db", "up": False}}}
+    specs = [{"path": "nodes[*].up", "service": "Node", "label_path": "name"}]
+    results = agent._extract(doc, specs, "http://test/h")
+    assert [(r["service"], r["value"]) for r in results] == [
+        ("Node web", True),
+        ("Node db", False),
+    ]
 
 
 def test_extract_nested_wildcard_cartesian_product(agent):
@@ -153,7 +184,7 @@ def test_extract_nested_wildcard_missing_inner_array(agent):
         ("X ok / 0", True, 1),
         ("X broken", False, None),
     ]
-    assert results[-1]["error"] == "array not found at wildcard path"
+    assert results[-1]["error"] == "array or object not found at wildcard path"
 
 
 def test_build_session_defaults_json_content_type_for_body(agent):
