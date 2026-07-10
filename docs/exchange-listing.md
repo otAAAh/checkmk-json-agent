@@ -14,8 +14,11 @@ included. One rule. Any API. Done.
 - 🎯 **Any endpoint, unmodified** — Spring Boot, Kubernetes, vendor appliances,
   your own apps. No special response format required.
 - 🧭 **Pick fields by path** — `components.db.status`, `items[0].count`, done.
-- 🔁 **Auto-discover arrays** — `nodes[*].status` becomes one service per node,
-  automatically.
+- 🔁 **Auto-discover arrays *and* objects** — `nodes[*].status` becomes one
+  service per array element, and `components[*].status` one per object key
+  (e.g. a Spring Boot Actuator `/health` map), automatically.
+- 🔗 **Many endpoints, one rule** — poll several APIs together, each with its own
+  method, auth, and fields; an unreachable one only affects its own services.
 - 📈 **Thresholds & graphs in Checkmk** — WARN/CRIT and metrics live in *your*
   rule, not upstream in the API.
 - 🔐 **Secure by default** — basic or bearer auth via the password store, TLS
