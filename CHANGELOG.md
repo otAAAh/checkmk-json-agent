@@ -3,6 +3,12 @@
 All notable changes to this project, one section per released version.
 Generated from the git history by `scripts/gen_changelog.py`.
 
+## [0.7.0] - 2026-07-10
+
+- Refresh Exchange listing for object-map discovery & multi-endpoint ([`fce6b72`](https://github.com/otAAAh/checkmk-json-agent/commit/fce6b72))
+- Expand '[*]' wildcard over JSON objects/maps, not just arrays ([`886eab8`](https://github.com/otAAAh/checkmk-json-agent/commit/886eab8))
+- Add contributing guide and issue templates ([`9466710`](https://github.com/otAAAh/checkmk-json-agent/commit/9466710))
+
 ## [0.6.0] - 2026-07-08
 
 - Deps: bump pytest from 8.3.4 to 9.0.3 ([`27472a4`](https://github.com/otAAAh/checkmk-json-agent/commit/27472a4))
