@@ -8,19 +8,17 @@ name: Bridge check
 # mounts. A red build is the earliest signal that a Checkmk release changed the
 # custom-element names or the `data` contract the Explorer relies on.
 #
-# Runs weekly (drift catch as `-latest`/dailies move), on demand, and on PRs
-# that touch the bridge — kept out of the main CI so it doesn't add container +
-# browser time to every unrelated change.
+# Runs weekly (drift catch as dailies move) and on demand only — NOT on PRs.
+# The smoke needs a *current* check-mk-raw 2.5.0 image, but until 2.5.0 goes
+# stable the only public tags are stale beta dailies whose internal
+# cmk-frontend-vue contract no longer matches, so gating PRs on it would wedge
+# every change. The weekly run keeps catching real drift once a current 2.5.0
+# image is published. Kept out of the main CI regardless, to avoid adding
+# container + browser time to unrelated changes.
 on:
   workflow_dispatch:
   schedule:
     - cron: "0 6 * * 1" # Mondays 06:00 UTC
-  pull_request:
-    paths:
-      - "web/**"
-      - "tests/bridge/**"
-      - "scripts/build_mkp.py"
-      - ".github/workflows/bridge-check.yml"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}

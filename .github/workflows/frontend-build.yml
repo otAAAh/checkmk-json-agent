@@ -106,6 +106,30 @@ jobs:
           docker rm cmk >/dev/null
           echo "CMK_FRONTEND_DIST=$PWD/cmk-frontend-dist" >> "$GITHUB_ENV"
 
+      # cmk-frontend-vue's icons.constants.ts EAGERLY imports every theme icon it
+      # knows about (`~cmk-frontend/themes/.../images/icon_*.svg?url`). The
+      # check-mk-raw (CRE) dist ships fewer icons than the full/enterprise set the
+      # constant enumerates, so a single missing file (e.g. icon_add_rule.svg)
+      # fails the whole Vite build even though the wizard uses none of them. Stub
+      # any referenced-but-absent icon with an empty SVG so the eager imports
+      # resolve; the wizard's own icons are present and unaffected.
+      - name: Stub theme icons the raw dist doesn't ship
+        run: |
+          set -euo pipefail
+          consts="$CMK_SRC/packages/cmk-frontend-vue/src/components/CmkIcon/icons.constants.ts"
+          stubbed=0
+          while IFS= read -r rel; do
+            f="$CMK_FRONTEND_DIST/$rel"
+            [ -f "$f" ] && continue
+            mkdir -p "$(dirname "$f")"
+            case "$rel" in
+              *.svg) printf '%s' '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1 1"/>' > "$f" ;;
+              *)     : > "$f" ;;
+            esac
+            stubbed=$((stubbed + 1))
+          done < <(grep -oE "themes/[A-Za-z0-9/_-]+\.(svg|png)" "$consts" | sort -u)
+          echo "stubbed $stubbed icon(s) missing from the raw dist"
+
       # --- BUILD our app against the assembled artifacts, then package the MKP
       - name: Build the Explorer wizard + assemble web/
         env:
