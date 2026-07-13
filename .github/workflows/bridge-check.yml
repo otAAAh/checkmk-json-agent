@@ -52,8 +52,7 @@ jobs:
           pip install playwright pytest
           playwright install --with-deps chromium
 
-      # Same resolution as the main CI 'test' job: the stable 2.4 image plus the
-      # newest 2.5 daily (2.5 has no floating '-latest' tag and dailies are
+      # The newest 2.5 daily (2.5 has no floating '-latest' tag and dailies are
       # pruned, so it's resolved at run time rather than hard-coded).
       - name: Resolve the Checkmk images to test against
         id: images
@@ -63,9 +62,11 @@ jobs:
             curl -fsSL "https://hub.docker.com/v2/repositories/checkmk/check-mk-raw/tags/?page_size=100&name=$1" \
               | python3 -c "import sys, json; ts=[t['name'] for t in json.load(sys.stdin)['results'] if t['name'].startswith('$1')]; print(sorted(ts)[-1] if ts else '')"
           }
-          images="checkmk/check-mk-raw:2.4.0-latest"
+          # The Explorer MKP requires Checkmk >= 2.5.0, so only smoke it on 2.5.0+
+          # sites (the agent's 2.4 support is covered by the main CI 'test' job).
           v25="$(newest_daily 2.5.0-2 || true)"
-          [ -n "$v25" ] && images="$images checkmk/check-mk-raw:$v25"
+          [ -n "$v25" ] || { echo "::error::no check-mk-raw 2.5.0 daily image found"; exit 1; }
+          images="checkmk/check-mk-raw:$v25"
           echo "list=$images" >> "$GITHUB_OUTPUT"
           echo "Testing against: $images"
 

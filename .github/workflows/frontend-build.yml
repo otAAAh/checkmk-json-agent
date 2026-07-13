@@ -48,9 +48,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-      - uses: actions/setup-node@39370e3970a6d051c3f4a4494c944b0e1cf6c2f6 # v4.1.0
-        with:
-          node-version: "22"
+      # Node ships on the ubuntu-24.04 runner (>=20), which is enough for Vite;
+      # no setup-node step needed.
 
       # --- SOURCE: sparse shallow clone of just the packages we compile against
       - name: Clone Checkmk source at pinned ref (sparse)
