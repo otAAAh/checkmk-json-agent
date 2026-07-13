@@ -232,61 +232,22 @@ async function testAllEndpoints(): Promise<void> {
   }
 }
 
-/** Escape a string so it matches literally as a regex (for the `match` pattern). */
-function escapeRegex(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-}
-
 /** Keep integers integer, round the rest to 2 decimals (for seeded levels). */
 function niceRound(n: number): number {
   return Number.isInteger(n) ? n : Math.round(n * 100) / 100
 }
 
-/** Guess the `unit` SingleChoice (count|bytes|seconds|percent) from the field's
- * key name, e.g. 'uptime_seconds' -> seconds, 'heap_bytes' -> bytes. The last
- * path segment carries the hint; returns undefined when nothing clearly matches. */
-function guessUnit(path: string): 'count' | 'bytes' | 'seconds' | 'percent' | undefined {
-  // Last meaningful key, honouring bracket-quoted keys and skipping numeric
-  // indices — a plain `split('.')` would break on keys like data['foo.bar'].
-  const tokens = path.replace(/\[\*\]/g, '').match(/\['([^']*)'\]|\["([^"]*)"\]|\[\d+\]|[A-Za-z0-9_]+/g) ?? []
-  let key = ''
-  for (let i = tokens.length - 1; i >= 0; i--) {
-    const tok = tokens[i]!
-    if (tok.startsWith("['") || tok.startsWith('["')) {
-      key = tok.slice(2, -2)
-      break
-    }
-    if (tok.startsWith('[')) {
-      continue
-    }
-    key = tok
-    break
-  }
-  key = key.toLowerCase()
-  // Milliseconds/microseconds have no matching unit here — don't mislabel them
-  // as seconds (wrong scale); leave the unit unset.
-  if (/(^|_)(ms|us|ns|millis?|micros?|nanos?|msec|usec)$/.test(key)) {
-    return undefined
-  }
-  if (/(seconds?|secs?|_s$|duration|uptime|elapsed|latency|age$)/.test(key)) {
-    return 'seconds'
-  }
-  if (/(bytes?|_b$|size|memory|mem$|disk|storage|heap)/.test(key)) {
-    return 'bytes'
-  }
-  if (/(percent|pct|ratio|rate|usage|utilization|util|load)/.test(key)) {
-    return 'percent'
-  }
-  if (/(count|total|num|requests|errors|hits|connections|threads)/.test(key)) {
-    return 'count'
-  }
-  return undefined
-}
-
 /** A fresh extraction entry seeded from the extractions List's element default,
- * with the picked path + a derived service name, and — based on the sampled JSON
- * value type — a starting `match`/must_match on the literal value (strings/booleans)
- * or fixed upper `levels_upper` warn/crit (numbers). The user refines these in the form. */
+ * with the picked path + a derived service name, and — for a numeric sample —
+ * fixed upper `levels_upper` warn/crit with headroom. The user refines the rest
+ * in the form.
+ *
+ * NOTE: we deliberately do NOT pre-seed `unit` or `match`. Those are a
+ * SingleChoice / CascadingSingleChoice, whose values are HASHED idents on the
+ * FormEdit wire (not the raw 'percent' / 'must_match' name); a raw pre-seed is
+ * rejected on submit as "Invalid choice". `levels_upper` (SimpleLevels) is not
+ * hashed, so seeding ['fixed', [w, c]] is safe. The user picks unit / matching
+ * from the native dropdowns, which store the correct hashed ident. */
 function newExtractionEntry(path: string, valueType?: string, sampleValue?: unknown): ExtractionValue {
   const entry: ExtractionValue = {
     ...listElementDefault(extractionsSpec.value),
@@ -300,17 +261,6 @@ function newExtractionEntry(path: string, valueType?: string, sampleValue?: unkn
     // the service permanently CRIT — warn < crit, both > 0.
     const base = Math.abs(sampleValue) || 1
     entry.levels_upper = ['fixed', [niceRound(base * 1.5), niceRound(base * 2)]]
-    const unit = guessUnit(path)
-    if (unit) {
-      entry.unit = unit
-    }
-  } else if (
-    (valueType === 'string' || valueType === 'boolean') &&
-    sampleValue !== null &&
-    sampleValue !== undefined
-  ) {
-    // Must-match on a regex that matches the current value literally as a starting point.
-    entry.match = ['must_match', { pattern: escapeRegex(String(sampleValue)) }]
   }
   return entry
 }

@@ -28,7 +28,59 @@ import {
 } from '../../lib/rulevalue'
 
 const { _t } = usei18n()
-const { state, status, createRuleOnSite } = useExplorer()
+const { state, status, createRuleOnSite, extractionsSpec } = useExplorer()
+
+// FormEdit serializes SingleChoice / CascadingSingleChoice / ServiceState values
+// as hashed idents on the wire (e.g. unit "Percent" -> "438dc5f6…"), so the raw
+// extraction values here are hashes, not speaking names. Walk the serialized
+// extractions spec once to map every choice ident -> its human-readable title.
+const choiceTitles = computed<Map<string, string>>(() => {
+  const map = new Map<string, string>()
+  const walk = (node: unknown): void => {
+    if (Array.isArray(node)) {
+      node.forEach(walk)
+      return
+    }
+    if (node && typeof node === 'object') {
+      const o = node as Record<string, unknown>
+      if (typeof o.name === 'string' && typeof o.title === 'string') {
+        map.set(o.name, o.title)
+      }
+      Object.values(o).forEach(walk)
+    }
+  }
+  walk((extractionsSpec.value as { spec?: unknown } | null)?.spec)
+  return map
+})
+
+/** The speaking title for a (possibly hashed) choice ident, else the value itself. */
+function titleOf(value: unknown): string | null {
+  if (typeof value !== 'string' || !value) {
+    return null
+  }
+  return choiceTitles.value.get(value) ?? value
+}
+
+/** A ServiceState choice (hashed ident or int) -> StateKind, via its title. */
+function stateChoiceKind(value: unknown): StateKind | null {
+  if (typeof value === 'number') {
+    return serviceStateToKind(value)
+  }
+  const title = (titleOf(value) ?? '').toUpperCase()
+  if (title.includes('WARN')) return 'warn'
+  if (title.includes('CRIT')) return 'crit'
+  if (title.includes('UNKNOWN')) return 'none'
+  if (title.includes('OK')) return 'ok'
+  return null
+}
+
+/** Infer the match mode from the cfg keys (the mode string is a hashed ident, so
+ * we key off the non-hashed sub-fields instead). */
+function matchMode(cfg: Record<string, unknown>): 'must_match' | 'state_map' | null {
+  if (typeof cfg.pattern === 'string') return 'must_match'
+  if (['ok', 'warn', 'crit'].some((k) => typeof cfg[k] === 'string' && cfg[k])) return 'state_map'
+  return null
+}
 
 // Review is read-only: auto-expand the first endpoint, but allow any number
 // open at once (min/max-open 0) — unlike the single-open accordion on step 2.
@@ -67,6 +119,122 @@ function parseMatch(match: unknown): { mode: string; cfg: Record<string, unknown
   return null
 }
 
+/**
+ * Safely evaluate an arithmetic `calc` expression over the variable `value`.
+ *
+ * Mirrors the special-agent grammar: decimal numbers, the identifier `value`,
+ * parentheses, binary `+ - * /` (with `*`/`/` binding tighter than `+`/`-`) and
+ * unary `+`/`-`. A hand-written recursive-descent parser is used deliberately —
+ * NO `eval`/`new Function` — so nothing outside the grammar can run. Returns the
+ * computed number, or `null` on any tokenize/parse error, unknown token, or a
+ * non-finite result (e.g. division by zero).
+ */
+function evalCalc(expr: string, value: number): number | null {
+  // --- Tokenize into numbers / 'value' / operators / parens. ---------------
+  type Token = { t: 'num'; v: number } | { t: 'value' } | { t: 'op'; v: string }
+  const tokens: Token[] = []
+  let i = 0
+  while (i < expr.length) {
+    const c = expr[i]!
+    if (c === ' ' || c === '\t' || c === '\n' || c === '\r') {
+      i += 1
+    } else if (c === '+' || c === '-' || c === '*' || c === '/' || c === '(' || c === ')') {
+      tokens.push({ t: 'op', v: c })
+      i += 1
+    } else if (c >= '0' && c <= '9') {
+      // A decimal number: leading digits, optional single '.' with more digits.
+      let j = i + 1
+      while (j < expr.length && expr[j]! >= '0' && expr[j]! <= '9') j += 1
+      if (j < expr.length && expr[j] === '.') {
+        j += 1
+        while (j < expr.length && expr[j]! >= '0' && expr[j]! <= '9') j += 1
+      }
+      tokens.push({ t: 'num', v: Number(expr.slice(i, j)) })
+      i = j
+    } else if (c === '.') {
+      // A number starting with '.', e.g. `.5`.
+      let j = i + 1
+      while (j < expr.length && expr[j]! >= '0' && expr[j]! <= '9') j += 1
+      if (j === i + 1) return null // a lone '.'
+      tokens.push({ t: 'num', v: Number(expr.slice(i, j)) })
+      i = j
+    } else if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')) {
+      // The only identifier allowed is `value`; anything else (function names,
+      // other variables) is rejected.
+      let j = i + 1
+      while (j < expr.length) {
+        const d = expr[j]!
+        if ((d >= 'a' && d <= 'z') || (d >= 'A' && d <= 'Z')) j += 1
+        else break
+      }
+      if (expr.slice(i, j) !== 'value') return null
+      tokens.push({ t: 'value' })
+      i = j
+    } else {
+      return null // unknown character
+    }
+  }
+
+  // --- Recursive-descent parser with standard precedence. ------------------
+  let p = 0
+  const peek = (): Token | undefined => tokens[p]
+  // expr := term (('+' | '-') term)*
+  function parseExpr(): number {
+    let acc = parseTerm()
+    for (let tok = peek(); tok && tok.t === 'op' && (tok.v === '+' || tok.v === '-'); tok = peek()) {
+      p += 1
+      const rhs = parseTerm()
+      acc = tok.v === '+' ? acc + rhs : acc - rhs
+    }
+    return acc
+  }
+  // term := factor (('*' | '/') factor)*
+  function parseTerm(): number {
+    let acc = parseFactor()
+    for (let tok = peek(); tok && tok.t === 'op' && (tok.v === '*' || tok.v === '/'); tok = peek()) {
+      p += 1
+      const rhs = parseFactor()
+      acc = tok.v === '*' ? acc * rhs : acc / rhs
+    }
+    return acc
+  }
+  // factor := ('+' | '-') factor | '(' expr ')' | number | value
+  function parseFactor(): number {
+    const tok = peek()
+    if (!tok) throw new Error('unexpected end')
+    if (tok.t === 'op' && (tok.v === '+' || tok.v === '-')) {
+      p += 1
+      const operand = parseFactor()
+      return tok.v === '-' ? -operand : operand
+    }
+    if (tok.t === 'op' && tok.v === '(') {
+      p += 1
+      const inner = parseExpr()
+      const close = peek()
+      if (!close || close.t !== 'op' || close.v !== ')') throw new Error('missing )')
+      p += 1
+      return inner
+    }
+    if (tok.t === 'num') {
+      p += 1
+      return tok.v
+    }
+    if (tok.t === 'value') {
+      p += 1
+      return value
+    }
+    throw new Error('unexpected token')
+  }
+
+  try {
+    const result = parseExpr()
+    if (p !== tokens.length) return null // trailing tokens left unparsed
+    return Number.isFinite(result) ? result : null
+  } catch {
+    return null
+  }
+}
+
 /** Whether `value` fully matches `pattern` (anchored); false on a bad regex. */
 function fullMatch(value: string, pattern: string): boolean {
   try {
@@ -94,16 +262,11 @@ function evalState(value: Json | undefined, x: ExtractionValue): StateKind {
   if (typeof value === 'string') {
     const parsed = parseMatch(x.match)
     if (!parsed) return 'none'
-    const { mode, cfg } = parsed
+    const { cfg } = parsed
+    const mode = matchMode(cfg)
     if (mode === 'must_match' && typeof cfg.pattern === 'string') {
-      let matched: boolean
-      try {
-        matched = new RegExp(`^(?:${cfg.pattern})$`).test(value)
-      } catch {
-        return 'none'
-      }
-      if (matched) return 'ok'
-      return serviceStateToKind(typeof cfg.state_no_match === 'number' ? cfg.state_no_match : 2)
+      if (fullMatch(value, cfg.pattern)) return 'ok'
+      return stateChoiceKind(cfg.state_no_match) ?? 'crit'
     }
     if (mode === 'state_map') {
       for (const [key, kind] of [
@@ -116,23 +279,25 @@ function evalState(value: Json | undefined, x: ExtractionValue): StateKind {
           return kind
         }
       }
-      return serviceStateToKind(typeof cfg.state_no_match === 'number' ? cfg.state_no_match : 0)
+      return stateChoiceKind(cfg.state_no_match) ?? 'ok'
     }
     return 'none'
   }
   return 'none'
 }
 
-/** Label a Checkmk service-state number for the no-match case. */
-function stateNoMatchLabel(n: number): string {
-  return n === 0 ? _t('OK') : n === 1 ? _t('WARN') : n === 3 ? _t('UNKNOWN') : _t('CRIT')
-}
-
 /** Human-readable list of the configured thresholds/unit/match rule. */
 function definedSummary(x: ExtractionValue): string[] {
   const parts: string[] = []
-  if (typeof x.unit === 'string' && x.unit) {
-    parts.push(_t('unit %{u}', { u: x.unit }))
+  const unit = titleOf(x.unit)
+  if (unit) {
+    parts.push(_t('unit %{u}', { u: unit }))
+  }
+  if (x.count === true) {
+    parts.push(_t('count elements'))
+  }
+  if (typeof x.calc === 'string' && x.calc) {
+    parts.push(_t('calc %{c}', { c: x.calc }))
   }
   const upper = levelsPair(x.levels_upper)
   if (upper) {
@@ -144,11 +309,13 @@ function definedSummary(x: ExtractionValue): string[] {
   }
   const parsed = parseMatch(x.match)
   if (parsed) {
-    const { mode, cfg } = parsed
+    const { cfg } = parsed
+    const mode = matchMode(cfg)
     if (mode === 'must_match' && typeof cfg.pattern === 'string' && cfg.pattern) {
       let desc: string = _t('must match /%{e}/', { e: cfg.pattern })
-      if (typeof cfg.state_no_match === 'number' && cfg.state_no_match !== 2) {
-        desc += _t(' (else %{s})', { s: stateNoMatchLabel(cfg.state_no_match) })
+      const noMatch = titleOf(cfg.state_no_match)
+      if (noMatch && stateChoiceKind(cfg.state_no_match) !== 'crit') {
+        desc += _t(' (else %{s})', { s: noMatch })
       }
       parts.push(desc)
     } else if (mode === 'state_map') {
@@ -214,17 +381,44 @@ const reviews = computed<EndpointReview[]>(() =>
         const name = extractionService(x) || _t('(unnamed)')
         const path = extractionPath(x)
         const defined = definedSummary(x)
+        // Optional arithmetic transform applied to a NUMERIC value before
+        // levels/display, e.g. `value / 1024 / 1024`.
+        const calc = typeof x.calc === 'string' && x.calc ? x.calc : null
+        // When set, the monitored value is the NUMBER OF ELEMENTS of an
+        // array/object rather than the value itself; levels then apply to that
+        // count. Counting a scalar is a misconfiguration (UNKNOWN in the real
+        // check) — preview it as unresolved rather than crashing.
+        const doCount = x.count === true
         const matches = sample !== null ? resolvePath(sample, path) : []
         if (!matches.length) {
           return [{ service: name, path, value: undefined, defined, state: 'none' as StateKind }]
         }
-        return matches.map((m) => ({
-          service: matches.length > 1 && m.label ? `${name} ${m.label}` : name,
-          path,
-          value: m.value,
-          defined,
-          state: evalState(m.value, x),
-        }))
+        return matches.map((m): Row => {
+          const service = matches.length > 1 && m.label ? `${name} ${m.label}` : name
+          // 1) Count elements first, so a following `calc` transforms the count.
+          let value: Json = m.value
+          if (doCount) {
+            if (Array.isArray(m.value)) {
+              value = m.value.length
+            } else if (typeof m.value === 'object' && m.value !== null) {
+              value = Object.keys(m.value).length
+            } else {
+              // Not a list/object: cannot count — show the raw value, unresolved.
+              return { service, path, value: m.value, defined, state: 'none' as StateKind }
+            }
+          }
+          // 2) Transform the (possibly counted) value when `calc` is set and it
+          // is numeric. On a bad expression evalCalc returns null: leave the
+          // value shown and mark the preview unresolved rather than crashing.
+          if (calc !== null && typeof value === 'number') {
+            const transformed = evalCalc(calc, value)
+            if (transformed === null) {
+              return { service, path, value, defined, state: 'none' as StateKind }
+            }
+            value = transformed
+          }
+          return { service, path, value, defined, state: evalState(value, x) }
+        })
       })
     return { url: endpointUrl(connection) || _t('Endpoint %{n}', { n: ei + 1 }), rows }
   }),

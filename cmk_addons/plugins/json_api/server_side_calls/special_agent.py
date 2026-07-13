@@ -49,6 +49,10 @@ class Extraction(BaseModel, frozen=True):
     # straight from the CascadingSingleChoice form spec. Opaque here; the check
     # interprets it.
     match: object = None
+    # Arithmetic expression over 'value', applied to a numeric value by the check.
+    calc: str | None = None
+    # Monitor the length of the list/object at the path (resolved by the agent).
+    count: bool = False
 
 
 class Endpoint(BaseModel, frozen=True):

@@ -7,9 +7,9 @@
      the app; the edited value round-trips back through the Python visitor on
      create. -->
 <script setup lang="ts">
-import FormEdit from '@/form/FormEdit.vue'
-import type { ValidationMessages } from '@/form'
-import type { FormSpec } from 'cmk-shared-typing/typescript/vue_formspec_components'
+import type { ValidationMessages } from '@/form';
+import FormEdit from '@/form/FormEdit.vue';
+import type { FormSpec } from 'cmk-shared-typing/typescript/vue_formspec_components';
 
 defineProps<{ spec: FormSpec; validation?: ValidationMessages }>()
 const data = defineModel<unknown>('data', { required: true })
@@ -26,14 +26,8 @@ const data = defineModel<unknown>('data', { required: true })
   display: block;
 }
 
-/* The arrow's own `padding: 0 4px` (with border-box) shrinks the width:100% SVG
-   to near-zero, so the chevron renders clipped. Use a left margin for the gap
-   instead, and center it at a small fixed height rather than full-height stretch. */
 /* stylelint-disable-next-line checkmk/vue-bem-naming-convention */
-.je-form-spec-edit :deep(.cmk-dropdown--arrow) {
-  align-self: center;
-  height: 0.55em;
+.je-form-spec-edit :deep(.cmk-dropdown .cmk-dropdown--arrow) {
   padding: 0;
-  margin-left: 4px;
 }
 </style>

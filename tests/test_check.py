@@ -345,6 +345,59 @@ def test_check_legacy_expected_section_still_evaluated(check):
     assert "expected to match 'UP'" in result.summary
 
 
+def test_apply_calc_arithmetic(check):
+    assert check._apply_calc(1048576.0, "value / 1024 / 1024") == 1.0
+    assert check._apply_calc(0.5, "value * 1000") == 500.0
+    assert check._apply_calc(212.0, "(value - 32) * 5 / 9") == 100.0
+    assert check._apply_calc(3.0, "-value") == -3.0
+
+
+def test_apply_calc_rejects_non_arithmetic(check):
+    # No names other than 'value', no calls, no attribute access, no power op.
+    import pytest
+
+    for expr in ("foo", "__import__('os')", "value.bit_length()", "value ** 2", "abs(value)"):
+        with pytest.raises((ValueError, ZeroDivisionError)):
+            check._apply_calc(2.0, expr)
+
+
+def test_check_calc_transforms_value_and_metric(check):
+    section = _section(
+        check, [_entry("Mem", value=1048576, unit="bytes", calc="value / 1024 / 1024")]
+    )
+    results = list(check.check_json_api("Mem", section))
+    (metric,) = [r for r in results if isinstance(r, Metric)]
+    assert metric.value == 1.0
+    summary = next(r.summary for r in results if isinstance(r, Result) and r.summary)
+    assert summary == "Value: 1"
+
+
+def test_check_calc_applies_before_levels(check):
+    # 90000 ms -> 90 s, which trips the upper levels set in seconds.
+    section = _section(
+        check,
+        [_entry("Lat", value=90000, calc="value / 1000", levels_upper=["fixed", [60.0, 120.0]])],
+    )
+    result = next(
+        r for r in check.check_json_api("Lat", section) if isinstance(r, Result) and r.summary
+    )
+    assert result.state == State.WARN
+
+
+def test_check_calc_divide_by_zero_is_unknown(check):
+    section = _section(check, [_entry("Bad", value=5, calc="value / 0")])
+    result = list(check.check_json_api("Bad", section))[0]
+    assert result.state == State.UNKNOWN
+    assert "Calculation" in result.summary
+
+
+def test_check_calc_ignored_on_non_numeric(check):
+    # A calc on a string value simply does not apply; the value shows as-is.
+    section = _section(check, [_entry("S", value="hello", calc="value * 2")])
+    result = list(check.check_json_api("S", section))[0]
+    assert result.summary == "Value: hello"
+
+
 def test_check_api_error_is_crit(check):
     # A section-level error surfaces as CRIT on any discovered item.
     items = _section(check, [_entry("X", value="1")]).items
