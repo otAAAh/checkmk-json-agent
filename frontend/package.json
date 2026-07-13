@@ -1,0 +1,27 @@
+{
+  "name": "json-api-explorer-frontend",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Own Vue app for the JSON API Explorer wizard (ships compiled into the json_api_explorer MKP).",
+  "license": "GPL-2.0-only",
+  "type": "module",
+  "scripts": {
+    "build": "vite build",
+    "dev": "vite",
+    "lint:style": "stylelint \"src/**/*.{vue,css}\""
+  },
+  "dependencies": {
+    "vue": "^3.5.13"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.1",
+    "@vitejs/plugin-vue": "^5.2.1",
+    "postcss-html": "^1.8.0",
+    "sass-embedded": "^1.100.0",
+    "stylelint": "^17.8.0",
+    "stylelint-config-standard": "^40.0.0",
+    "typescript": "^5.7.2",
+    "vite": "^6.0.7",
+    "vue-tsc": "^2.2.0"
+  }
+}

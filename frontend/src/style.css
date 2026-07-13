@@ -1,0 +1,16 @@
+/* Copyright (C) 2026 Benjamin Knapp
+   SPDX-License-Identifier: GPL-2.0-only
+
+   No design tokens here: the app is embedded in a real Checkmk page, which
+   provides the theme. The GUI page also loads the site's cmk-frontend-vue token
+   CSS, so --dimension-*, --success-dimmed, --wizard-*, --font-color, etc. all
+   resolve from the real theme. We must NOT redefine them (that's what made the
+   wizard look off), and must NOT style `body` (that belongs to the Checkmk page). */
+
+/* The custom element renders into the light DOM (no shadow root), so a bare `*`
+   reset leaks to the whole Checkmk page — it was squashing the header's
+   title/page-navigation spacing. Confine it to our element's subtree. */
+cmk-json-explorer,
+cmk-json-explorer * {
+  box-sizing: border-box;
+}

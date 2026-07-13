@@ -37,6 +37,12 @@ htmlcov/
 # Build artifacts (MKP package output)
 *.mkp
 
+# Frontend build output (built by `make frontend` from frontend/; the Vue app
+# under frontend/src is the source of truth). Shipped in the mkp, not committed.
+web/htdocs/json_api/wizard/
+frontend/node_modules/
+frontend/dist/
+
 # Generated translation template (regenerate with `make pot`); the .po files
 # under locales/*/LC_MESSAGES/ are the committed source of truth.
 locales/json_api.pot

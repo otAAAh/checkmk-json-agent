@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<!-- Copyright (C) 2026 Benjamin Knapp -->
+<!-- SPDX-License-Identifier: GPL-2.0-only -->
+<!--
+  THROWAWAY EVALUATION HARNESS — NOT a shipped feature.
+
+  This page binds to the *site's own* cmk-frontend-vue bundle (already installed
+  under htdocs/cmk-frontend-vue/) to evaluate whether the native Checkmk Vue
+  components are worth adopting for the JSON API Explorer. Nothing is bundled or
+  shipped: we just reference the running site's asset, same-origin.
+
+  How it works (mirrors cmk/gui/htmllib/html.py):
+    1. fetch ../cmk-frontend-vue/.manifest.json
+    2. resolve src/main.ts -> hashed .js, and walk imports/css for stylesheets
+    3. inject the <link>s + the <script type=module>
+    4. loading main.js runs customElements.define('cmk-*', ...) for ~30 real
+       Web Components (defineCustomElement, shadowRoot:false). We can then use
+       them declaratively: <cmk-icon data='{...}'></cmk-icon>
+
+  Everything here is INTERNAL and UNVERSIONED: element names, the `data` JSON
+  shapes, the manifest layout and the CSS variables all change without notice
+  across Checkmk releases. Fine to evaluate; do not ship to users this way.
+
+  Serve it inside a site: install this MKP, then open
+    https://<host>/<site>/check_mk/json_api/vue-eval.html
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>cmk-frontend-vue eval — checkmk-json-agent</title>
+<style>
+  /* Minimal chrome only. Colours prefer the site's Vue design tokens (loaded
+     from the bundle's stylesheets) and fall back to literals when a token is
+     absent, so the page is legible even before/without the bundle. */
+  :root { --bg:#1e2329; --panel:#272d36; --line:#3a424e; --fg:#e6e9ee; --mut:#9aa6b2; --acc:#15d1a0; }
+  * { box-sizing: border-box; }
+  body { margin:0; font:14px/1.5 system-ui, sans-serif;
+         background:var(--ux-theme-1, var(--bg)); color:var(--font-color, var(--fg)); }
+  header { padding:14px 20px; border-bottom:1px solid var(--line); }
+  header h1 { margin:0; font-size:18px; }
+  header p { margin:4px 0 0; color:var(--mut); font-size:13px; max-width:70ch; }
+  .wrap { display:grid; grid-template-columns:minmax(320px,1fr) minmax(320px,1fr); gap:14px; padding:14px 20px; align-items:start; }
+  @media (max-width:900px){ .wrap{ grid-template-columns:1fr; } }
+  .panel { background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:12px; }
+  .panel h2 { margin:0 0 10px; font-size:13px; text-transform:uppercase; letter-spacing:.05em; color:var(--mut); }
+  label { display:block; color:var(--mut); font-size:12px; margin:8px 0 3px; }
+  input[type=text], textarea { width:100%; background:#161a1f; color:var(--fg); border:1px solid var(--line);
+             border-radius:6px; padding:7px 8px; font:12px/1.45 ui-monospace, monospace; }
+  textarea { min-height:150px; resize:vertical; }
+  .row { display:flex; gap:8px; flex-wrap:wrap; margin-top:10px; align-items:center; }
+  button { background:var(--acc); color:#06231c; border:0; border-radius:5px; padding:6px 12px;
+           font-weight:600; cursor:pointer; }
+  button.ghost { background:transparent; color:var(--mut); border:1px solid var(--line); font-weight:500; }
+  button.ghost:hover { color:var(--fg); }
+  #log { font:11.5px/1.55 ui-monospace, monospace; white-space:pre-wrap; word-break:break-word;
+         max-height:260px; overflow:auto; background:#161a1f; border:1px solid var(--line);
+         border-radius:6px; padding:8px; margin-top:4px; }
+  #log .ok { color:var(--acc); } #log .err { color:#e05a5a; } #log .dim { color:var(--mut); }
+  #mount { min-height:80px; padding:12px; border:1px dashed var(--line); border-radius:6px; margin-top:6px; }
+  .hint { color:var(--mut); font-size:12px; margin:2px 0 0; }
+  code { color:#7fb3ff; }
+</style>
+</head>
+<body>
+<header>
+  <h1>cmk-frontend-vue evaluation harness</h1>
+  <p>Binds to <strong>this site's own</strong> cmk-frontend-vue bundle (no Vue is shipped in the MKP)
+  to try the native Checkmk Web Components live. Internal &amp; unversioned — evaluation only.</p>
+</header>
+
+<div class="wrap">
+  <div class="panel">
+    <h2>Mount a component</h2>
+    <label for="cname">Custom element name (must start with <code>cmk-</code>)</label>
+    <input type="text" id="cname" value="cmk-icon" spellcheck="false">
+    <label for="cdata">Data (JSON — parsed &amp; spread into the component's props)</label>
+    <textarea id="cdata" spellcheck="false">{ "icon": "sidebar_folder", "size": "xxlarge" }</textarea>
+    <div class="row">
+      <button id="mount-btn">Mount</button>
+      <button class="ghost" id="preset-icon">preset: cmk-icon</button>
+      <button class="ghost" id="preset-dialog">preset: cmk-dialog</button>
+      <button class="ghost" id="preset-form">preset: cmk-form-spec (stub)</button>
+    </div>
+    <p class="hint">Pure components (<code>cmk-icon</code>, <code>cmk-dynamic-icon</code>, <code>cmk-rnbw</code>)
+      have the simplest contract. <code>cmk-form-spec</code> needs the full generated form-spec schema and
+      will likely error with a stub — that failure is itself a useful eval finding.</p>
+    <h2 style="margin-top:16px">Result</h2>
+    <div id="mount"></div>
+  </div>
+
+  <div class="panel">
+    <h2>Bundle resolution</h2>
+    <div id="log"></div>
+    <p class="hint">Mirrors <code>cmk/gui/htmllib/html.py</code>: resolve <code>src/main.ts</code> from
+      <code>.manifest.json</code>, recurse imports for CSS, inject stylesheets + the module script.</p>
+  </div>
+</div>
+
+<script type="module">
+// Path to the site's installed Vue bundle, relative to this page
+// (htdocs/json_api/vue-eval.html -> htdocs/cmk-frontend-vue/).
+const VUE_BASE = "../cmk-frontend-vue";
+
+const logEl = document.getElementById("log");
+function log(msg, cls) {
+  const line = document.createElement("div");
+  if (cls) line.className = cls;
+  line.textContent = msg;
+  logEl.appendChild(line);
+  logEl.scrollTop = logEl.scrollHeight;
+}
+
+// Recursively collect stylesheets for an entry, deps first — this is the JS
+// twin of html.py's _collect_stylesheets (an entry's "css" only covers its own
+// chunk; shared-chunk CSS lives under the imported entries).
+function collectStylesheets(manifest, entryKey, seen = new Set(), out = []) {
+  if (seen.has(entryKey)) return out;
+  seen.add(entryKey);
+  const entry = manifest[entryKey];
+  if (!entry) return out;
+  for (const imp of entry.imports || []) collectStylesheets(manifest, imp, seen, out);
+  for (const css of entry.css || []) if (!out.includes(css)) out.push(css);
+  return out;
+}
+
+async function loadBundle() {
+  log("fetching " + VUE_BASE + "/.manifest.json …", "dim");
+  const res = await fetch(VUE_BASE + "/.manifest.json", { credentials: "same-origin" });
+  if (!res.ok) throw new Error("manifest HTTP " + res.status + " — is cmk-frontend-vue installed on this site?");
+  const manifest = await res.json();
+
+  const mainEntry = manifest["src/main.ts"];
+  if (!mainEntry || !mainEntry.file) throw new Error("no 'src/main.ts' entry in manifest");
+  log("resolved src/main.ts → " + mainEntry.file, "ok");
+
+  const styles = collectStylesheets(manifest, "src/main.ts");
+  log("stylesheets: " + (styles.length ? styles.join(", ") : "(none)"), "dim");
+  for (const href of styles) {
+    const link = document.createElement("link");
+    link.rel = "stylesheet";
+    link.href = VUE_BASE + "/" + href;
+    document.head.appendChild(link);
+  }
+
+  const src = VUE_BASE + "/" + mainEntry.file;
+  log("importing module " + src + " …", "dim");
+  await import(/* @vite-ignore */ src);
+  log("bundle loaded — cmk-* custom elements registered", "ok");
+
+  // Report which elements actually registered (feedback on version drift).
+  const known = ["cmk-icon", "cmk-form-spec", "cmk-dialog", "cmk-date-time-picker", "cmk-quick-setup"];
+  const present = known.filter((n) => customElements.get(n));
+  log("present: " + present.join(", "), "dim");
+}
+
+function mount() {
+  const name = document.getElementById("cname").value.trim();
+  const raw = document.getElementById("cdata").value;
+  const mountEl = document.getElementById("mount");
+  mountEl.innerHTML = "";
+  if (!customElements.get(name)) {
+    log("✗ '" + name + "' is not a registered custom element", "err");
+    return;
+  }
+  let dataStr;
+  try {
+    dataStr = JSON.stringify(JSON.parse(raw)); // validate + normalise
+  } catch (e) {
+    log("✗ data is not valid JSON: " + e.message, "err");
+    return;
+  }
+  const el = document.createElement(name);
+  el.setAttribute("data", dataStr);
+  el.addEventListener("error", (e) => log("✗ component error: " + e.message, "err"));
+  mountEl.appendChild(el);
+  log("✓ mounted <" + name + ">", "ok");
+}
+
+// Presets
+const PRESETS = {
+  "preset-icon":   ["cmk-icon", { icon: "sidebar_folder", size: "xxlarge" }],
+  "preset-dialog": ["cmk-dialog", { type: "info", title: "Hello from the site's Vue", message: "This is a native cmk-frontend-vue component." }],
+  "preset-form":   ["cmk-form-spec", { id: "eval", spec: { type: "string", title: "stub", validators: [] }, data: "", validation: [] }],
+};
+for (const [btnId, [name, data]] of Object.entries(PRESETS)) {
+  document.getElementById(btnId).addEventListener("click", () => {
+    document.getElementById("cname").value = name;
+    document.getElementById("cdata").value = JSON.stringify(data, null, 2);
+  });
+}
+document.getElementById("mount-btn").addEventListener("click", mount);
+
+// Boot.
+loadBundle().catch((e) => log("✗ " + e.message, "err"));
+</script>
+</body>
+</html>

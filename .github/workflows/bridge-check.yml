@@ -1,0 +1,114 @@
+# SPDX-License-Identifier: GPL-2.0-only
+name: Bridge check
+
+# The Explorer eval page (web/htdocs/json_api/vue-eval.html) binds at runtime to
+# the *site's own* cmk-frontend-vue bundle. That bundle is internal and
+# unversioned, so this workflow boots real Checkmk containers, installs the MKP,
+# and drives a headless browser at the page to prove a native component still
+# mounts. A red build is the earliest signal that a Checkmk release changed the
+# custom-element names or the `data` contract the Explorer relies on.
+#
+# Runs weekly (drift catch as dailies move) and on demand only — NOT on PRs.
+# The smoke needs a *current* check-mk-raw 2.5.0 image, but until 2.5.0 goes
+# stable the only public tags are stale beta dailies whose internal
+# cmk-frontend-vue contract no longer matches, so gating PRs on it would wedge
+# every change. The weekly run keeps catching real drift once a current 2.5.0
+# image is published. Kept out of the main CI regardless, to avoid adding
+# container + browser time to unrelated changes.
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 6 * * 1" # Mondays 06:00 UTC
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  bridge-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: "3.12"
+
+      - name: Build the Explorer MKP (stdlib only)
+        id: build
+        run: |
+          set -euo pipefail
+          python3 scripts/build_mkp.py --package explorer
+          VERSION="$(python3 -c 'import tomllib,pathlib; print(tomllib.loads(pathlib.Path("pyproject.toml").read_text())["project"]["version"])')"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          ls -l "json_api_explorer-$VERSION.mkp"
+
+      - name: Install Playwright (Python) + Chromium
+        run: |
+          pip install playwright pytest
+          playwright install --with-deps chromium
+
+      # The newest 2.5 daily (2.5 has no floating '-latest' tag and dailies are
+      # pruned, so it's resolved at run time rather than hard-coded).
+      - name: Resolve the Checkmk images to test against
+        id: images
+        run: |
+          set -euo pipefail
+          newest_daily() {
+            curl -fsSL "https://hub.docker.com/v2/repositories/checkmk/check-mk-raw/tags/?page_size=100&name=$1" \
+              | python3 -c "import sys, json; ts=[t['name'] for t in json.load(sys.stdin)['results'] if t['name'].startswith('$1')]; print(sorted(ts)[-1] if ts else '')"
+          }
+          # The Explorer MKP requires Checkmk >= 2.5.0, so only smoke it on 2.5.0+
+          # sites (the agent's 2.4 support is covered by the main CI 'test' job).
+          v25="$(newest_daily 2.5.0-2 || true)"
+          [ -n "$v25" ] || { echo "::error::no check-mk-raw 2.5.0 daily image found"; exit 1; }
+          images="checkmk/check-mk-raw:$v25"
+          echo "list=$images" >> "$GITHUB_OUTPUT"
+          echo "Testing against: $images"
+
+      - name: Bridge smoke against each Checkmk site
+        env:
+          CMK_PASSWORD: "S3cure_cmk_bridge_pw"
+          VERSION: ${{ steps.build.outputs.version }}
+        run: |
+          set -uo pipefail
+          rc=0
+          for img in ${{ steps.images.outputs.list }}; do
+            echo "::group::$img"
+            docker rm -f cmk >/dev/null 2>&1 || true
+            docker run -d --name cmk -p 5000:5000 -e CMK_PASSWORD="$CMK_PASSWORD" "$img" >/dev/null
+
+            # Wait for the site apache to serve the GUI (fresh sites take a bit).
+            ready=""
+            for _ in $(seq 1 60); do
+              code="$(curl -s -o /dev/null -w '%{http_code}' http://localhost:5000/cmk/check_mk/login.py || true)"
+              if [ "$code" = "200" ]; then ready=1; break; fi
+              sleep 3
+            done
+            if [ -z "$ready" ]; then
+              echo "::error::site did not come up for $img"
+              docker logs cmk 2>&1 | tail -50
+              docker rm -f cmk >/dev/null 2>&1 || true
+              rc=1; echo "::endgroup::"; continue
+            fi
+
+            # Install the freshly built Explorer package into the running site.
+            # Static htdocs assets are served straight off disk — no restart.
+            docker cp "json_api_explorer-$VERSION.mkp" cmk:/tmp/pkg.mkp
+            docker exec cmk su -l cmk -c "mkp add /tmp/pkg.mkp && mkp enable json_api_explorer $VERSION"
+
+            # Drive a real browser at the bridge page (see tests/bridge/).
+            if CMK_SITE_URL="http://localhost:5000/cmk" python3 -m pytest tests/bridge -q; then
+              echo "bridge OK on $img"
+            else
+              echo "::error::bridge smoke failed on $img"
+              docker logs cmk 2>&1 | tail -50
+              rc=1
+            fi
+
+            docker rm -f cmk >/dev/null 2>&1 || true
+            echo "::endgroup::"
+          done
+          exit $rc
