@@ -252,6 +252,7 @@ def _result(spec: dict, service: str, found: bool, value: object, error: str, ur
         "levels_upper": spec.get("levels_upper"),
         "levels_lower": spec.get("levels_lower"),
         "match": spec.get("match"),
+        "calc": spec.get("calc"),
         "unit": spec.get("unit"),
     }
 

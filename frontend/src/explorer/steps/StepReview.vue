@@ -67,6 +67,122 @@ function parseMatch(match: unknown): { mode: string; cfg: Record<string, unknown
   return null
 }
 
+/**
+ * Safely evaluate an arithmetic `calc` expression over the variable `value`.
+ *
+ * Mirrors the special-agent grammar: decimal numbers, the identifier `value`,
+ * parentheses, binary `+ - * /` (with `*`/`/` binding tighter than `+`/`-`) and
+ * unary `+`/`-`. A hand-written recursive-descent parser is used deliberately —
+ * NO `eval`/`new Function` — so nothing outside the grammar can run. Returns the
+ * computed number, or `null` on any tokenize/parse error, unknown token, or a
+ * non-finite result (e.g. division by zero).
+ */
+function evalCalc(expr: string, value: number): number | null {
+  // --- Tokenize into numbers / 'value' / operators / parens. ---------------
+  type Token = { t: 'num'; v: number } | { t: 'value' } | { t: 'op'; v: string }
+  const tokens: Token[] = []
+  let i = 0
+  while (i < expr.length) {
+    const c = expr[i]!
+    if (c === ' ' || c === '\t' || c === '\n' || c === '\r') {
+      i += 1
+    } else if (c === '+' || c === '-' || c === '*' || c === '/' || c === '(' || c === ')') {
+      tokens.push({ t: 'op', v: c })
+      i += 1
+    } else if (c >= '0' && c <= '9') {
+      // A decimal number: leading digits, optional single '.' with more digits.
+      let j = i + 1
+      while (j < expr.length && expr[j]! >= '0' && expr[j]! <= '9') j += 1
+      if (j < expr.length && expr[j] === '.') {
+        j += 1
+        while (j < expr.length && expr[j]! >= '0' && expr[j]! <= '9') j += 1
+      }
+      tokens.push({ t: 'num', v: Number(expr.slice(i, j)) })
+      i = j
+    } else if (c === '.') {
+      // A number starting with '.', e.g. `.5`.
+      let j = i + 1
+      while (j < expr.length && expr[j]! >= '0' && expr[j]! <= '9') j += 1
+      if (j === i + 1) return null // a lone '.'
+      tokens.push({ t: 'num', v: Number(expr.slice(i, j)) })
+      i = j
+    } else if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')) {
+      // The only identifier allowed is `value`; anything else (function names,
+      // other variables) is rejected.
+      let j = i + 1
+      while (j < expr.length) {
+        const d = expr[j]!
+        if ((d >= 'a' && d <= 'z') || (d >= 'A' && d <= 'Z')) j += 1
+        else break
+      }
+      if (expr.slice(i, j) !== 'value') return null
+      tokens.push({ t: 'value' })
+      i = j
+    } else {
+      return null // unknown character
+    }
+  }
+
+  // --- Recursive-descent parser with standard precedence. ------------------
+  let p = 0
+  const peek = (): Token | undefined => tokens[p]
+  // expr := term (('+' | '-') term)*
+  function parseExpr(): number {
+    let acc = parseTerm()
+    for (let tok = peek(); tok && tok.t === 'op' && (tok.v === '+' || tok.v === '-'); tok = peek()) {
+      p += 1
+      const rhs = parseTerm()
+      acc = tok.v === '+' ? acc + rhs : acc - rhs
+    }
+    return acc
+  }
+  // term := factor (('*' | '/') factor)*
+  function parseTerm(): number {
+    let acc = parseFactor()
+    for (let tok = peek(); tok && tok.t === 'op' && (tok.v === '*' || tok.v === '/'); tok = peek()) {
+      p += 1
+      const rhs = parseFactor()
+      acc = tok.v === '*' ? acc * rhs : acc / rhs
+    }
+    return acc
+  }
+  // factor := ('+' | '-') factor | '(' expr ')' | number | value
+  function parseFactor(): number {
+    const tok = peek()
+    if (!tok) throw new Error('unexpected end')
+    if (tok.t === 'op' && (tok.v === '+' || tok.v === '-')) {
+      p += 1
+      const operand = parseFactor()
+      return tok.v === '-' ? -operand : operand
+    }
+    if (tok.t === 'op' && tok.v === '(') {
+      p += 1
+      const inner = parseExpr()
+      const close = peek()
+      if (!close || close.t !== 'op' || close.v !== ')') throw new Error('missing )')
+      p += 1
+      return inner
+    }
+    if (tok.t === 'num') {
+      p += 1
+      return tok.v
+    }
+    if (tok.t === 'value') {
+      p += 1
+      return value
+    }
+    throw new Error('unexpected token')
+  }
+
+  try {
+    const result = parseExpr()
+    if (p !== tokens.length) return null // trailing tokens left unparsed
+    return Number.isFinite(result) ? result : null
+  } catch {
+    return null
+  }
+}
+
 /** Whether `value` fully matches `pattern` (anchored); false on a bad regex. */
 function fullMatch(value: string, pattern: string): boolean {
   try {
@@ -133,6 +249,9 @@ function definedSummary(x: ExtractionValue): string[] {
   const parts: string[] = []
   if (typeof x.unit === 'string' && x.unit) {
     parts.push(_t('unit %{u}', { u: x.unit }))
+  }
+  if (typeof x.calc === 'string' && x.calc) {
+    parts.push(_t('calc %{c}', { c: x.calc }))
   }
   const upper = levelsPair(x.levels_upper)
   if (upper) {
@@ -214,17 +333,39 @@ const reviews = computed<EndpointReview[]>(() =>
         const name = extractionService(x) || _t('(unnamed)')
         const path = extractionPath(x)
         const defined = definedSummary(x)
+        // Optional arithmetic transform applied to a NUMERIC sample value before
+        // levels/display, e.g. `value / 1024 / 1024`.
+        const calc = typeof x.calc === 'string' && x.calc ? x.calc : null
         const matches = sample !== null ? resolvePath(sample, path) : []
         if (!matches.length) {
           return [{ service: name, path, value: undefined, defined, state: 'none' as StateKind }]
         }
-        return matches.map((m) => ({
-          service: matches.length > 1 && m.label ? `${name} ${m.label}` : name,
-          path,
-          value: m.value,
-          defined,
-          state: evalState(m.value, x),
-        }))
+        return matches.map((m): Row => {
+          // Transform the value when `calc` is set and the sample is numeric.
+          // On a bad expression evalCalc returns null: leave the raw value shown
+          // and mark the numeric preview unresolved rather than crashing.
+          let value = m.value
+          if (calc !== null && typeof m.value === 'number') {
+            const transformed = evalCalc(calc, m.value)
+            if (transformed === null) {
+              return {
+                service: matches.length > 1 && m.label ? `${name} ${m.label}` : name,
+                path,
+                value: m.value,
+                defined,
+                state: 'none' as StateKind,
+              }
+            }
+            value = transformed
+          }
+          return {
+            service: matches.length > 1 && m.label ? `${name} ${m.label}` : name,
+            path,
+            value,
+            defined,
+            state: evalState(value, x),
+          }
+        })
       })
     return { url: endpointUrl(connection) || _t('Endpoint %{n}', { n: ei + 1 }), rows }
   }),

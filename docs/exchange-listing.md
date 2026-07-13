@@ -21,6 +21,9 @@ included. One rule. Any API. Done.
   method, auth, and fields; an unreachable one only affects its own services.
 - 📈 **Thresholds & graphs in Checkmk** — WARN/CRIT and metrics live in *your*
   rule, not upstream in the API.
+- 🧮 **Transform the numeric value** — apply a small arithmetic expression like
+  `value / 1024 / 1024` (bytes→MiB) or `(value - 32) * 5 / 9` (°F→°C) before
+  levels and the metric; safely evaluated, no `eval`.
 - 🔤 **String matching, two ways** — require a value to match a regex (pick the
   state when it doesn't, default CRIT), or map values like `ready` / `degraded`
   / `failed` straight to OK / WARN / CRIT.

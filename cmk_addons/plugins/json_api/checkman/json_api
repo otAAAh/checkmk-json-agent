@@ -9,7 +9,11 @@ description:
  configured in the rule's endpoints. Each configured field becomes one service.
 
  A numeric value with configured levels is checked against those levels and
- exposed as a metric. String matching offers two modes: a value can be required
+ exposed as a metric. A field may also carry an arithmetic transform (an
+ expression on the variable {value}, e.g. {value / 1024 / 1024}) that is applied
+ to the numeric value first, so the levels, the metric and the summary all use
+ the transformed value; a broken expression or a non-finite result makes the
+ service {UNKNOWN}. String matching offers two modes: a value can be required
  to fully match a regular expression, with a configurable state (default {CRIT})
  when it does not; or the value can be mapped to a state by matching it against
  separate OK, WARN and CRIT regular expressions, tried in that order with the

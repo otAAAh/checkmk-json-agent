@@ -8,6 +8,7 @@ extract (each with optional thresholds / expected-string match). This is the
 deliberate UX choice — no separate master-item / discovery / threshold rules.
 """
 
+import ast
 import re
 from urllib.parse import urlparse
 
@@ -42,6 +43,47 @@ def _validate_regex(value: str) -> None:
         raise validators.ValidationError(
             Message("Invalid regular expression: %s") % str(exc)
         ) from exc
+
+
+# The AST node types a calc expression may contain: an arithmetic tree over
+# numeric literals and the variable 'value'. Kept in lock-step with the check's
+# own evaluator (_apply_calc in agent_based/json_api.py).
+_CALC_ALLOWED_NODES = (
+    ast.Expression,
+    ast.BinOp,
+    ast.UnaryOp,
+    ast.Constant,
+    ast.Name,
+    ast.Load,  # every Name carries a Load context node, harmless
+    ast.Add,
+    ast.Sub,
+    ast.Mult,
+    ast.Div,
+    ast.UAdd,
+    ast.USub,
+)
+
+
+def _validate_calc(value: str) -> None:
+    try:
+        tree = ast.parse(value, mode="eval")
+    except SyntaxError as exc:
+        raise validators.ValidationError(
+            Message("Invalid arithmetic expression: %s") % str(exc)
+        ) from exc
+    for node in ast.walk(tree):
+        if not isinstance(node, _CALC_ALLOWED_NODES):
+            raise validators.ValidationError(
+                Message("Only the variable 'value', numbers, parentheses and + - * / are allowed.")
+            )
+        if isinstance(node, ast.Name) and node.id != "value":
+            raise validators.ValidationError(
+                Message("Unknown variable '%s' - only 'value' is available.") % node.id
+            )
+        if isinstance(node, ast.Constant) and (
+            isinstance(node.value, bool) or not isinstance(node.value, (int, float))
+        ):
+            raise validators.ValidationError(Message("Only numeric constants are allowed."))
 
 
 def _validate_unique_endpoints(value: object) -> None:
@@ -301,6 +343,22 @@ def _extraction() -> Dictionary:
                     form_spec_template=Float(),
                     level_direction=LevelDirection.LOWER,
                     prefill_fixed_levels=InputHint((0.0, 0.0)),
+                ),
+            ),
+            "calc": DictElement(
+                required=False,
+                parameter_form=String(
+                    title=Title("Transform the numeric value"),
+                    help_text=Help(
+                        "An arithmetic expression applied to a numeric value "
+                        "before the levels and the metric, using the variable "
+                        "'value'. Only numbers, parentheses and + - * / are "
+                        "allowed. Examples: 'value / 1024 / 1024' (bytes to MiB), "
+                        "'value * 1000' (seconds to milliseconds), "
+                        "'(value - 32) * 5 / 9' (Fahrenheit to Celsius)."
+                    ),
+                    prefill=InputHint("value / 1024 / 1024"),
+                    custom_validate=(_validate_calc,),
                 ),
             ),
             "match": DictElement(

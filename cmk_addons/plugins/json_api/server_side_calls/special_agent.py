@@ -49,6 +49,8 @@ class Extraction(BaseModel, frozen=True):
     # straight from the CascadingSingleChoice form spec. Opaque here; the check
     # interprets it.
     match: object = None
+    # Arithmetic expression over 'value', applied to a numeric value by the check.
+    calc: str | None = None
 
 
 class Endpoint(BaseModel, frozen=True):
