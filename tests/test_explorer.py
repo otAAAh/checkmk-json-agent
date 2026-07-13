@@ -87,7 +87,7 @@ def test_ruleset_has_required_keys_to_check():
     # Guard the guard: if the AST parse found nothing, the checks below are
     # vacuous and the whole test is worthless.
     assert _required_keys("_endpoint") >= {"url", "method", "extractions"}
-    assert _required_keys("_extraction") == {"service", "path"}
+    assert _required_keys("_extraction") == {"service", "path", "count"}
 
 
 def test_explorer_value_raw_covers_required_endpoint_keys(rule_value: dict):

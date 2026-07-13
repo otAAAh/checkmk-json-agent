@@ -8,6 +8,7 @@ extract (each with optional thresholds / expected-string match). This is the
 deliberate UX choice — no separate master-item / discovery / threshold rules.
 """
 
+import ast
 import re
 from urllib.parse import urlparse
 
@@ -42,6 +43,51 @@ def _validate_regex(value: str) -> None:
         raise validators.ValidationError(
             Message("Invalid regular expression: %s") % str(exc)
         ) from exc
+
+
+# The AST node types a calc expression may contain: an arithmetic tree over
+# numeric literals and the variable 'value'. Kept in lock-step with the check's
+# own evaluator (_apply_calc in agent_based/json_api.py).
+_CALC_ALLOWED_NODES = (
+    ast.Expression,
+    ast.BinOp,
+    ast.UnaryOp,
+    ast.Constant,
+    ast.Name,
+    ast.Load,  # every Name carries a Load context node, harmless
+    ast.Add,
+    ast.Sub,
+    ast.Mult,
+    ast.Div,
+    ast.UAdd,
+    ast.USub,
+)
+
+
+def _validate_calc(value: str) -> None:
+    if not value.strip():
+        # An empty expression means "no transform" - the check skips a falsy
+        # calc, so accept it here instead of tripping on ast.parse("").
+        return
+    try:
+        tree = ast.parse(value, mode="eval")
+    except SyntaxError as exc:
+        raise validators.ValidationError(
+            Message("Invalid arithmetic expression: %s") % str(exc)
+        ) from exc
+    for node in ast.walk(tree):
+        if not isinstance(node, _CALC_ALLOWED_NODES):
+            raise validators.ValidationError(
+                Message("Only the variable 'value', numbers, parentheses and + - * / are allowed.")
+            )
+        if isinstance(node, ast.Name) and node.id != "value":
+            raise validators.ValidationError(
+                Message("Unknown variable '%s' - only 'value' is available.") % node.id
+            )
+        if isinstance(node, ast.Constant) and (
+            isinstance(node.value, bool) or not isinstance(node.value, (int, float))
+        ):
+            raise validators.ValidationError(Message("Only numeric constants are allowed."))
 
 
 def _validate_unique_endpoints(value: object) -> None:
@@ -206,14 +252,16 @@ def _migrate_extraction(value: object) -> dict[str, object]:
     ``("must_match", <regex>)`` so existing rules keep their behaviour."""
     if not isinstance(value, dict):
         raise TypeError(f"Unexpected extraction value: {value!r}")
-    if "expected" not in value or "match" in value:
-        return value
     migrated = dict(value)
-    expected = migrated.pop("expected")
-    if isinstance(expected, str):
-        # The old flat regex was OK-on-match, CRIT otherwise - keep that exactly
-        # by omitting state_no_match (its CRIT default).
-        migrated["match"] = ("must_match", {"pattern": expected})
+    if "expected" in migrated and "match" not in migrated:
+        expected = migrated.pop("expected")
+        if isinstance(expected, str):
+            # The old flat regex was OK-on-match, CRIT otherwise - keep that
+            # exactly by omitting state_no_match (its CRIT default).
+            migrated["match"] = ("must_match", {"pattern": expected})
+    # 'count' is required as of the count-elements feature; a rule saved before it
+    # lacks the key, so default it here (off) to satisfy the required element.
+    migrated.setdefault("count", False)
     return migrated
 
 
@@ -268,6 +316,24 @@ def _extraction() -> Dictionary:
                     ),
                 ),
             ),
+            "count": DictElement(
+                # Required (a plain, always-present labelled checkbox like the
+                # TLS/redirect toggles) - a required=False boolean would render as
+                # an unlabelled "enable this option" checkbox, which is confusing.
+                required=True,
+                parameter_form=BooleanChoice(
+                    label=Label("Count the number of elements at this path"),
+                    help_text=Help(
+                        "When the path points at a JSON array or object, monitor "
+                        "the number of elements it contains instead of the value "
+                        "itself. The count is a number, so a unit, levels, a "
+                        "transform and a metric all apply to it. If the path does "
+                        "not resolve to an array or object, the service becomes "
+                        "UNKNOWN."
+                    ),
+                    prefill=DefaultValue(False),
+                ),
+            ),
             "unit": DictElement(
                 required=False,
                 parameter_form=SingleChoice(
@@ -301,6 +367,22 @@ def _extraction() -> Dictionary:
                     form_spec_template=Float(),
                     level_direction=LevelDirection.LOWER,
                     prefill_fixed_levels=InputHint((0.0, 0.0)),
+                ),
+            ),
+            "calc": DictElement(
+                required=False,
+                parameter_form=String(
+                    title=Title("Transform the numeric value"),
+                    help_text=Help(
+                        "An arithmetic expression applied to a numeric value "
+                        "before the levels and the metric, using the variable "
+                        "'value'. Only numbers, parentheses and + - * / are "
+                        "allowed. Examples: 'value / 1024 / 1024' (bytes to MiB), "
+                        "'value * 1000' (seconds to milliseconds), "
+                        "'(value - 32) * 5 / 9' (Fahrenheit to Celsius)."
+                    ),
+                    prefill=InputHint("value / 1024 / 1024"),
+                    custom_validate=(_validate_calc,),
                 ),
             ),
             "match": DictElement(

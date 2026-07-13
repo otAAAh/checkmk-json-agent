@@ -7,6 +7,7 @@ One service per configured extraction (keyed by its service name). Numeric
 values get levels + a metric; string values get an optional regex match.
 """
 
+import ast
 import json
 import math
 import re
@@ -62,6 +63,7 @@ class Item:
     levels_upper: _Levels
     levels_lower: _Levels
     match: _Match
+    calc: str | None
     metric_name: str
     path: str
     url: str
@@ -146,6 +148,7 @@ def parse_json_api(string_table: StringTable) -> Section | None:
             levels_upper=_coerce_levels(result.get("levels_upper")),
             levels_lower=_coerce_levels(result.get("levels_lower")),
             match=_coerce_match(result.get("match"), result.get("expected")),
+            calc=result.get("calc") if isinstance(result.get("calc"), str) else None,
             metric_name=_metric_name(result.get("unit")),
             path=result.get("path", ""),
             url=result.get("url", ""),
@@ -238,8 +241,75 @@ def _evaluate_match(match: tuple[str, object], text: str) -> tuple[State, str]:
     return State(no_match), ("no pattern matched" if no_match != 0 else "")
 
 
+def _apply_calc(value: float, expr: str) -> float:
+    """Evaluate a small arithmetic expression over the variable ``value``.
+
+    Only numeric literals, ``value``, parentheses and + - * / (incl. unary +/-)
+    are supported; anything else raises ``ValueError``. This walks the AST and
+    never uses ``eval``, so a rule cannot smuggle in code execution. Operators
+    are dispatched with explicit ``isinstance`` branches (rather than a lookup
+    table of ``operator`` callables) so the arithmetic stays statically typed.
+    """
+
+    def _eval(node: ast.AST) -> float:
+        if isinstance(node, ast.Expression):
+            return _eval(node.body)
+        if isinstance(node, ast.BinOp):
+            left, right = _eval(node.left), _eval(node.right)
+            if isinstance(node.op, ast.Add):
+                return left + right
+            if isinstance(node.op, ast.Sub):
+                return left - right
+            if isinstance(node.op, ast.Mult):
+                return left * right
+            if isinstance(node.op, ast.Div):
+                return left / right
+            raise ValueError("unsupported operator")
+        if isinstance(node, ast.UnaryOp):
+            operand = _eval(node.operand)
+            if isinstance(node.op, ast.UAdd):
+                return +operand
+            if isinstance(node.op, ast.USub):
+                return -operand
+            raise ValueError("unsupported operator")
+        if (
+            isinstance(node, ast.Constant)
+            and not isinstance(node.value, bool)
+            and isinstance(node.value, (int, float))
+        ):
+            return float(node.value)
+        if isinstance(node, ast.Name) and node.id == "value":
+            return value
+        raise ValueError("unsupported expression")
+
+    return float(_eval(ast.parse(expr, mode="eval")))
+
+
+def _fmt_number(number: float) -> str:
+    """Render a (calculated) number without a spurious trailing ``.0``."""
+    return str(int(number)) if number.is_integer() else str(number)
+
+
 def _value_results(entry: Item) -> CheckResult:
     number = _as_number(entry.value)
+
+    # A numeric value may be transformed by a small arithmetic expression before
+    # levels and the metric see it (e.g. bytes -> MiB). A broken calculation
+    # (bad expression, divide-by-zero, non-finite result) is surfaced, never
+    # silently ignored.
+    if number is not None and entry.calc:
+        try:
+            number = _apply_calc(number, entry.calc)
+        except (ValueError, ZeroDivisionError, OverflowError) as exc:
+            yield Result(state=State.UNKNOWN, summary=f"Calculation '{entry.calc}' failed: {exc}")
+            return
+        if not math.isfinite(number):
+            yield Result(
+                state=State.UNKNOWN,
+                summary=f"Calculation '{entry.calc}' produced a non-finite result",
+            )
+            return
+
     has_levels = bool(entry.levels_upper or entry.levels_lower)
 
     if number is not None and has_levels:
@@ -283,10 +353,15 @@ def _value_results(entry: Item) -> CheckResult:
         )
         return
 
-    # No levels, no expected pattern: surface the value, add a metric if numeric.
-    yield Result(state=State.OK, summary=f"Value: {_render_value(entry.value)}")
+    # No levels, no match: surface the value, add a metric if numeric. When a
+    # calculation transformed the number, show the transformed value (what the
+    # metric records), not the raw JSON.
     if number is not None:
+        shown = _fmt_number(number) if entry.calc else _render_value(entry.value)
+        yield Result(state=State.OK, summary=f"Value: {shown}")
         yield Metric(entry.metric_name, number)
+    else:
+        yield Result(state=State.OK, summary=f"Value: {_render_value(entry.value)}")
 
 
 def check_json_api(item: str, section: Section) -> CheckResult:

@@ -6,7 +6,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: checkmk-json-agent\n"
 "Report-Msgid-Bugs-To: https://github.com/otAAAh/checkmk-json-agent/issues\n"
-"POT-Creation-Date: 2026-07-13 15:24+0200\n"
+"POT-Creation-Date: 2026-07-13 15:51+0200\n"
 "PO-Revision-Date: 2026-07-06 12:00+0000\n"
 "Last-Translator: checkmk-json-agent contributors\n"
 "Language-Team: Romanian\n"
@@ -15,71 +15,90 @@ msgstr ""
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:43
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:44
 #, python-format
 msgid "Invalid regular expression: %s"
 msgstr "Expresie regulată invalidă: %s"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:60
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:72
+#, python-format
+msgid "Invalid arithmetic expression: %s"
+msgstr "Expresie aritmetică invalidă: %s"
+
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:77
+msgid ""
+"Only the variable 'value', numbers, parentheses and + - * / are allowed."
+msgstr "Sunt permise numai variabila 'value', numere, paranteze și + - * /."
+
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:81
+#, python-format
+msgid "Unknown variable '%s' - only 'value' is available."
+msgstr "Variabilă necunoscută '%s' - numai 'value' este disponibilă."
+
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:86
+msgid "Only numeric constants are allowed."
+msgstr "Numai constante numerice sunt permise."
+
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:102
 #, python-format
 msgid "Each endpoint URL must be unique. Duplicated: %s"
 msgstr "Fiecare URL de endpoint trebuie să fie unic. Duplicat: %s"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:70
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:112
 msgid "The URL must not contain whitespace."
 msgstr "URL-ul nu trebuie să conțină spații albe."
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:74
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:116
 msgid "Enter a valid http(s) URL, e.g. 'https://host/path'."
 msgstr "Introduceți un URL http(s) valid, de ex. 'https://host/cale'."
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:80
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:122
 msgid "Authentication"
 msgstr "Autentificare"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:85
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:127
 msgid "Basic authentication (username / password)"
 msgstr "Autentificare de bază (nume de utilizator / parolă)"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:91
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:133
 msgid "Username"
 msgstr "Nume de utilizator"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:98
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:140
 msgid "Password"
 msgstr "Parolă"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:107
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:149
 msgid "Bearer token"
 msgstr "Token Bearer"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:113
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:155
 msgid "Token"
 msgstr "Token"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:114
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:156
 msgid "Sent as 'Authorization: Bearer <token>'."
 msgstr "Trimis ca 'Authorization: Bearer <token>'."
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:127
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:169
 msgid "String matching"
 msgstr "Potrivire de șiruri de caractere"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:128
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:170
 msgid "How to turn a string value into a Checkmk service state."
 msgstr ""
 "Cum se transformă o valoare șir de caractere într-o stare de serviciu "
 "Checkmk."
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:133
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:175
 msgid "Value must match a regular expression"
 msgstr "Valoarea trebuie să corespundă unei expresii regulate"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:139
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:181
 msgid "Expected value (regex)"
 msgstr "Valoare așteptată (regex)"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:141
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:183
 msgid ""
 "For string values: the value must fully match this regular expression (e.g. "
 "'UP|ok')."
@@ -87,15 +106,15 @@ msgstr ""
 "Pentru valori șir de caractere: valoarea trebuie să corespundă complet "
 "acestei expresii regulate (de ex. 'UP|ok')."
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:150
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:192
 msgid "State when the value does not match"
 msgstr "Starea când valoarea nu corespunde"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:159
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:201
 msgid "Map the value to a state (OK / WARN / CRIT)"
 msgstr "Asociază valoarea unei stări (OK / WARN / CRIT)"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:162
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:204
 msgid ""
 "For string values with several known states: each pattern is a regular "
 "expression matched against the whole value. They are tried in the order OK, "
@@ -105,39 +124,39 @@ msgstr ""
 "este o expresie regulată comparată cu întreaga valoare. Sunt încercate în "
 "ordinea OK, WARN, CRIT și prima potrivire câștigă."
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:171
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:213
 msgid "OK when the value matches (regex)"
 msgstr "OK când valoarea corespunde (regex)"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:178
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:220
 msgid "WARN when the value matches (regex)"
 msgstr "WARN când valoarea corespunde (regex)"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:185
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:227
 msgid "CRIT when the value matches (regex)"
 msgstr "CRIT când valoarea corespunde (regex)"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:192
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:234
 msgid "State when nothing matches"
 msgstr "Starea când nimic nu corespunde"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:222
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:264
 msgid "Field to monitor"
 msgstr "Câmp de monitorizat"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:228
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:270
 msgid "Service name"
 msgstr "Nume serviciu"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:229
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:271
 msgid "Becomes the Checkmk service description for this field."
 msgstr "Devine descrierea serviciului Checkmk pentru acest câmp."
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:236
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:278
 msgid "JSON path"
 msgstr "Cale JSON"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:238
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:280
 msgid ""
 "Dotted path into the JSON response, e.g. 'status', 'components.db.status' or "
 "'items[0].count'. Use a '[*]' wildcard (e.g. 'nodes[*].health') to create "
@@ -160,11 +179,11 @@ msgstr ""
 "sau '[' pot fi adresate cu segmente între paranteze și ghilimele, de ex. "
 "\"data['foo.bar'].value\"."
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:258
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:300
 msgid "Item label path (for '[*]' wildcards)"
 msgstr "Cale etichetă element (pentru metacaractere '[*]')"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:260
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:302
 msgid ""
 "When the path contains a '[*]' wildcard, this optional path - relative to "
 "each array element, e.g. 'name' or 'id' - provides the label appended to the "
@@ -180,11 +199,28 @@ msgstr ""
 "nivel, iar etichetele sunt unite cu ' / ' (de ex. '<pod> / <container>'). "
 "Alegeți un câmp care este unic și stabil între rulări."
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:274
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:316
+msgid "Count the number of elements at this path"
+msgstr "Numără elementele de la această cale"
+
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:318
+msgid ""
+"When the path points at a JSON array or object, monitor the number of "
+"elements it contains instead of the value itself. The count is a number, so "
+"a unit, levels, a transform and a metric all apply to it. If the path does "
+"not resolve to an array or object, the service becomes UNKNOWN."
+msgstr ""
+"Când calea indică o matrice sau un obiect JSON, monitorizează numărul de "
+"elemente pe care le conține în loc de valoarea în sine. Numărătoarea este un "
+"număr, așadar o unitate, niveluri, o transformare și o metrică se aplică "
+"toate la aceasta. Dacă calea nu se rezolvă la o matrice sau un obiect, "
+"serviciul devine UNKNOWN."
+
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:331
 msgid "Unit (for numeric values)"
 msgstr "Unitate (pentru valori numerice)"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:276
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:333
 msgid ""
 "Renders the metric and graph with this unit. Leave unset for a plain, unit-"
 "less value. Only affects numeric values."
@@ -192,43 +228,61 @@ msgstr ""
 "Redă metrica și graficul cu această unitate. Lăsați nesetat pentru o valoare "
 "simplă, fără unitate. Afectează doar valorile numerice."
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:280
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:337
 msgid "Count (integer)"
 msgstr "Număr (întreg)"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:281
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:338
 msgid "Bytes (IEC: KiB, MiB, ...)"
 msgstr "Octeți (IEC: KiB, MiB, ...)"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:282
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:339
 msgid "Seconds (duration)"
 msgstr "Secunde (durată)"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:283
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:340
 msgid "Percent"
 msgstr "Procent"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:285
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:342
 msgid "No unit"
 msgstr "Fără unitate"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:291
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:348
 msgid "Upper levels (for numeric values)"
 msgstr "Niveluri superioare (pentru valori numerice)"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:300
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:357
 msgid "Lower levels (for numeric values)"
 msgstr "Niveluri inferioare (pentru valori numerice)"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:316
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:366
+msgid "Transform the numeric value"
+msgstr "Transformă valoarea numerică"
+
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:368
+msgid ""
+"An arithmetic expression applied to a numeric value before the levels and "
+"the metric, using the variable 'value'. Only numbers, parentheses and + - "
+"* / are allowed. Examples: 'value / 1024 / 1024' (bytes to MiB), 'value * "
+"1000' (seconds to milliseconds), '(value - 32) * 5 / 9' (Fahrenheit to "
+"Celsius)."
+msgstr ""
+"O expresie aritmetică aplicată unei valori numerice înainte de niveluri și "
+"de metrică, utilizând variabila 'value'. Sunt permise numai numere, "
+"paranteze și + - * /. Exemple: 'value / 1024 / 1024' (octeți în MiB), 'value "
+"* 1000' (secunde în milisecunde), '(value - 32) * 5 / 9' (Fahrenheit în "
+"Celsius)."
+
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:389
 msgid "Endpoint"
 msgstr "Endpoint"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:321
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:394
 msgid "URL"
 msgstr "URL"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:323
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:396
 msgid ""
 "Full URL of the JSON endpoint, including scheme, e.g. 'https://app.example."
 "com/actuator/health'."
@@ -236,47 +290,47 @@ msgstr ""
 "URL complet al endpoint-ului JSON, inclusiv schema, de ex. 'https://app."
 "example.com/actuator/health'."
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:332
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:405
 msgid "HTTP method"
 msgstr "Metodă HTTP"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:334
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:407
 msgid "GET"
 msgstr "GET"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:335
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:408
 msgid "POST"
 msgstr "POST"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:343
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:416
 msgid "Request body (for POST)"
 msgstr "Corpul cererii (pentru POST)"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:349
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:422
 msgid "Additional request headers"
 msgstr "Anteturi de cerere suplimentare"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:354
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:427
 msgid "Header name"
 msgstr "Nume antet"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:358
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:431
 msgid "Header value"
 msgstr "Valoare antet"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:371
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:444
 msgid "Verify the TLS certificate"
 msgstr "Verifică certificatul TLS"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:372
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:445
 msgid "Disabling certificate verification is insecure."
 msgstr "Dezactivarea verificării certificatului nu este sigură."
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:379
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:452
 msgid "Follow HTTP redirects"
 msgstr "Urmărește redirecționările HTTP"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:381
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:454
 msgid ""
 "On by default. Disable in locked-down environments to harden against SSRF: a "
 "target that redirects (e.g. 3xx to an internal address) will then fail "
@@ -286,19 +340,19 @@ msgstr ""
 "SSRF: o țintă care redirecționează (de ex. 3xx către o adresă internă) va "
 "eșua atunci în loc să fie urmărită până la locația de redirecționare."
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:392
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:465
 msgid "Request timeout (seconds)"
 msgstr "Timp de expirare a cererii (secunde)"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:393
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:466
 msgid "Per-request timeout. Defaults to 30 seconds."
 msgstr "Timp de expirare per cerere. Implicit 30 de secunde."
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:401
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:474
 msgid "Fields to monitor"
 msgstr "Câmpuri de monitorizat"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:403
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:476
 msgid ""
 "Each entry becomes one Checkmk service, built from the value found at the "
 "given JSON path."
@@ -306,11 +360,11 @@ msgstr ""
 "Fiecare intrare devine un serviciu Checkmk, construit din valoarea găsită la "
 "calea JSON dată."
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:430
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:503
 msgid "Endpoints"
 msgstr "Endpoint-uri"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:432
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:505
 msgid ""
 "One or more HTTP/JSON endpoints. Each is fetched with its own connection "
 "settings and extractions; all results are merged into one section. An "
@@ -321,7 +375,7 @@ msgstr ""
 "singură secțiune. Un endpoint care nu poate fi accesat afectează doar "
 "propriile servicii."
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:447
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:520
 msgid "Generic JSON API"
 msgstr "API JSON generic"
 

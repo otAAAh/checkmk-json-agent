@@ -73,6 +73,27 @@ def test_extract_scalar(agent):
     assert all(r["url"] == "http://test/h" for r in results)
 
 
+def test_extract_count_list(agent):
+    specs = [{"path": "items", "service": "Items", "count": True}]
+    (result,) = agent._extract(DOC, specs, "http://test/h")
+    assert result["found"] is True
+    assert result["value"] == 2
+
+
+def test_extract_count_object_keys(agent):
+    specs = [{"path": "components", "service": "Comps", "count": True}]
+    (result,) = agent._extract(DOC, specs, "http://test/h")
+    assert result["found"] is True
+    assert result["value"] == 1
+
+
+def test_extract_count_on_scalar_is_not_found(agent):
+    specs = [{"path": "status", "service": "Bad", "count": True}]
+    (result,) = agent._extract(DOC, specs, "http://test/h")
+    assert result["found"] is False
+    assert "cannot count" in result["error"]
+
+
 def test_extract_wildcard_index_label(agent):
     specs = [{"path": "items[*].count", "service": "Item"}]
     results = agent._extract(DOC, specs, "http://test/h")

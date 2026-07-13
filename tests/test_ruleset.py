@@ -32,6 +32,39 @@ def test_url_without_http_scheme_rejected(ruleset, bad):
         ruleset._validate_url(bad)
 
 
+@pytest.mark.parametrize(
+    "expr",
+    [
+        "value / 1024 / 1024",
+        "value * 1000",
+        "(value - 32) * 5 / 9",
+        "-value + 1",
+        "value",
+        "",
+        "   ",
+    ],
+)
+def test_valid_calc_passes(ruleset, expr):
+    # An empty/blank expression is valid (= no transform); the check skips it.
+    ruleset._validate_calc(expr)  # must not raise
+
+
+@pytest.mark.parametrize(
+    "expr",
+    [
+        "foo",  # unknown variable
+        "__import__('os')",  # call + name
+        "value.bit_length()",  # attribute + call
+        "value ** 2",  # power operator not allowed
+        "value +",  # syntax error
+        "'str'",  # non-numeric constant
+    ],
+)
+def test_invalid_calc_rejected(ruleset, expr):
+    with pytest.raises(ValidationError):
+        ruleset._validate_calc(expr)
+
+
 def test_parameter_form_builds(ruleset):
     # Smoke test: the form spec constructs without error.
     assert ruleset._parameter_form() is not None
@@ -58,11 +91,21 @@ def test_migrate_extraction_expected_becomes_must_match(ruleset):
     assert migrated["unit"] == "count"
 
 
-def test_migrate_extraction_leaves_new_shape_untouched(ruleset):
+def test_migrate_extraction_leaves_match_untouched_but_adds_count(ruleset):
+    # An already-migrated 'match' rule keeps its match; 'count' (required as of
+    # the count feature) is defaulted in for rules saved before it existed.
     new = {"service": "S", "path": "p", "match": ("state_map", {"crit": "DOWN"})}
-    assert ruleset._migrate_extraction(new) == new
+    migrated = ruleset._migrate_extraction(new)
+    assert migrated["match"] == ("state_map", {"crit": "DOWN"})
+    assert migrated["count"] is False
 
 
-def test_migrate_extraction_without_expected_untouched(ruleset):
+def test_migrate_extraction_defaults_count(ruleset):
     plain = {"service": "S", "path": "p"}
-    assert ruleset._migrate_extraction(plain) == plain
+    assert ruleset._migrate_extraction(plain) == {"service": "S", "path": "p", "count": False}
+
+
+def test_migrate_extraction_keeps_existing_count(ruleset):
+    assert (
+        ruleset._migrate_extraction({"service": "S", "path": "p", "count": True})["count"] is True
+    )
