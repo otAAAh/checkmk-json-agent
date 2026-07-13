@@ -9,6 +9,7 @@ deliberate UX choice — no separate master-item / discovery / threshold rules.
 """
 
 import re
+from urllib.parse import urlparse
 
 from cmk.rulesets.v1 import Help, Label, Message, Title
 from cmk.rulesets.v1.form_specs import (
@@ -42,11 +43,34 @@ def _validate_regex(value: str) -> None:
         ) from exc
 
 
-def _validate_url(value: str) -> None:
-    # URL schemes are case-insensitive per RFC 3986 (requests accepts 'HTTP://').
-    if not re.match(r"^https?://", value, re.IGNORECASE):
+def _validate_unique_endpoints(value: object) -> None:
+    # No two endpoints may target the same URL — duplicates would create
+    # colliding services from the same source.
+    if not isinstance(value, (list, tuple)):
+        return
+    urls = [
+        ep["url"].strip()
+        for ep in value
+        if isinstance(ep, dict) and isinstance(ep.get("url"), str) and ep["url"].strip()
+    ]
+    duplicates = sorted({url for url in urls if urls.count(url) > 1})
+    if duplicates:
         raise validators.ValidationError(
-            Message("The URL must start with 'http://' or 'https://'.")
+            Message("Each endpoint URL must be unique. Duplicated: %s") % ", ".join(duplicates)
+        )
+
+
+def _validate_url(value: str) -> None:
+    # A proper http(s) URI: no surrounding/embedded whitespace (urlparse would
+    # silently strip a leading space and accept it, then the agent fails at
+    # runtime), scheme http/https (case-insensitive per RFC 3986, requests
+    # accepts 'HTTP://') AND a host present ('http://' alone is not usable).
+    if re.search(r"\s", value):
+        raise validators.ValidationError(Message("The URL must not contain whitespace."))
+    parsed = urlparse(value)
+    if parsed.scheme.lower() not in ("http", "https") or not parsed.netloc:
+        raise validators.ValidationError(
+            Message("Enter a valid http(s) URL, e.g. 'https://host/path'.")
         )
 
 
@@ -322,6 +346,7 @@ def _parameter_form() -> Dictionary:
                         "reached only affects its own services."
                     ),
                     element_template=_endpoint(),
+                    custom_validate=(_validate_unique_endpoints,),
                 ),
             ),
         },

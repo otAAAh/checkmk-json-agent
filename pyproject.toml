@@ -14,6 +14,20 @@ author = "Benjamin Knapp"
 download_url = "https://github.com/otAAAh/checkmk-json-agent"
 min_required = "2.4.0"
 
+# The Explorer ships as a SEPARATE, optional MKP (json_api_explorer) so the
+# agent package above stays free of any non-public API dependency (its assets
+# bind at runtime to Checkmk's internal cmk-frontend-vue bundle). It is a
+# distinct package but shares the project version above — both MKPs release
+# together at the same version to avoid confusion. See build_explorer() in
+# scripts/build_mkp.py.
+[tool.mkp.explorer]
+package_name = "json_api_explorer"
+title = "Generic JSON API - Explorer (extra)"
+description = "Optional in-site JSON API Explorer for the Generic JSON API agent"
+# The wizard imports cmk-frontend-vue's CmkWizard, which only exists in Checkmk
+# 2.5+. The agent package stays at 2.4.0 (separate package, public APIs only).
+min_required = "2.5.0"
+
 [tool.ruff]
 line-length = 100
 target-version = "py312"

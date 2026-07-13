@@ -1,21 +1,29 @@
 #!/usr/bin/env python3
 # Copyright (C) 2026 Benjamin Knapp
 # SPDX-License-Identifier: GPL-2.0-only
-"""Build the checkmk-json-agent MKP using only the standard library.
+"""Build the checkmk-json-agent MKP(s) using only the standard library.
 
-An MKP is a gzipped tar containing:
+This builds two independent packages (see ``--package``):
 
-  - ``info``       — the manifest as a Python literal dict
-  - ``info.json``  — the same manifest as JSON (for external tools)
-  - ``cmk_addons_plugins.tar`` — an *uncompressed* tar of the plugin files,
-    with paths relative to ``local/lib/python3/cmk_addons/plugins``.
-  - ``locales.tar`` — an *uncompressed* tar of the compiled translation
-    catalogs, with paths relative to ``local/share/check_mk/locale`` (only
-    present when the repo ships translations).
+* **agent** (``json_api``) — the special agent. Ships:
+  - ``cmk_addons_plugins.tar`` — plugin files, relative to
+    ``local/lib/python3/cmk_addons/plugins``.
+  - ``locales.tar`` — compiled translation catalogs, relative to
+    ``local/share/check_mk/locale`` (only when the repo ships translations).
+  It touches only the public, stable plugin APIs — no GUI parts.
 
-This mirrors cmk_mkp_tool's on-disk format without importing any cmk package,
-so the repo stays self-contained. The ``.po`` sources are compiled to ``.mo``
-here with :mod:`pofile`, so the ``gettext`` tools aren't needed to build.
+* **explorer** (``json_api_explorer``) — the optional in-site Explorer. Ships:
+  - ``web.tar`` — static GUI assets under ``web/``, relative to
+    ``local/share/check_mk/web`` (the legacy "web" MKP part; the newer
+    ``cmk_addons/plugins`` layout has no GUI group). Kept a separate package so
+    the agent never inherits the Explorer's dependency on Checkmk's internal,
+    unversioned cmk-frontend-vue bundle.
+
+Every MKP is a gzipped tar of ``info`` (manifest as a Python literal), the same
+manifest as ``info.json``, and the ``<part>.tar`` inner tars listed above. This
+mirrors cmk_mkp_tool's on-disk format without importing any cmk package, so the
+repo stays self-contained. The ``.po`` sources are compiled to ``.mo`` here with
+:mod:`pofile`, so the ``gettext`` tools aren't needed to build.
 """
 
 from __future__ import annotations
@@ -34,6 +42,13 @@ PLUGINS_BASE = REPO / "cmk_addons" / "plugins"
 # Repo dir holding the translation sources (one <lang>/LC_MESSAGES/multisite.po
 # per language); packaged into the site's local/share/check_mk/locale.
 LOCALES_BASE = REPO / "locales"
+# Repo dir mirroring the site's local/share/check_mk/web tree (static GUI
+# assets, e.g. htdocs/<...>); packaged into the "web" MKP part.
+WEB_BASE = REPO / "web"
+# Repo dir mirroring the site's local/lib/python3/cmk/gui/plugins tree (GUI page
+# modules auto-imported by the GUI, e.g. wato/<...>.py); packaged into the "gui"
+# MKP part.
+GUI_BASE = REPO / "gui"
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import pofile  # noqa: E402  (local module, resolved via the path insert above)
@@ -66,6 +81,46 @@ def _inner_tar(files: list[Path]) -> bytes:
             with file.open("rb") as handle:
                 tar.addfile(info, handle)
     return buffer.getvalue()
+
+
+def _web_files() -> list[Path]:
+    """Static GUI assets under web/, or [] when the repo ships none."""
+    if not WEB_BASE.is_dir():
+        return []
+    return sorted(
+        path for path in WEB_BASE.rglob("*") if path.is_file() and "__pycache__" not in path.parts
+    )
+
+
+def _tar_relative_to(files: list[Path], base: Path) -> bytes:
+    """Uncompressed tar of ``files`` with arcnames relative to ``base`` (mode 644).
+
+    Used for the ``web`` part (arcnames like ``htdocs/json_api/vue-eval.html``,
+    relative to ``local/share/check_mk/web``) and the ``gui`` part (arcnames like
+    ``wato/json_explorer.py``, relative to ``local/lib/python3/cmk/gui/plugins``).
+    """
+    buffer = io.BytesIO()
+    with tarfile.open(fileobj=buffer, mode="w") as tar:
+        for file in files:
+            arcname = file.relative_to(base)
+            info = tar.gettarinfo(str(file), arcname=str(arcname))
+            info.uid = info.gid = 0
+            info.uname = info.gname = ""
+            info.mode = 0o644
+            with file.open("rb") as handle:
+                tar.addfile(info, handle)
+    return buffer.getvalue()
+
+
+def _gui_files() -> list[Path]:
+    """GUI page modules under gui/, or [] when the repo ships none."""
+    if not GUI_BASE.is_dir():
+        return []
+    return sorted(
+        path
+        for path in GUI_BASE.rglob("*")
+        if path.is_file() and path.suffix != ".pyc" and "__pycache__" not in path.parts
+    )
 
 
 def _locale_entries(family: str) -> list[tuple[str, bytes]]:
@@ -107,7 +162,56 @@ def _add_bytes(tar: tarfile.TarFile, name: str, content: bytes) -> None:
     tar.addfile(info, io.BytesIO(content))
 
 
+def _manifest(
+    *,
+    name: str,
+    title: str,
+    description: str,
+    version: str,
+    min_required: str,
+    usable_until: str | None,
+    author: str,
+    download_url: str,
+    files: dict[str, list[str]],
+) -> dict:
+    return {
+        "title": title,
+        "name": name,
+        "description": description,
+        "version": version,
+        "version.packaged": f"checkmk-json-agent {version}",
+        "version.min_required": min_required,
+        "version.usable_until": usable_until,
+        "author": author,
+        "download_url": download_url,
+        "files": files,
+    }
+
+
+def _write_mkp(name: str, version: str, manifest: dict, part_tars: list[tuple[str, bytes]]) -> Path:
+    """Assemble the outer .mkp: info/info.json plus the given inner part tars."""
+    parts = [
+        ("info", (pprint.pformat(manifest) + "\n").encode()),
+        ("info.json", json.dumps(manifest).encode()),
+        *part_tars,
+    ]
+    output = REPO / f"{name}-{version}.mkp"
+    buffer = io.BytesIO()
+    with tarfile.open(fileobj=buffer, mode="w:gz") as tar:
+        for entry_name, content in parts:
+            _add_bytes(tar, entry_name, content)
+    output.write_bytes(buffer.getvalue())
+    return output
+
+
 def build() -> Path:
+    """The agent package: plugin code + translations.
+
+    Deliberately GUI-free: it ships only the ``cmk_addons_plugins`` (and
+    ``locales``) parts, so the agent depends solely on the public, stable plugin
+    APIs. Anything that touches Checkmk's internal frontend lives in the separate
+    Explorer package (see :func:`build_explorer`).
+    """
     project, mkp = _load_metadata()
     family = mkp["package_name"]
     files = _plugin_files(family)
@@ -117,40 +221,88 @@ def build() -> Path:
     relative = [str(f.relative_to(PLUGINS_BASE)) for f in files]
     locale_entries = _locale_entries(family)
 
-    package_files = {"cmk_addons_plugins": relative}
+    package_files: dict[str, list[str]] = {"cmk_addons_plugins": relative}
+    part_tars = [("cmk_addons_plugins.tar", _inner_tar(files))]
     if locale_entries:
         package_files["locales"] = [arcname for arcname, _ in locale_entries]
+        part_tars.append(("locales.tar", _inner_tar_from_bytes(locale_entries)))
 
-    manifest = {
-        "title": mkp["title"],
-        "name": family,
-        "description": project["description"],
-        "version": project["version"],
-        "version.packaged": f"checkmk-json-agent {project['version']}",
-        "version.min_required": mkp["min_required"],
-        "version.usable_until": mkp.get("usable_until"),
-        "author": mkp["author"],
-        "download_url": mkp["download_url"],
-        "files": package_files,
-    }
+    manifest = _manifest(
+        name=family,
+        title=mkp["title"],
+        description=project["description"],
+        version=project["version"],
+        min_required=mkp["min_required"],
+        usable_until=mkp.get("usable_until"),
+        author=mkp["author"],
+        download_url=mkp["download_url"],
+        files=package_files,
+    )
+    return _write_mkp(family, project["version"], manifest, part_tars)
 
-    parts = [
-        ("info", (pprint.pformat(manifest) + "\n").encode()),
-        ("info.json", json.dumps(manifest).encode()),
-        ("cmk_addons_plugins.tar", _inner_tar(files)),
-    ]
-    if locale_entries:
-        parts.append(("locales.tar", _inner_tar_from_bytes(locale_entries)))
 
-    output = REPO / f"{family}-{project['version']}.mkp"
-    buffer = io.BytesIO()
-    with tarfile.open(fileobj=buffer, mode="w:gz") as tar:
-        for name, content in parts:
-            _add_bytes(tar, name, content)
-    output.write_bytes(buffer.getvalue())
-    return output
+def build_explorer() -> Path | None:
+    """The Explorer 'extra' package: the wizard bundle (``web``) + its GUI page
+    (``gui``).
+
+    Kept separate from the agent on purpose. Only this package touches Checkmk's
+    GUI internals — the ``web`` part ships the built Vue app (which compiles the
+    real cmk-frontend-vue CmkWizard), and the ``gui`` part ships the Python page
+    module that registers ``check_mk/json_explorer.py`` and embeds the app. That
+    coupling to internal, version-specific GUI APIs must never reach the
+    monitoring agent. Carries its own name/title/``min_required``
+    (``[tool.mkp.explorer]`` in pyproject) but *shares the project version*.
+    Returns ``None`` when the repo ships no ``web/``.
+    """
+    project, mkp = _load_metadata()
+    explorer = mkp["explorer"]
+    web_files = _web_files()
+    if not web_files:
+        return None
+    gui_files = _gui_files()
+
+    version = project["version"]
+    package_files: dict[str, list[str]] = {"web": [str(f.relative_to(WEB_BASE)) for f in web_files]}
+    part_tars = [("web.tar", _tar_relative_to(web_files, WEB_BASE))]
+    if gui_files:
+        package_files["gui"] = [str(f.relative_to(GUI_BASE)) for f in gui_files]
+        part_tars.append(("gui.tar", _tar_relative_to(gui_files, GUI_BASE)))
+
+    manifest = _manifest(
+        name=explorer["package_name"],
+        title=explorer["title"],
+        description=explorer["description"],
+        version=version,
+        min_required=explorer["min_required"],
+        usable_until=explorer.get("usable_until"),
+        author=mkp["author"],  # author/download_url are shared with the agent
+        download_url=mkp["download_url"],
+        files=package_files,
+    )
+    return _write_mkp(explorer["package_name"], version, manifest, part_tars)
 
 
 if __name__ == "__main__":
-    path = build()
-    print(f"Built {path.name} ({path.stat().st_size} bytes)")
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Build the checkmk-json-agent MKP(s).")
+    parser.add_argument(
+        "--package",
+        choices=["agent", "explorer", "all"],
+        default="all",
+        help="which package to build (default: all)",
+    )
+    args = parser.parse_args()
+
+    built: list[Path] = []
+    if args.package in ("agent", "all"):
+        built.append(build())
+    if args.package in ("explorer", "all"):
+        explorer_mkp = build_explorer()
+        if explorer_mkp is not None:
+            built.append(explorer_mkp)
+        elif args.package == "explorer":
+            raise SystemExit("No web/ assets found — nothing to build for the Explorer package")
+
+    for path in built:
+        print(f"Built {path.name} ({path.stat().st_size} bytes)")

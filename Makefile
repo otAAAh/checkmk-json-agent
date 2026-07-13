@@ -4,10 +4,28 @@ PYTHON ?= python3
 
 XGETTEXT ?= xgettext
 
-.PHONY: help format lint typecheck test mkp pot check-po changelog release-notes clean
+NPM ?= npm
+# Checkmk checkout supplying the BUILT-IN cmk-frontend-vue source (build-time
+# bridge — see frontend/vite.config.ts). Locally $CMK_REPO; in CI a clone of
+# the public github.com/Checkmk/checkmk at a pinned ref.
+CMK_REPO ?= $(HOME)/git/checkmk
+
+.PHONY: help format lint typecheck test mkp frontend pot check-po changelog release-notes clean
 
 help:
-	@echo "Targets: format | lint | typecheck | test | mkp | pot | check-po | changelog | release-notes | clean"
+	@echo "Targets: format | lint | typecheck | test | mkp | frontend | pot | check-po | changelog | release-notes | clean"
+
+# Build the Explorer's own Vue app, importing the REAL CmkWizard from
+# cmk-frontend-vue (no vendoring) via the build-time bridge. Emits index.html +
+# assets/ (the real components pull theme image assets that can't be inlined),
+# placed under web/htdocs/json_api/wizard/ which the json_api_explorer MKP ships
+# via the 'web' part. build_mkp.py stays stdlib and just packages web/.
+frontend:
+	cd frontend && $(NPM) ci && CMK_REPO="$(CMK_REPO)" $(NPM) run build
+	rm -rf web/htdocs/json_api/wizard
+	mkdir -p web/htdocs/json_api/wizard
+	cp -r frontend/dist/. web/htdocs/json_api/wizard/
+	@echo "Wrote web/htdocs/json_api/wizard/ (index.html + assets/)"
 
 format:
 	$(RUFF) format cmk_addons scripts

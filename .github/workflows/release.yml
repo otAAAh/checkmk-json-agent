@@ -66,23 +66,27 @@ jobs:
             exit 1
           fi
 
-      - name: Build the MKP and its checksum
+      # Build BOTH packages at the same version: the agent (json_api) and the
+      # optional Explorer (json_api_explorer). Both are attached to the release.
+      - name: Build the MKPs and their checksums
         env:
           VERSION: ${{ steps.tag.outputs.version }}
         run: |
           python3 scripts/build_mkp.py
-          sha256sum "json_api-$VERSION.mkp" > SHA256SUMS
+          sha256sum "json_api-$VERSION.mkp" "json_api_explorer-$VERSION.mkp" > SHA256SUMS
           cat SHA256SUMS
 
-      # Cryptographically attest that this mkp was built by this workflow from
-      # this commit, so consumers can verify its provenance with
-      # `gh attestation verify json_api-X.Y.Z.mkp --repo otAAAh/checkmk-json-agent`.
+      # Cryptographically attest that these mkps were built by this workflow from
+      # this commit, so consumers can verify provenance with
+      # `gh attestation verify <file>.mkp --repo otAAAh/checkmk-json-agent`.
       # Only on a real publish (a dry run builds but must not attest).
-      - name: Attest build provenance for the MKP
+      - name: Attest build provenance for the MKPs
         if: ${{ github.event_name != 'workflow_dispatch' || !inputs.dry_run }}
         uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
         with:
-          subject-path: json_api-${{ steps.tag.outputs.version }}.mkp
+          subject-path: |
+            json_api-${{ steps.tag.outputs.version }}.mkp
+            json_api_explorer-${{ steps.tag.outputs.version }}.mkp
 
       - name: Render the release notes
         env:
@@ -108,7 +112,7 @@ jobs:
           VERSION: ${{ steps.tag.outputs.version }}
           LATEST: ${{ steps.latest.outputs.flag }}
         run: |
-          assets="json_api-$VERSION.mkp SHA256SUMS"
+          assets="json_api-$VERSION.mkp json_api_explorer-$VERSION.mkp SHA256SUMS"
           if gh release view "$TAG" >/dev/null 2>&1; then
             echo "Release $TAG exists — updating notes and assets."
             gh release edit "$TAG" --title "$TAG" --notes-file release-notes.md --latest="$LATEST"
@@ -121,4 +125,4 @@ jobs:
         if: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
         run: |
           echo "Dry run for ${{ steps.tag.outputs.ref }} — nothing published." >> "$GITHUB_STEP_SUMMARY"
-          echo "Built json_api-${{ steps.tag.outputs.version }}.mkp; notes rendered above." >> "$GITHUB_STEP_SUMMARY"
+          echo "Built json_api-${{ steps.tag.outputs.version }}.mkp and json_api_explorer-${{ steps.tag.outputs.version }}.mkp; notes rendered above." >> "$GITHUB_STEP_SUMMARY"
