@@ -54,7 +54,7 @@ def test_split_wildcards(agent):
 
 def test_extract_scalar(agent):
     specs = [
-        {"path": "status", "service": "Health", "expected": "UP"},
+        {"path": "status", "service": "Health", "match": ["must_match", {"pattern": "UP"}]},
         {"path": "components.db", "service": "DB"},  # dict -> serialized to JSON text
         {"path": "missing", "service": "Gone"},
     ]
@@ -63,6 +63,8 @@ def test_extract_scalar(agent):
 
     assert by_service["Health"]["value"] == "UP"
     assert by_service["Health"]["found"] is True
+    # The match config is passed through verbatim for the check to interpret.
+    assert by_service["Health"]["match"] == ["must_match", {"pattern": "UP"}]
     assert by_service["DB"]["value"] == '{"status": "DOWN", "details": {"connections": 7}}'
     assert by_service["Gone"]["found"] is False
     assert by_service["Gone"]["error"] == "path not found in response"

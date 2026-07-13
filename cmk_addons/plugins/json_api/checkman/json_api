@@ -9,9 +9,13 @@ description:
  configured in the rule's endpoints. Each configured field becomes one service.
 
  A numeric value with configured levels is checked against those levels and
- exposed as a metric. A value configured with an expected-value regular
- expression goes {CRIT} unless the value matches. Otherwise the value is shown
- in the service summary, and a metric is added when it is numeric.
+ exposed as a metric. String matching offers two modes: a value can be required
+ to fully match a regular expression, with a configurable state (default {CRIT})
+ when it does not; or the value can be mapped to a state by matching it against
+ separate OK, WARN and CRIT regular expressions, tried in that order with the
+ first full match winning and a configurable state (default {OK}) when none
+ matches. Otherwise the value is shown in the service summary, and a metric is
+ added when it is numeric.
 
  The service goes {UNKNOWN} if the configured path is not present in the
  response, or if its endpoint could not be reached or did not return JSON. An

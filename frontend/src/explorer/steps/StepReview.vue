@@ -1,7 +1,7 @@
 <!-- Copyright (C) 2026 Benjamin Knapp -->
 <!-- SPDX-License-Identifier: GPL-2.0-only -->
 <!-- Wizard step 4: review — one accordion item per endpoint listing every chosen
-     service with its defined values (unit / thresholds / expected regex) and its
+     service with its defined values (unit / thresholds / match rule) and its
      CURRENT value + state, resolved live against the fetched sample JSON. Then
      create the rule via the API. -->
 <script setup lang="ts">
@@ -47,7 +47,36 @@ function levelsPair(value: unknown): [number, number] | null {
   return null
 }
 
-/** Evaluate a value against the extraction's thresholds/expected-regex. */
+/** Map a Checkmk service-state number (0=OK,1=WARN,2=CRIT,3=UNKNOWN) to a
+ * StateKind. There is no 'unknown' StateKind, so 3 maps to 'none'. */
+function serviceStateToKind(n: unknown): StateKind {
+  return n === 1 ? 'warn' : n === 2 ? 'crit' : n === 3 ? 'none' : 'ok'
+}
+
+/** Narrow a serialized match value `[mode, cfg]` into its parts, or null. */
+function parseMatch(match: unknown): { mode: string; cfg: Record<string, unknown> } | null {
+  if (
+    Array.isArray(match) &&
+    typeof match[0] === 'string' &&
+    match[1] !== null &&
+    typeof match[1] === 'object' &&
+    !Array.isArray(match[1])
+  ) {
+    return { mode: match[0], cfg: match[1] as Record<string, unknown> }
+  }
+  return null
+}
+
+/** Whether `value` fully matches `pattern` (anchored); false on a bad regex. */
+function fullMatch(value: string, pattern: string): boolean {
+  try {
+    return new RegExp(`^(?:${pattern})$`).test(value)
+  } catch {
+    return false
+  }
+}
+
+/** Evaluate a value against the extraction's thresholds / match rule. */
 function evalState(value: Json | undefined, x: ExtractionValue): StateKind {
   if (typeof value === 'number') {
     const upper = levelsPair(x.levels_upper)
@@ -62,17 +91,44 @@ function evalState(value: Json | undefined, x: ExtractionValue): StateKind {
     }
     return upper || lower ? 'ok' : 'none'
   }
-  if (typeof value === 'string' && typeof x.expected === 'string' && x.expected) {
-    try {
-      return new RegExp(`^(?:${x.expected})$`).test(value) ? 'ok' : 'crit'
-    } catch {
-      return 'none'
+  if (typeof value === 'string') {
+    const parsed = parseMatch(x.match)
+    if (!parsed) return 'none'
+    const { mode, cfg } = parsed
+    if (mode === 'must_match' && typeof cfg.pattern === 'string') {
+      let matched: boolean
+      try {
+        matched = new RegExp(`^(?:${cfg.pattern})$`).test(value)
+      } catch {
+        return 'none'
+      }
+      if (matched) return 'ok'
+      return serviceStateToKind(typeof cfg.state_no_match === 'number' ? cfg.state_no_match : 2)
     }
+    if (mode === 'state_map') {
+      for (const [key, kind] of [
+        ['ok', 'ok'],
+        ['warn', 'warn'],
+        ['crit', 'crit'],
+      ] as const) {
+        const pat = cfg[key]
+        if (typeof pat === 'string' && pat && fullMatch(value, pat)) {
+          return kind
+        }
+      }
+      return serviceStateToKind(typeof cfg.state_no_match === 'number' ? cfg.state_no_match : 0)
+    }
+    return 'none'
   }
   return 'none'
 }
 
-/** Human-readable list of the configured thresholds/unit/expected. */
+/** Label a Checkmk service-state number for the no-match case. */
+function stateNoMatchLabel(n: number): string {
+  return n === 0 ? _t('OK') : n === 1 ? _t('WARN') : n === 3 ? _t('UNKNOWN') : _t('CRIT')
+}
+
+/** Human-readable list of the configured thresholds/unit/match rule. */
 function definedSummary(x: ExtractionValue): string[] {
   const parts: string[] = []
   if (typeof x.unit === 'string' && x.unit) {
@@ -86,8 +142,31 @@ function definedSummary(x: ExtractionValue): string[] {
   if (lower) {
     parts.push(_t('WARN ≤ %{w} / CRIT ≤ %{c}', { w: String(lower[0]), c: String(lower[1]) }))
   }
-  if (typeof x.expected === 'string' && x.expected) {
-    parts.push(_t('expected /%{e}/', { e: x.expected }))
+  const parsed = parseMatch(x.match)
+  if (parsed) {
+    const { mode, cfg } = parsed
+    if (mode === 'must_match' && typeof cfg.pattern === 'string' && cfg.pattern) {
+      let desc: string = _t('must match /%{e}/', { e: cfg.pattern })
+      if (typeof cfg.state_no_match === 'number' && cfg.state_no_match !== 2) {
+        desc += _t(' (else %{s})', { s: stateNoMatchLabel(cfg.state_no_match) })
+      }
+      parts.push(desc)
+    } else if (mode === 'state_map') {
+      const patterns: string[] = []
+      for (const [key, label] of [
+        ['ok', 'OK'],
+        ['warn', 'WARN'],
+        ['crit', 'CRIT'],
+      ] as const) {
+        const pat = cfg[key]
+        if (typeof pat === 'string' && pat) {
+          patterns.push(`${label} /${pat}/`)
+        }
+      }
+      if (patterns.length) {
+        parts.push(_t('state map: %{s}', { s: patterns.join(', ') }))
+      }
+    }
   }
   return parts
 }

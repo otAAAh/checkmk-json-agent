@@ -36,7 +36,10 @@ Targets **Checkmk 2.4+** and the current stable plugin APIs
   composite `<pod> / <container>` labels
 - **Thresholds**: WARN/CRIT upper and lower levels for numeric values, exposed
   as a metric/graph
-- **String matching**: a regex the value must fully match, else CRIT
+- **String matching**: two modes — either a regex the value must fully match
+  (with a configurable state when it does not, default CRIT), or map the value
+  to a state by matching it against separate OK / WARN / CRIT regexes (tried in
+  that order, first full match wins; configurable state when nothing matches)
 - TLS verification on by default (with an explicit opt-out)
 - Unreachable endpoints and non-JSON responses surface as UNKNOWN on the
   affected services, not a crash
@@ -88,24 +91,32 @@ Each **field to monitor** has:
 | **Item label path** | For `[*]`: field within each element to label the service (defaults to the array index) |
 | **Unit** | Optional: `count` / `bytes` / `seconds` / `percent` — renders the metric and graph with that unit (numeric values only) |
 | **Upper / lower levels** | WARN/CRIT for numeric values |
-| **Expected value (regex)** | Value must fully match, else CRIT |
+| **String matching** | Either *must match a regex* (choose the state when it does **not** match, default CRIT) or *map the value to a state* (separate OK / WARN / CRIT regexes, first full match wins; choose the state when nothing matches, default OK) |
 
 ### Service states
 
 - **Numeric value with levels** → checked against the levels, emitted as a
   metric named for the field's unit (`json_api_value` when no unit is set)
-- **Value with an expected regex** → OK if it fully matches, else CRIT
+- **Value with must-match string matching** → OK if it fully matches the regex,
+  otherwise your chosen no-match state (default CRIT)
+- **Value with a state map** → tried against the OK, WARN, then CRIT regexes in
+  that order; the first full match sets the state, and if none matches your
+  chosen no-match state applies (default OK)
 - **Plain value** → shown in the summary (numeric values still get a metric)
 - **Levels set on a non-numeric value** → WARN (so the misconfig is visible)
 - **Path not found** → UNKNOWN
 - **Endpoint request failed / not JSON** → that endpoint's services go UNKNOWN
   with the error; the other endpoints in the rule keep reporting normally
 
-Values are rendered as they appear in JSON, so an `expected` regex matches
+Values are rendered as they appear in JSON, so a regex matches
 `true` / `false` / `null` — not Python's `True` / `False` / `None`.
 
+Rules that used the old **Expected value (regex)** field are migrated
+automatically to must-match with the CRIT no-match default, so their behaviour
+is unchanged.
+
 The service **Details** view additionally shows where the value came from — the
-JSON path, the source endpoint URL, and the expected pattern (when set) — which
+JSON path, the source endpoint URL, and the match pattern (when set) — which
 makes a misconfigured extraction (wrong path or wrong endpoint) easy to spot.
 This is details-only and never changes the summary line or the service state.
 
@@ -121,11 +132,24 @@ Given `GET /actuator/health`:
 
 | Service name | JSON path | Check |
 |---|---|---|
-| `Health` | `status` | expected `UP` |
-| `Database` | `components.db.status` | expected `UP` |
+| `Health` | `status` | must match `UP` (else CRIT) |
+| `Database` | `components.db.status` | must match `UP` (else CRIT) |
 | `DB connections` | `components.db.details.connections` | upper levels `50 / 100` |
 
 Produces services `JSON Health`, `JSON Database`, `JSON DB connections`.
+
+### Mapping a value to a state
+
+For APIs that expose a semantic state, map each value to a Checkmk state instead
+of demanding one exact match. Given `GET /status` → `{"mode": "degraded"}`:
+
+| Service name | JSON path | Check |
+|---|---|---|
+| `Mode` | `mode` | state map: OK `ready`, WARN `degraded`, CRIT `failed` |
+
+The regexes are tried OK → WARN → CRIT and the first full match wins, so `ready`
+is OK, `degraded` is WARN and `failed` is CRIT; anything else falls back to the
+no-match state (default OK).
 
 ### Array auto-discovery
 
@@ -137,7 +161,7 @@ Given a payload with a `nodes` array:
 
 | Service name | JSON path | Item label path | Check |
 |---|---|---|---|
-| `Node` | `nodes[*].status` | `name` | expected `UP` |
+| `Node` | `nodes[*].status` | `name` | must match `UP` (else CRIT) |
 
 Produces `JSON Node web-1` (OK) and `JSON Node web-2` (CRIT). If a label value
 repeats across elements, every occurrence is suffixed with its index so two

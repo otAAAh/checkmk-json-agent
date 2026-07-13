@@ -45,7 +45,10 @@ class Extraction(BaseModel, frozen=True):
     # verbatim to the check via the agent section, so they stay opaque here.
     levels_upper: object = None
     levels_lower: object = None
-    expected: str | None = None
+    # ("must_match", <regex>) or ("state_map", {"ok"/"warn"/"crit": <regex>}),
+    # straight from the CascadingSingleChoice form spec. Opaque here; the check
+    # interprets it.
+    match: object = None
 
 
 class Endpoint(BaseModel, frozen=True):

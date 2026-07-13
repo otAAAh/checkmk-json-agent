@@ -452,7 +452,9 @@ function addExtraction(path) {
     service: defaultService(path),
     path,
     label_path: path.includes("[*]") ? guessLabel(path) : "",
-    unit: "", lu_w: "", lu_c: "", ll_w: "", ll_c: "", expected: ""
+    unit: "", lu_w: "", lu_c: "", ll_w: "", ll_c: "",
+    matchMode: "", mmPattern: "", mmState: "2",
+    smOk: "", smWarn: "", smCrit: "", smState: "0",
   });
   renderFields();
   renderOutputs();
@@ -483,12 +485,33 @@ function renderFields() {
       `</select></div>` +
       `<div class="row"><label>Upper W/C</label><span class="lvls"><input type="text" data-f="lu_w" data-i="${i}" value="${escAttr(e.lu_w)}" placeholder="warn"><input type="text" data-f="lu_c" data-i="${i}" value="${escAttr(e.lu_c)}" placeholder="crit"></span></div>` +
       `<div class="row"><label>Lower W/C</label><span class="lvls"><input type="text" data-f="ll_w" data-i="${i}" value="${escAttr(e.ll_w)}" placeholder="warn"><input type="text" data-f="ll_c" data-i="${i}" value="${escAttr(e.ll_c)}" placeholder="crit"></span></div>` +
-      `<div class="row"><label>Expected</label><input type="text" data-f="expected" data-i="${i}" value="${escAttr(e.expected)}" placeholder="regex, e.g. UP|ok"></div>`;
+      `<div class="row"><label>Match</label><select data-f="matchMode" data-rerender="1" data-i="${i}">` +
+        [["", "no matching"], ["must_match", "must match (regex)"], ["state_map", "map to states"]].map(([v, lbl]) =>
+          `<option value="${v}"${e.matchMode === v ? " selected" : ""}>${lbl}</option>`).join("") +
+      `</select></div>` +
+      (e.matchMode === "must_match"
+        ? `<div class="row"><label>Pattern</label><input type="text" data-f="mmPattern" data-i="${i}" value="${escAttr(e.mmPattern)}" placeholder="regex, e.g. UP|ok"></div>` +
+          `<div class="row"><label>State if no match</label><select data-f="mmState" data-i="${i}">` +
+            [["0", "OK"], ["1", "WARN"], ["2", "CRIT"], ["3", "UNKNOWN"]].map(([v, lbl]) =>
+              `<option value="${v}"${e.mmState === v ? " selected" : ""}>${lbl}</option>`).join("") +
+          `</select></div>`
+        : "") +
+      (e.matchMode === "state_map"
+        ? `<div class="row"><label>OK/WARN/CRIT</label><span class="lvls"><input type="text" data-f="smOk" data-i="${i}" value="${escAttr(e.smOk)}" placeholder="OK regex"><input type="text" data-f="smWarn" data-i="${i}" value="${escAttr(e.smWarn)}" placeholder="WARN regex"><input type="text" data-f="smCrit" data-i="${i}" value="${escAttr(e.smCrit)}" placeholder="CRIT regex"></span></div>` +
+          `<div class="row"><label>State if nothing matches</label><select data-f="smState" data-i="${i}">` +
+            [["0", "OK"], ["1", "WARN"], ["2", "CRIT"], ["3", "UNKNOWN"]].map(([v, lbl]) =>
+              `<option value="${v}"${e.smState === v ? " selected" : ""}>${lbl}</option>`).join("") +
+          `</select></div>`
+        : "");
     box.appendChild(d);
   });
   box.querySelectorAll("input[data-f], select[data-f]").forEach(inp => {
     const evt = inp.tagName === "SELECT" ? "onchange" : "oninput";
-    inp[evt] = () => { ep().extractions[+inp.dataset.i][inp.dataset.f] = inp.value; renderOutputs(); };
+    inp[evt] = () => {
+      ep().extractions[+inp.dataset.i][inp.dataset.f] = inp.value;
+      if (inp.dataset.rerender) renderFields();
+      renderOutputs();
+    };
   });
   box.querySelectorAll("[data-rm]").forEach(b => {
     b.onclick = () => { ep().extractions.splice(+b.dataset.rm, 1); renderFields(); renderOutputs(); };
@@ -509,7 +532,20 @@ function extractionObjs(e) {
     if (x.unit) o.unit = x.unit;
     const lu = levelsPair(x.lu_w, x.lu_c); if (lu) o.levels_upper = ["fixed", lu];
     const ll = levelsPair(x.ll_w, x.ll_c); if (ll) o.levels_lower = ["fixed", ll];
-    if (x.expected) o.expected = x.expected;
+    if (x.matchMode === "must_match" && x.mmPattern) {
+      const mm = { pattern: x.mmPattern };
+      if (x.mmState !== "2") mm.state_no_match = Number(x.mmState);
+      o.match = ["must_match", mm];
+    } else if (x.matchMode === "state_map") {
+      const sm = {};
+      if (x.smOk) sm.ok = x.smOk;
+      if (x.smWarn) sm.warn = x.smWarn;
+      if (x.smCrit) sm.crit = x.smCrit;
+      if (sm.ok || sm.warn || sm.crit) {
+        if (x.smState !== "0") sm.state_no_match = Number(x.smState);
+        o.match = ["state_map", sm];
+      }
+    }
     return o;
   });
 }
@@ -520,7 +556,20 @@ function pyExtraction(o) {
   if (o.unit) p.push(`'unit': ${pyStr(o.unit)}`);
   if (o.levels_upper) p.push(`'levels_upper': ('fixed', (${o.levels_upper[1][0]}, ${o.levels_upper[1][1]}))`);
   if (o.levels_lower) p.push(`'levels_lower': ('fixed', (${o.levels_lower[1][0]}, ${o.levels_lower[1][1]}))`);
-  if (o.expected) p.push(`'expected': ${pyStr(o.expected)}`);
+  if (o.match) {
+    const [mode, cfg] = o.match;
+    const parts = [];
+    if (mode === "must_match") {
+      parts.push(`'pattern': ${pyStr(cfg.pattern)}`);
+      if (cfg.state_no_match !== undefined) parts.push(`'state_no_match': ${cfg.state_no_match}`);
+    } else {
+      if (cfg.ok !== undefined) parts.push(`'ok': ${pyStr(cfg.ok)}`);
+      if (cfg.warn !== undefined) parts.push(`'warn': ${pyStr(cfg.warn)}`);
+      if (cfg.crit !== undefined) parts.push(`'crit': ${pyStr(cfg.crit)}`);
+      if (cfg.state_no_match !== undefined) parts.push(`'state_no_match': ${cfg.state_no_match}`);
+    }
+    p.push(`'match': (${pyStr(mode)}, {${parts.join(", ")}})`);
+  }
   return "{" + p.join(", ") + "}";
 }
 
