@@ -10,7 +10,6 @@ values get levels + a metric; string values get an optional regex match.
 import ast
 import json
 import math
-import operator
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -242,30 +241,37 @@ def _evaluate_match(match: tuple[str, object], text: str) -> tuple[State, str]:
     return State(no_match), ("no pattern matched" if no_match != 0 else "")
 
 
-_CALC_BINOPS = {
-    ast.Add: operator.add,
-    ast.Sub: operator.sub,
-    ast.Mult: operator.mul,
-    ast.Div: operator.truediv,
-}
-_CALC_UNARYOPS = {ast.UAdd: operator.pos, ast.USub: operator.neg}
-
-
 def _apply_calc(value: float, expr: str) -> float:
     """Evaluate a small arithmetic expression over the variable ``value``.
 
     Only numeric literals, ``value``, parentheses and + - * / (incl. unary +/-)
     are supported; anything else raises ``ValueError``. This walks the AST and
-    never uses ``eval``, so a rule cannot smuggle in code execution.
+    never uses ``eval``, so a rule cannot smuggle in code execution. Operators
+    are dispatched with explicit ``isinstance`` branches (rather than a lookup
+    table of ``operator`` callables) so the arithmetic stays statically typed.
     """
 
     def _eval(node: ast.AST) -> float:
         if isinstance(node, ast.Expression):
             return _eval(node.body)
-        if isinstance(node, ast.BinOp) and type(node.op) in _CALC_BINOPS:
-            return _CALC_BINOPS[type(node.op)](_eval(node.left), _eval(node.right))
-        if isinstance(node, ast.UnaryOp) and type(node.op) in _CALC_UNARYOPS:
-            return _CALC_UNARYOPS[type(node.op)](_eval(node.operand))
+        if isinstance(node, ast.BinOp):
+            left, right = _eval(node.left), _eval(node.right)
+            if isinstance(node.op, ast.Add):
+                return left + right
+            if isinstance(node.op, ast.Sub):
+                return left - right
+            if isinstance(node.op, ast.Mult):
+                return left * right
+            if isinstance(node.op, ast.Div):
+                return left / right
+            raise ValueError("unsupported operator")
+        if isinstance(node, ast.UnaryOp):
+            operand = _eval(node.operand)
+            if isinstance(node.op, ast.UAdd):
+                return +operand
+            if isinstance(node.op, ast.USub):
+                return -operand
+            raise ValueError("unsupported operator")
         if (
             isinstance(node, ast.Constant)
             and not isinstance(node.value, bool)
