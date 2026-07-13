@@ -34,6 +34,11 @@ Targets **Checkmk 2.4+** and the current stable plugin APIs
   labelled by a field you pick (or the index/key); multiple wildcards
   (e.g. `pods[*].containers[*].ready`) expand the cartesian product, with
   composite `<pod> / <container>` labels
+- **Transform the numeric value**: an optional arithmetic expression (using the
+  variable `value`) applied to a numeric value before levels and the metric —
+  e.g. `value / 1024 / 1024` for bytes→MiB or `(value - 32) * 5 / 9` for °F→°C;
+  only numbers, parentheses and `+ - * /` are allowed and it is evaluated safely
+  (never `eval`)
 - **Thresholds**: WARN/CRIT upper and lower levels for numeric values, exposed
   as a metric/graph
 - **String matching**: two modes — either a regex the value must fully match
@@ -90,6 +95,7 @@ Each **field to monitor** has:
 | **JSON path** | Dotted path; use `[*]` for array discovery |
 | **Item label path** | For `[*]`: field within each element to label the service (defaults to the array index) |
 | **Unit** | Optional: `count` / `bytes` / `seconds` / `percent` — renders the metric and graph with that unit (numeric values only) |
+| **Transform the numeric value** | Optional arithmetic expression on the variable `value` (e.g. `value / 1024 / 1024`), applied to a numeric value before levels and the metric; only numbers, parentheses and `+ - * /` are allowed |
 | **Upper / lower levels** | WARN/CRIT for numeric values |
 | **String matching** | Either *must match a regex* (choose the state when it does **not** match, default CRIT) or *map the value to a state* (separate OK / WARN / CRIT regexes, first full match wins; choose the state when nothing matches, default OK) |
 
@@ -97,6 +103,10 @@ Each **field to monitor** has:
 
 - **Numeric value with levels** → checked against the levels, emitted as a
   metric named for the field's unit (`json_api_value` when no unit is set)
+- **Numeric value with a transform** → the arithmetic expression is applied
+  first, and the transformed value is what the levels check, what the metric
+  records, and what the service shows; a broken expression or a non-finite
+  result makes the service UNKNOWN
 - **Value with must-match string matching** → OK if it fully matches the regex,
   otherwise your chosen no-match state (default CRIT)
 - **Value with a state map** → tried against the OK, WARN, then CRIT regexes in
@@ -150,6 +160,18 @@ of demanding one exact match. Given `GET /status` → `{"mode": "degraded"}`:
 The regexes are tried OK → WARN → CRIT and the first full match wins, so `ready`
 is OK, `degraded` is WARN and `failed` is CRIT; anything else falls back to the
 no-match state (default OK).
+
+### Transforming a numeric value
+
+When an API reports a value in an awkward unit, transform it before levels and
+the metric apply. Given `GET /status` → `{"heap_bytes": 734003200}`:
+
+| Service name | JSON path | Transform | Check |
+|---|---|---|---|
+| `Heap` | `heap_bytes` | `value / 1024 / 1024` | upper levels `512 / 768` |
+
+The service checks, graphs and displays the value in MiB, so the levels are set
+in MiB too. A broken expression makes the service UNKNOWN.
 
 ### Array auto-discovery
 

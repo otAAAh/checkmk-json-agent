@@ -32,6 +32,29 @@ def test_url_without_http_scheme_rejected(ruleset, bad):
         ruleset._validate_url(bad)
 
 
+@pytest.mark.parametrize(
+    "expr", ["value / 1024 / 1024", "value * 1000", "(value - 32) * 5 / 9", "-value + 1", "value"]
+)
+def test_valid_calc_passes(ruleset, expr):
+    ruleset._validate_calc(expr)  # must not raise
+
+
+@pytest.mark.parametrize(
+    "expr",
+    [
+        "foo",  # unknown variable
+        "__import__('os')",  # call + name
+        "value.bit_length()",  # attribute + call
+        "value ** 2",  # power operator not allowed
+        "value +",  # syntax error
+        "'str'",  # non-numeric constant
+    ],
+)
+def test_invalid_calc_rejected(ruleset, expr):
+    with pytest.raises(ValidationError):
+        ruleset._validate_calc(expr)
+
+
 def test_parameter_form_builds(ruleset):
     # Smoke test: the form spec constructs without error.
     assert ruleset._parameter_form() is not None
