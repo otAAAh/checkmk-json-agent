@@ -24,6 +24,7 @@ from cmk.rulesets.v1.form_specs import (
     LevelDirection,
     List,
     Password,
+    ServiceState,
     SimpleLevels,
     SingleChoice,
     SingleChoiceElement,
@@ -121,9 +122,105 @@ def _authentication() -> CascadingSingleChoice:
     )
 
 
+def _string_match() -> CascadingSingleChoice:
+    return CascadingSingleChoice(
+        title=Title("String matching"),
+        help_text=Help("How to turn a string value into a Checkmk service state."),
+        prefill=DefaultValue("must_match"),
+        elements=[
+            CascadingSingleChoiceElement(
+                name="must_match",
+                title=Title("Value must match a regular expression"),
+                parameter_form=Dictionary(
+                    elements={
+                        "pattern": DictElement(
+                            required=True,
+                            parameter_form=String(
+                                title=Title("Expected value (regex)"),
+                                help_text=Help(
+                                    "For string values: the value must fully match "
+                                    "this regular expression (e.g. 'UP|ok')."
+                                ),
+                                custom_validate=(_validate_regex,),
+                            ),
+                        ),
+                        "state_no_match": DictElement(
+                            required=False,
+                            parameter_form=ServiceState(
+                                title=Title("State when the value does not match"),
+                                prefill=DefaultValue(ServiceState.CRIT),
+                            ),
+                        ),
+                    },
+                ),
+            ),
+            CascadingSingleChoiceElement(
+                name="state_map",
+                title=Title("Map the value to a state (OK / WARN / CRIT)"),
+                parameter_form=Dictionary(
+                    help_text=Help(
+                        "For string values with several known states: each pattern "
+                        "is a regular expression matched against the whole value. "
+                        "They are tried in the order OK, WARN, CRIT and the first "
+                        "match wins."
+                    ),
+                    elements={
+                        "ok": DictElement(
+                            required=False,
+                            parameter_form=String(
+                                title=Title("OK when the value matches (regex)"),
+                                custom_validate=(_validate_regex,),
+                            ),
+                        ),
+                        "warn": DictElement(
+                            required=False,
+                            parameter_form=String(
+                                title=Title("WARN when the value matches (regex)"),
+                                custom_validate=(_validate_regex,),
+                            ),
+                        ),
+                        "crit": DictElement(
+                            required=False,
+                            parameter_form=String(
+                                title=Title("CRIT when the value matches (regex)"),
+                                custom_validate=(_validate_regex,),
+                            ),
+                        ),
+                        "state_no_match": DictElement(
+                            required=False,
+                            parameter_form=ServiceState(
+                                title=Title("State when nothing matches"),
+                                prefill=DefaultValue(ServiceState.OK),
+                            ),
+                        ),
+                    },
+                ),
+            ),
+        ],
+    )
+
+
+def _migrate_extraction(value: object) -> dict[str, object]:
+    """Carry a pre-'match' extraction (flat ``expected`` regex) into the current
+    ``match`` CascadingSingleChoice shape - ``expected`` becomes the equivalent
+    ``("must_match", <regex>)`` so existing rules keep their behaviour."""
+    if not isinstance(value, dict):
+        raise TypeError(f"Unexpected extraction value: {value!r}")
+    if "expected" not in value or "match" in value:
+        return value
+    migrated = dict(value)
+    expected = migrated.pop("expected")
+    if isinstance(expected, str):
+        # The old flat regex was OK-on-match, CRIT otherwise - keep that exactly
+        # by omitting state_no_match (its CRIT default).
+        migrated["match"] = ("must_match", {"pattern": expected})
+    return migrated
+
+
 def _extraction() -> Dictionary:
     return Dictionary(
         title=Title("Field to monitor"),
+        migrate=_migrate_extraction,
         elements={
             "service": DictElement(
                 required=True,
@@ -206,17 +303,9 @@ def _extraction() -> Dictionary:
                     prefill_fixed_levels=InputHint((0.0, 0.0)),
                 ),
             ),
-            "expected": DictElement(
+            "match": DictElement(
                 required=False,
-                parameter_form=String(
-                    title=Title("Expected value (regex)"),
-                    help_text=Help(
-                        "For string values: the service is OK only if the value "
-                        "fully matches this regular expression (e.g. 'UP|ok'). "
-                        "Otherwise CRIT."
-                    ),
-                    custom_validate=(_validate_regex,),
-                ),
+                parameter_form=_string_match(),
             ),
         },
     )

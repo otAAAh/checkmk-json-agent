@@ -18,7 +18,7 @@ The section payload looks like:
     {"results": [{"service": "...", "path": "...", "url": "...",
                   "found": true, "value": "UP", "error": null,
                   "levels_upper": ["fixed", [80, 90]], "levels_lower": null,
-                  "expected": "UP|ok"}, ...]}
+                  "match": ["must_match", "UP|ok"]}, ...]}
 """
 
 import argparse
@@ -251,7 +251,7 @@ def _result(spec: dict, service: str, found: bool, value: object, error: str, ur
         "error": None if found else error,
         "levels_upper": spec.get("levels_upper"),
         "levels_lower": spec.get("levels_lower"),
-        "expected": spec.get("expected"),
+        "match": spec.get("match"),
         "unit": spec.get("unit"),
     }
 

@@ -232,7 +232,7 @@ async function testAllEndpoints(): Promise<void> {
   }
 }
 
-/** Escape a string so it matches literally as a regex (for the `expected` field). */
+/** Escape a string so it matches literally as a regex (for the `match` pattern). */
 function escapeRegex(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
@@ -285,8 +285,8 @@ function guessUnit(path: string): 'count' | 'bytes' | 'seconds' | 'percent' | un
 
 /** A fresh extraction entry seeded from the extractions List's element default,
  * with the picked path + a derived service name, and — based on the sampled JSON
- * value type — a starting `expected` regex (strings/booleans) or fixed upper
- * `levels_upper` warn/crit (numbers). The user refines these in the form. */
+ * value type — a starting `match`/must_match on the literal value (strings/booleans)
+ * or fixed upper `levels_upper` warn/crit (numbers). The user refines these in the form. */
 function newExtractionEntry(path: string, valueType?: string, sampleValue?: unknown): ExtractionValue {
   const entry: ExtractionValue = {
     ...listElementDefault(extractionsSpec.value),
@@ -309,8 +309,8 @@ function newExtractionEntry(path: string, valueType?: string, sampleValue?: unkn
     sampleValue !== null &&
     sampleValue !== undefined
   ) {
-    // Regex that matches the current value literally as a starting point.
-    entry.expected = escapeRegex(String(sampleValue))
+    // Must-match on a regex that matches the current value literally as a starting point.
+    entry.match = ['must_match', { pattern: escapeRegex(String(sampleValue)) }]
   }
   return entry
 }

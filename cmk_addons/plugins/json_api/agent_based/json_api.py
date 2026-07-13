@@ -31,6 +31,12 @@ from cmk.agent_based.v2 import (
 # Plain alias (not a PEP 695 `type` statement) to stay portable to Checkmk 2.4.
 _Levels = tuple[str, tuple[float, float] | None] | None
 
+# The string-matching config from the CascadingSingleChoice form spec, JSON-encoded
+# by the agent. After _coerce_match it is one of:
+#   ("must_match", {"pattern": <regex>, "state_no_match": <0-3>})
+#   ("state_map",  {"ok"/"warn"/"crit": <regex>, "state_no_match": <0-3>})
+_Match = tuple[str, object] | None
+
 
 # Maps the unit chosen in the rule to the metric defined in graphing/json_api.py.
 # ``None`` (no unit chosen, incl. rules from before units existed) keeps the
@@ -55,7 +61,7 @@ class Item:
     error: str | None
     levels_upper: _Levels
     levels_lower: _Levels
-    expected: str | None
+    match: _Match
     metric_name: str
     path: str
     url: str
@@ -73,6 +79,49 @@ def _coerce_levels(raw: object) -> _Levels:
             return ("fixed", (float(warn), float(crit)))
         case ["no_levels", _] | None:
             return None
+    return None
+
+
+def _coerce_state(raw: object, default: int) -> int:
+    """A ServiceState value (0=OK, 1=WARN, 2=CRIT, 3=UNKNOWN), else ``default``."""
+    if not isinstance(raw, bool) and isinstance(raw, int) and 0 <= raw <= 3:
+        return raw
+    return default
+
+
+def _coerce_match(raw: object, legacy_expected: object = None) -> _Match:
+    """Normalize the string-match config (list from JSON -> tuple).
+
+    ``must_match`` carries ``{"pattern", "state_no_match"}`` (a bare string is
+    also accepted for a hand-written rule/CLI). ``state_map`` carries the
+    OK/WARN/CRIT patterns plus a ``state_no_match`` fallback. ``legacy_expected``
+    is the old flat ``expected`` regex; a section from a pre-'match' agent is
+    read as the equivalent ``must_match`` (CRIT on mismatch) so old spool data
+    keeps working alongside the migrated ruleset.
+    """
+    match raw:
+        case ["must_match", dict() as cfg] | ("must_match", dict() as cfg):
+            pattern = cfg.get("pattern")
+            if isinstance(pattern, str):
+                return (
+                    "must_match",
+                    {
+                        "pattern": pattern,
+                        "state_no_match": _coerce_state(cfg.get("state_no_match"), 2),
+                    },
+                )
+        case ["must_match", str() as pattern] | ("must_match", str() as pattern):
+            return ("must_match", {"pattern": pattern, "state_no_match": 2})
+        case ["state_map", dict() as cfg] | ("state_map", dict() as cfg):
+            cleaned: dict[str, object] = {
+                key: cfg[key]
+                for key in ("ok", "warn", "crit")
+                if isinstance(cfg.get(key), str) and cfg[key]
+            }
+            cleaned["state_no_match"] = _coerce_state(cfg.get("state_no_match"), 0)
+            return ("state_map", cleaned)
+    if isinstance(legacy_expected, str):
+        return ("must_match", {"pattern": legacy_expected, "state_no_match": 2})
     return None
 
 
@@ -96,7 +145,7 @@ def parse_json_api(string_table: StringTable) -> Section | None:
             error=result["error"],
             levels_upper=_coerce_levels(result.get("levels_upper")),
             levels_lower=_coerce_levels(result.get("levels_lower")),
-            expected=result.get("expected"),
+            match=_coerce_match(result.get("match"), result.get("expected")),
             metric_name=_metric_name(result.get("unit")),
             path=result.get("path", ""),
             url=result.get("url", ""),
@@ -148,10 +197,45 @@ def _context(entry: Item) -> CheckResult:
         lines.append(f"JSON path: {entry.path}")
     if entry.url:
         lines.append(f"Source: {entry.url}")
-    if entry.expected is not None:
-        lines.append(f"Expected pattern: {entry.expected}")
+    if entry.match is not None:
+        kind, cfg = entry.match
+        if kind == "must_match" and isinstance(cfg, dict) and isinstance(cfg.get("pattern"), str):
+            lines.append(f"Expected pattern: {cfg['pattern']}")
+        elif kind == "state_map" and isinstance(cfg, dict):
+            parts = [
+                f"{key.upper()} /{cfg[key]}/" for key in ("ok", "warn", "crit") if cfg.get(key)
+            ]
+            if parts:
+                lines.append("State map: " + ", ".join(parts))
     if lines:
         yield Result(state=State.OK, notice="\n".join(lines))
+
+
+_STATE_MAP_ORDER = (("ok", State.OK), ("warn", State.WARN), ("crit", State.CRIT))
+
+
+def _evaluate_match(match: tuple[str, object], text: str) -> tuple[State, str]:
+    """Return ``(state, description)`` for a string value's configured matching.
+
+    ``must_match`` is OK on a full match, else CRIT. ``state_map`` tries the OK,
+    WARN then CRIT pattern and the first full match wins; no match stays OK.
+    Raises ``re.error`` on a bad pattern so the caller surfaces it as UNKNOWN.
+    """
+    kind, cfg = match
+    if not isinstance(cfg, dict):
+        return State.OK, ""
+    if kind == "must_match":
+        pattern = cfg.get("pattern")
+        pattern = pattern if isinstance(pattern, str) else ""
+        if re.fullmatch(pattern, text) is not None:
+            return State.OK, ""
+        return State(_coerce_state(cfg.get("state_no_match"), 2)), f"expected to match '{pattern}'"
+    for key, state in _STATE_MAP_ORDER:
+        pattern = cfg.get(key)
+        if isinstance(pattern, str) and pattern and re.fullmatch(pattern, text) is not None:
+            return state, f"matched {key.upper()}"
+    no_match = _coerce_state(cfg.get("state_no_match"), 0)
+    return State(no_match), ("no pattern matched" if no_match != 0 else "")
 
 
 def _value_results(entry: Item) -> CheckResult:
@@ -174,30 +258,23 @@ def _value_results(entry: Item) -> CheckResult:
     misconfigured_levels = has_levels and number is None
     misconfig_note = " (levels configured but value is not numeric)"
 
-    if entry.expected is not None:
+    if entry.match is not None:
         text = _render_value(entry.value)
         try:
-            ok = re.fullmatch(entry.expected, text) is not None
+            state, description = _evaluate_match(entry.match, text)
         except re.error as exc:
-            yield Result(
-                state=State.UNKNOWN,
-                summary=f"Invalid expected pattern '{entry.expected}': {exc}",
-            )
+            yield Result(state=State.UNKNOWN, summary=f"Invalid match pattern: {exc}")
             return
-        # A non-matching value is CRIT; a match is OK, downgraded to WARN when
-        # levels were also (meaninglessly) configured. Either way the
-        # levels-misconfig note is appended, so it is never hidden behind the
-        # regex result - CRIT still wins over WARN in the failed-match case.
+        # The matched state stands; a meaningless levels config only ever
+        # escalates it (to at least WARN) and appends its note, so the misconfig
+        # is surfaced without ever hiding behind - or weakening - the match.
         note = misconfig_note if misconfigured_levels else ""
-        if not ok:
-            yield Result(
-                state=State.CRIT,
-                summary=f"Value: {text} (expected to match '{entry.expected}'){note}",
-            )
-        elif misconfigured_levels:
-            yield Result(state=State.WARN, summary=f"Value: {text}{note}")
-        else:
-            yield Result(state=State.OK, summary=f"Value: {text}")
+        if misconfigured_levels:
+            state = State.worst(state, State.WARN)
+        summary = f"Value: {text}"
+        if description:
+            summary += f" ({description})"
+        yield Result(state=state, summary=summary + note)
         return
 
     if misconfigured_levels:

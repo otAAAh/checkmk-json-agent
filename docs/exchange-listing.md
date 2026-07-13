@@ -21,6 +21,9 @@ included. One rule. Any API. Done.
   method, auth, and fields; an unreachable one only affects its own services.
 - 📈 **Thresholds & graphs in Checkmk** — WARN/CRIT and metrics live in *your*
   rule, not upstream in the API.
+- 🔤 **String matching, two ways** — require a value to match a regex (pick the
+  state when it doesn't, default CRIT), or map values like `ready` / `degraded`
+  / `failed` straight to OK / WARN / CRIT.
 - 🔐 **Secure by default** — basic or bearer auth via the password store, TLS
   verification on.
 - 🧰 **Bonus field picker** — paste your JSON in the bundled explorer, click what

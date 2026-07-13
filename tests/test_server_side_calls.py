@@ -35,7 +35,13 @@ def test_basic_command_line(ssc):
                     "url": "https://example.com/health",
                     "method": "GET",
                     "verify_cert": True,
-                    "extractions": [{"path": "status", "service": "Health", "expected": "UP"}],
+                    "extractions": [
+                        {
+                            "path": "status",
+                            "service": "Health",
+                            "match": ("must_match", {"pattern": "UP"}),
+                        }
+                    ],
                 }
             ]
         },
@@ -53,7 +59,8 @@ def test_basic_command_line(ssc):
             "unit": None,
             "levels_upper": None,
             "levels_lower": None,
-            "expected": "UP",
+            # The CascadingSingleChoice tuple survives the JSON round-trip as a list.
+            "match": ["must_match", {"pattern": "UP"}],
         }
     ]
 

@@ -100,7 +100,7 @@ def test_check_invalid_regex_is_unknown_not_crash(check):
     section = _section(check, [_entry("Bad", value="UP", expected="(unclosed")])
     result = list(check.check_json_api("Bad", section))[0]
     assert result.state == State.UNKNOWN
-    assert "Invalid expected pattern" in result.summary
+    assert "Invalid match pattern" in result.summary
 
 
 def test_check_levels_on_non_numeric_warns(check):
@@ -227,6 +227,122 @@ def test_parse_duplicate_service_names_kept_distinct(check):
     assert len(section.items) == 2
     assert "Dup" in section.items
     assert "Dup (2)" in section.items
+
+
+def test_coerce_match_normalizes_shapes(check):
+    # Canonical must_match: dict with pattern + no-match state (defaults CRIT=2).
+    assert check._coerce_match(["must_match", {"pattern": "UP"}]) == (
+        "must_match",
+        {"pattern": "UP", "state_no_match": 2},
+    )
+    assert check._coerce_match(["must_match", {"pattern": "UP", "state_no_match": 1}]) == (
+        "must_match",
+        {"pattern": "UP", "state_no_match": 1},
+    )
+    # A bare string is accepted for hand-written rules/CLI.
+    assert check._coerce_match(["must_match", "UP"]) == (
+        "must_match",
+        {"pattern": "UP", "state_no_match": 2},
+    )
+    # state_map keeps only real patterns and always carries a no-match state.
+    assert check._coerce_match(["state_map", {"ok": "UP", "crit": "DOWN"}]) == (
+        "state_map",
+        {"ok": "UP", "crit": "DOWN", "state_no_match": 0},
+    )
+    assert check._coerce_match(["state_map", {"ok": "", "warn": "W", "x": "y"}]) == (
+        "state_map",
+        {"warn": "W", "state_no_match": 0},
+    )
+    assert check._coerce_match(None) is None
+    # Back-compat: an old section with only the flat 'expected' regex -> CRIT.
+    assert check._coerce_match(None, "UP|ok") == (
+        "must_match",
+        {"pattern": "UP|ok", "state_no_match": 2},
+    )
+
+
+def test_check_must_match_explicit_shape(check):
+    section = _section(
+        check,
+        [
+            _entry("Up", value="UP", match=["must_match", {"pattern": "UP"}]),
+            _entry("Down", value="DOWN", match=["must_match", {"pattern": "UP"}]),
+        ],
+    )
+    assert list(check.check_json_api("Up", section))[0].state == State.OK
+    crit = list(check.check_json_api("Down", section))[0]
+    assert crit.state == State.CRIT
+    assert "expected to match 'UP'" in crit.summary
+
+
+def test_check_must_match_no_match_state_is_configurable(check):
+    # The ARD-style "not-match -> WARN" instead of the CRIT default.
+    section = _section(
+        check,
+        [
+            _entry(
+                "Down", value="DOWN", match=["must_match", {"pattern": "UP", "state_no_match": 1}]
+            )
+        ],
+    )
+    result = list(check.check_json_api("Down", section))[0]
+    assert result.state == State.WARN
+    assert "expected to match 'UP'" in result.summary
+
+
+def test_check_state_map_first_match_wins(check):
+    # OK -> WARN -> CRIT order; 'degraded' matches WARN.
+    match = ["state_map", {"ok": "ready", "warn": "degraded", "crit": "failed"}]
+    section = _section(
+        check,
+        [
+            _entry("Ready", value="ready", match=match),
+            _entry("Degraded", value="degraded", match=match),
+            _entry("Failed", value="failed", match=match),
+        ],
+    )
+    assert list(check.check_json_api("Ready", section))[0].state == State.OK
+    warn = list(check.check_json_api("Degraded", section))[0]
+    assert warn.state == State.WARN
+    assert "matched WARN" in warn.summary
+    assert list(check.check_json_api("Failed", section))[0].state == State.CRIT
+
+
+def test_check_state_map_no_match_defaults_ok(check):
+    section = _section(
+        check,
+        [_entry("Mode", value="maintenance", match=["state_map", {"crit": "^failed$"}])],
+    )
+    result = list(check.check_json_api("Mode", section))[0]
+    assert result.state == State.OK
+    assert result.summary == "Value: maintenance"
+
+
+def test_check_state_map_no_match_state_is_configurable(check):
+    section = _section(
+        check,
+        [_entry("Mode", value="weird", match=["state_map", {"ok": "good", "state_no_match": 2}])],
+    )
+    result = list(check.check_json_api("Mode", section))[0]
+    assert result.state == State.CRIT
+    assert "no pattern matched" in result.summary
+
+
+def test_check_state_map_details_list_patterns(check):
+    section = _section(
+        check,
+        [_entry("Mode", value="ok", match=["state_map", {"ok": "ok", "crit": "bad"}], path="m")],
+    )
+    details = _details(check.check_json_api("Mode", section))
+    assert "State map: OK /ok/, CRIT /bad/" in details
+
+
+def test_check_legacy_expected_section_still_evaluated(check):
+    # A section produced by a pre-'match' agent (only 'expected') must still work.
+    section = _section(check, [_entry("Up", value="DOWN", expected="UP")])
+    result = list(check.check_json_api("Up", section))[0]
+    assert result.state == State.CRIT
+    assert "expected to match 'UP'" in result.summary
 
 
 def test_check_api_error_is_crit(check):

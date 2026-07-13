@@ -45,3 +45,24 @@ def test_migrate_wraps_flat_rule_into_single_endpoint(ruleset):
 def test_migrate_leaves_new_shape_untouched(ruleset):
     new = {"endpoints": [{"url": "http://x", "extractions": []}]}
     assert ruleset._migrate_to_endpoints(new) is new
+
+
+def test_migrate_extraction_expected_becomes_must_match(ruleset):
+    # A pre-'match' extraction (flat 'expected' regex) migrates to the
+    # equivalent must_match, preserving the other fields.
+    old = {"service": "Health", "path": "status", "unit": "count", "expected": "UP|ok"}
+    migrated = ruleset._migrate_extraction(old)
+    assert migrated["match"] == ("must_match", {"pattern": "UP|ok"})
+    assert "expected" not in migrated
+    assert migrated["service"] == "Health"
+    assert migrated["unit"] == "count"
+
+
+def test_migrate_extraction_leaves_new_shape_untouched(ruleset):
+    new = {"service": "S", "path": "p", "match": ("state_map", {"crit": "DOWN"})}
+    assert ruleset._migrate_extraction(new) == new
+
+
+def test_migrate_extraction_without_expected_untouched(ruleset):
+    plain = {"service": "S", "path": "p"}
+    assert ruleset._migrate_extraction(plain) == plain
