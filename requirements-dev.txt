@@ -2,7 +2,7 @@
 # Kept in a requirements file (not an inline `pip install`) so Dependabot can see
 # and bump these pins. Runtime deps (cmk.*, requests) come from the Checkmk site,
 # not from here; pydantic is needed only so mypy can type-check the server-side call.
-ruff==0.15.8
+ruff==0.15.21
 mypy==1.13.0
 pydantic==2.11.7
 pytest==9.0.3
