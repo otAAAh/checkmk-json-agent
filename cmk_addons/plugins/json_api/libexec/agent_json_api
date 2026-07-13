@@ -239,6 +239,15 @@ def _split_wildcards(path: str) -> list[str]:
 
 
 def _result(spec: dict, service: str, found: bool, value: object, error: str, url: str) -> dict:
+    # "Count elements": monitor the length of the list/object at the path instead
+    # of the value itself. A scalar has no length to count, so that is surfaced as
+    # a not-found misconfiguration rather than counting characters of a string.
+    if found and spec.get("count"):
+        if isinstance(value, (list, dict)):
+            value = len(value)
+        else:
+            found = False
+            error = "value at path is not a list or object (cannot count elements)"
     # Values that are not JSON scalars (dict/list) are reported as strings.
     if found and isinstance(value, (dict, list)):
         value = json.dumps(value)

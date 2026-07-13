@@ -34,6 +34,12 @@ Targets **Checkmk 2.4+** and the current stable plugin APIs
   labelled by a field you pick (or the index/key); multiple wildcards
   (e.g. `pods[*].containers[*].ready`) expand the cartesian product, with
   composite `<pod> / <container>` labels
+- **Count elements**: instead of monitoring a value, monitor *how many*
+  elements a path holds — array length or number of object keys. Where `[*]`
+  fans a collection out into one service per element, `count` collapses it into
+  a single "how many" service (queue length, number of unhealthy nodes, ...).
+  The count is a number, so a unit, WARN/CRIT levels, the transform and a metric
+  all apply to it; a path that is not an array or object becomes UNKNOWN
 - **Transform the numeric value**: an optional arithmetic expression (using the
   variable `value`) applied to a numeric value before levels and the metric —
   e.g. `value / 1024 / 1024` for bytes→MiB or `(value - 32) * 5 / 9` for °F→°C;
@@ -94,6 +100,7 @@ Each **field to monitor** has:
 | **Service name** | Becomes the service (shown as `JSON <name>`) |
 | **JSON path** | Dotted path; use `[*]` for array discovery |
 | **Item label path** | For `[*]`: field within each element to label the service (defaults to the array index) |
+| **Count the number of elements at this path** | Optional: when the path points at an array or object, monitor its number of elements (array length / object keys) instead of the value; the count is a number, so unit, levels, transform and metric all apply. A path that is not an array or object becomes UNKNOWN |
 | **Unit** | Optional: `count` / `bytes` / `seconds` / `percent` — renders the metric and graph with that unit (numeric values only) |
 | **Transform the numeric value** | Optional arithmetic expression on the variable `value` (e.g. `value / 1024 / 1024`), applied to a numeric value before levels and the metric; only numbers, parentheses and `+ - * /` are allowed |
 | **Upper / lower levels** | WARN/CRIT for numeric values |
@@ -112,6 +119,9 @@ Each **field to monitor** has:
 - **Value with a state map** → tried against the OK, WARN, then CRIT regexes in
   that order; the first full match sets the state, and if none matches your
   chosen no-match state applies (default OK)
+- **Count enabled on an array or object** → the number of elements is what the
+  levels check, the metric records and the summary shows (after any transform)
+- **Count enabled on a non-array/object path** → UNKNOWN
 - **Plain value** → shown in the summary (numeric values still get a metric)
 - **Levels set on a non-numeric value** → WARN (so the misconfig is visible)
 - **Path not found** → UNKNOWN
@@ -188,6 +198,20 @@ Given a payload with a `nodes` array:
 Produces `JSON Node web-1` (OK) and `JSON Node web-2` (CRIT). If a label value
 repeats across elements, every occurrence is suffixed with its index so two
 elements never collapse into one service.
+
+### Counting elements
+
+When you care about *how many*, not each one, enable **Count** instead of a
+`[*]` wildcard. Given `GET /status` → `{"jobs": [{"id": 1}, {"id": 2}, {"id": 3}]}`:
+
+| Service name | JSON path | Count | Check |
+|---|---|---|---|
+| `Queued jobs` | `jobs` | yes | upper levels `100 / 500` |
+
+Produces a single service `JSON Queued jobs` that reports `3` and alerts on the
+queue length — where `jobs[*]` would instead have created one service per job.
+The same works on an object (e.g. `components` → number of components). If the
+path resolves to anything other than an array or object, the service is UNKNOWN.
 
 ### Multiple endpoints
 

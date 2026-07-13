@@ -13,7 +13,12 @@ description:
  expression on the variable {value}, e.g. {value / 1024 / 1024}) that is applied
  to the numeric value first, so the levels, the metric and the summary all use
  the transformed value; a broken expression or a non-finite result makes the
- service {UNKNOWN}. String matching offers two modes: a value can be required
+ service {UNKNOWN}. A field may instead be configured to count the number of
+ elements at its path: when the path resolves to an array or object the service
+ monitors the element count (array length or number of object keys) as a
+ number, to which the unit, levels, transform and metric all apply, and it goes
+ {UNKNOWN} if the path is neither an array nor an object. String matching
+ offers two modes: a value can be required
  to fully match a regular expression, with a configurable state (default {CRIT})
  when it does not; or the value can be mapped to a state by matching it against
  separate OK, WARN and CRIT regular expressions, tried in that order with the

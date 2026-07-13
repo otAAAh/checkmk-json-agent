@@ -60,6 +60,7 @@
   /* field editors */
   .field { border:1px solid var(--line); border-radius:6px; padding:8px; margin-bottom:8px; }
   .field .row { display:grid; grid-template-columns:auto 1fr; gap:4px 8px; align-items:center; margin-bottom:4px; }
+  .field .cb { display:flex; gap:6px; align-items:center; font-size:13px; cursor:pointer; }
   .field .lvls { display:flex; gap:6px; align-items:center; }
   .field .lvls input { width:70px; }
   .field code { color:var(--warn); word-break:break-all; }
@@ -452,6 +453,7 @@ function addExtraction(path) {
     service: defaultService(path),
     path,
     label_path: path.includes("[*]") ? guessLabel(path) : "",
+    count: false,
     unit: "", calc: "", lu_w: "", lu_c: "", ll_w: "", ll_c: "",
     matchMode: "", mmPattern: "", mmState: "2",
     smOk: "", smWarn: "", smCrit: "", smState: "0",
@@ -479,6 +481,7 @@ function renderFields() {
       `<div class="muted">path: <code>${esc(e.path)}</code></div>` +
       `<div class="row"><label>Service</label><input type="text" data-f="service" data-i="${i}" value="${escAttr(e.service)}"></div>` +
       (wild ? `<div class="row"><label>Label path</label><input type="text" data-f="label_path" data-i="${i}" value="${escAttr(e.label_path)}" placeholder="field in each element, e.g. name"></div>` : "") +
+      `<div class="row"><label>Count</label><label class="cb"><input type="checkbox" data-fb="count" data-i="${i}"${e.count ? " checked" : ""}> Count elements (monitor array/object length)</label></div>` +
       `<div class="row"><label>Unit</label><select data-f="unit" data-i="${i}">` +
         ["", "count", "bytes", "seconds", "percent"].map(u =>
           `<option value="${u}"${e.unit === u ? " selected" : ""}>${u || "no unit"}</option>`).join("") +
@@ -514,6 +517,12 @@ function renderFields() {
       renderOutputs();
     };
   });
+  box.querySelectorAll("input[data-fb]").forEach(inp => {
+    inp.onchange = () => {
+      ep().extractions[+inp.dataset.i][inp.dataset.fb] = inp.checked;
+      renderOutputs();
+    };
+  });
   box.querySelectorAll("[data-rm]").forEach(b => {
     b.onclick = () => { ep().extractions.splice(+b.dataset.rm, 1); renderFields(); renderOutputs(); };
   });
@@ -530,6 +539,7 @@ function extractionObjs(e) {
   return e.extractions.map(x => {
     const o = { service: x.service, path: x.path };
     if (x.label_path) o.label_path = x.label_path;
+    if (x.count) o.count = true;
     if (x.unit) o.unit = x.unit;
     if (x.calc) o.calc = x.calc;
     const lu = levelsPair(x.lu_w, x.lu_c); if (lu) o.levels_upper = ["fixed", lu];
@@ -555,6 +565,7 @@ function extractionObjs(e) {
 function pyExtraction(o) {
   const p = [`'service': ${pyStr(o.service)}`, `'path': ${pyStr(o.path)}`];
   if (o.label_path) p.push(`'label_path': ${pyStr(o.label_path)}`);
+  if (o.count) p.push("'count': True");
   if (o.unit) p.push(`'unit': ${pyStr(o.unit)}`);
   if (o.calc) p.push(`'calc': ${pyStr(o.calc)}`);
   if (o.levels_upper) p.push(`'levels_upper': ('fixed', (${o.levels_upper[1][0]}, ${o.levels_upper[1][1]}))`);

@@ -250,6 +250,9 @@ function definedSummary(x: ExtractionValue): string[] {
   if (typeof x.unit === 'string' && x.unit) {
     parts.push(_t('unit %{u}', { u: x.unit }))
   }
+  if (x.count === true) {
+    parts.push(_t('count elements'))
+  }
   if (typeof x.calc === 'string' && x.calc) {
     parts.push(_t('calc %{c}', { c: x.calc }))
   }
@@ -333,38 +336,43 @@ const reviews = computed<EndpointReview[]>(() =>
         const name = extractionService(x) || _t('(unnamed)')
         const path = extractionPath(x)
         const defined = definedSummary(x)
-        // Optional arithmetic transform applied to a NUMERIC sample value before
+        // Optional arithmetic transform applied to a NUMERIC value before
         // levels/display, e.g. `value / 1024 / 1024`.
         const calc = typeof x.calc === 'string' && x.calc ? x.calc : null
+        // When set, the monitored value is the NUMBER OF ELEMENTS of an
+        // array/object rather than the value itself; levels then apply to that
+        // count. Counting a scalar is a misconfiguration (UNKNOWN in the real
+        // check) — preview it as unresolved rather than crashing.
+        const doCount = x.count === true
         const matches = sample !== null ? resolvePath(sample, path) : []
         if (!matches.length) {
           return [{ service: name, path, value: undefined, defined, state: 'none' as StateKind }]
         }
         return matches.map((m): Row => {
-          // Transform the value when `calc` is set and the sample is numeric.
-          // On a bad expression evalCalc returns null: leave the raw value shown
-          // and mark the numeric preview unresolved rather than crashing.
-          let value = m.value
-          if (calc !== null && typeof m.value === 'number') {
-            const transformed = evalCalc(calc, m.value)
+          const service = matches.length > 1 && m.label ? `${name} ${m.label}` : name
+          // 1) Count elements first, so a following `calc` transforms the count.
+          let value: Json = m.value
+          if (doCount) {
+            if (Array.isArray(m.value)) {
+              value = m.value.length
+            } else if (typeof m.value === 'object' && m.value !== null) {
+              value = Object.keys(m.value).length
+            } else {
+              // Not a list/object: cannot count — show the raw value, unresolved.
+              return { service, path, value: m.value, defined, state: 'none' as StateKind }
+            }
+          }
+          // 2) Transform the (possibly counted) value when `calc` is set and it
+          // is numeric. On a bad expression evalCalc returns null: leave the
+          // value shown and mark the preview unresolved rather than crashing.
+          if (calc !== null && typeof value === 'number') {
+            const transformed = evalCalc(calc, value)
             if (transformed === null) {
-              return {
-                service: matches.length > 1 && m.label ? `${name} ${m.label}` : name,
-                path,
-                value: m.value,
-                defined,
-                state: 'none' as StateKind,
-              }
+              return { service, path, value, defined, state: 'none' as StateKind }
             }
             value = transformed
           }
-          return {
-            service: matches.length > 1 && m.label ? `${name} ${m.label}` : name,
-            path,
-            value,
-            defined,
-            state: evalState(value, x),
-          }
+          return { service, path, value, defined, state: evalState(value, x) }
         })
       })
     return { url: endpointUrl(connection) || _t('Endpoint %{n}', { n: ei + 1 }), rows }

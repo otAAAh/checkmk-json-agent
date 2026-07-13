@@ -310,6 +310,21 @@ def _extraction() -> Dictionary:
                     ),
                 ),
             ),
+            "count": DictElement(
+                required=False,
+                parameter_form=BooleanChoice(
+                    label=Label("Count the number of elements at this path"),
+                    help_text=Help(
+                        "When the path points at a JSON array or object, monitor "
+                        "the number of elements it contains instead of the value "
+                        "itself. The count is a number, so a unit, levels, a "
+                        "transform and a metric all apply to it. If the path does "
+                        "not resolve to an array or object, the service becomes "
+                        "UNKNOWN."
+                    ),
+                    prefill=DefaultValue(False),
+                ),
+            ),
             "unit": DictElement(
                 required=False,
                 parameter_form=SingleChoice(
