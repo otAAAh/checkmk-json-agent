@@ -62,6 +62,7 @@ def test_basic_command_line(ssc):
             # The CascadingSingleChoice tuple survives the JSON round-trip as a list.
             "match": ["must_match", {"pattern": "UP"}],
             "calc": None,
+            "count": False,
         }
     ]
 
@@ -179,6 +180,23 @@ def test_calc_passed_through(ssc):
     )
     (endpoint,) = _endpoints(ssc, args)
     assert endpoint["extractions"][0]["calc"] == "value / 1024"
+
+
+def test_count_passed_through(ssc):
+    args = _command_args(
+        ssc,
+        {
+            "endpoints": [
+                {
+                    "url": "http://x",
+                    "verify_cert": True,
+                    "extractions": [{"path": "items", "service": "Items", "count": True}],
+                }
+            ]
+        },
+    )
+    (endpoint,) = _endpoints(ssc, args)
+    assert endpoint["extractions"][0]["count"] is True
 
 
 def test_multiple_endpoints_each_with_own_config(ssc):

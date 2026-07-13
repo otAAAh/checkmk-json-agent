@@ -51,6 +51,8 @@ class Extraction(BaseModel, frozen=True):
     match: object = None
     # Arithmetic expression over 'value', applied to a numeric value by the check.
     calc: str | None = None
+    # Monitor the length of the list/object at the path (resolved by the agent).
+    count: bool = False
 
 
 class Endpoint(BaseModel, frozen=True):
