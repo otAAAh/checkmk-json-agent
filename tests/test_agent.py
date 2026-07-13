@@ -419,3 +419,35 @@ def test_main_isolates_endpoint_failure(agent, monkeypatch, capsys):
     assert by_service["Down"]["found"] is False
     assert by_service["Down"]["error"] == "Request failed: boom"
     assert by_service["Up"]["found"] is True and by_service["Up"]["value"] == "UP"
+
+
+def test_main_flushes_stdout(agent, monkeypatch):
+    """The section is flushed before returning, so a consultant who copies the
+    program call out of `cmk -D <host>` and runs it by hand on a TTY sees the
+    output instead of a silently buffered stream (issue #70)."""
+    import io
+    import sys
+
+    monkeypatch.setattr(agent, "_fetch", lambda endpoint, secret: ({"s": "UP"}, None))
+
+    flushed = []
+
+    class _FlushSpy(io.StringIO):
+        def flush(self):
+            flushed.append(True)
+            super().flush()
+
+    buf = _FlushSpy()
+    monkeypatch.setattr(sys, "stdout", buf)
+
+    argv = [
+        "--endpoint",
+        json.dumps({"url": "http://up", "extractions": [{"path": "s", "service": "Up"}]}),
+    ]
+    rc = agent.main(argv)
+    lines = buf.getvalue().splitlines()
+
+    assert rc == 0
+    assert lines[0] == "<<<json_api:sep(0)>>>"
+    assert json.loads(lines[1])["results"][0]["service"] == "Up"
+    assert flushed, "main() must flush stdout so the section is delivered on a TTY"
