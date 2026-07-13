@@ -204,8 +204,7 @@ def _fetch(endpoint: dict, secret: str | None) -> tuple[object | None, str | Non
             if not allow_redirects and 300 <= response.status_code < 400:
                 location = response.headers.get("Location", "?")
                 return None, (
-                    f"Unexpected {response.status_code} redirect to {location} "
-                    "(redirects disabled)"
+                    f"Unexpected {response.status_code} redirect to {location} (redirects disabled)"
                 )
             raw = _read_capped(response, _MAX_RESPONSE_BYTES)
     except _ResponseTooLarge as exc:
@@ -366,7 +365,9 @@ def _process_endpoint(args: argparse.Namespace, index: int, endpoint: dict) -> l
 
     def _fail(error: str) -> list[dict]:
         results = [
-            _result({"path": spec.get("path", "?")}, spec.get("service", "?"), False, None, error, url)
+            _result(
+                {"path": spec.get("path", "?")}, spec.get("service", "?"), False, None, error, url
+            )
             for spec in endpoint.get("extractions", [])
             if isinstance(spec, dict)
         ]
@@ -408,6 +409,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     payload = {"results": results}
     sys.stdout.write("<<<json_api:sep(0)>>>\n")
     sys.stdout.write(json.dumps(payload) + "\n")
+    # Flush explicitly so the section is delivered no matter how stdout is
+    # connected. Checkmk always reads the agent through a pipe (block-buffered,
+    # flushed at exit), but a consultant copying the program call out of
+    # `cmk -D <host>` and running it by hand on a TTY otherwise sees nothing
+    # until the buffer happens to flush — making a working agent look broken.
+    sys.stdout.flush()
     return 0
 
 
