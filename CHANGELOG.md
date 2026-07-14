@@ -3,6 +3,30 @@
 All notable changes to this project, one section per released version.
 Generated from the git history by `scripts/gen_changelog.py`.
 
+## [0.8.0] - 2026-07-14
+
+### Features
+
+- Count elements + on-site wizard fixes (completes #75) ([`36ee9d2`](https://github.com/otAAAh/checkmk-json-agent/commit/36ee9d2))
+- String matching with OK/WARN/CRIT state mapping ([`727e033`](https://github.com/otAAAh/checkmk-json-agent/commit/727e033))
+
+### Fixes
+
+- Don't crash the check on a blank calc expression ([`a7254e8`](https://github.com/otAAAh/checkmk-json-agent/commit/a7254e8))
+- Flush stdout so the agent's section shows on direct CLI runs ([`854bdd7`](https://github.com/otAAAh/checkmk-json-agent/commit/854bdd7))
+
+### Other
+
+- Add supported-Checkmk-version badges to the README ([`d87bb9f`](https://github.com/otAAAh/checkmk-json-agent/commit/d87bb9f))
+- Stub raw-dist-missing icons; take bridge-check off the PR path ([`c7a6aab`](https://github.com/otAAAh/checkmk-json-agent/commit/c7a6aab))
+- CI: fix frontend-build (drop unresolvable setup-node pin) and bridge-check (Explorer is 2.5.0-only, drop 2.4 image) ([`49d1e3d`](https://github.com/otAAAh/checkmk-json-agent/commit/49d1e3d))
+- Add in-site JSON API Explorer wizard (json_api_explorer MKP) ([`43dce51`](https://github.com/otAAAh/checkmk-json-agent/commit/43dce51))
+- Deps: bump mypy from 1.13.0 to 2.2.0 ([`836bf48`](https://github.com/otAAAh/checkmk-json-agent/commit/836bf48))
+- Deps: bump pytest from 9.0.3 to 9.1.1 ([`5b93194`](https://github.com/otAAAh/checkmk-json-agent/commit/5b93194))
+- Deps: bump ruff from 0.15.8 to 0.15.21 ([`6e5eb0d`](https://github.com/otAAAh/checkmk-json-agent/commit/6e5eb0d))
+- Deps: bump pydantic from 2.11.7 to 2.13.4 ([`12dfede`](https://github.com/otAAAh/checkmk-json-agent/commit/12dfede))
+- Bump the actions group with 2 updates ([`8c33708`](https://github.com/otAAAh/checkmk-json-agent/commit/8c33708))
+
 ## [0.7.0] - 2026-07-10
 
 - Refresh Exchange listing for object-map discovery & multi-endpoint ([`fce6b72`](https://github.com/otAAAh/checkmk-json-agent/commit/fce6b72))
