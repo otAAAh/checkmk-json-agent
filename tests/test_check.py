@@ -398,6 +398,18 @@ def test_check_calc_ignored_on_non_numeric(check):
     assert result.summary == "Value: hello"
 
 
+def test_check_blank_calc_is_no_transform_not_crash(check):
+    # The ruleset accepts a blank/whitespace calc as "no transform". A truthy
+    # whitespace string must not reach ast.parse (which would raise an uncaught
+    # SyntaxError and crash the check) - it is normalized away at parse time.
+    section = _section(check, [_entry("N", value=5, calc="   ")])
+    results = list(check.check_json_api("N", section))
+    (metric,) = [r for r in results if isinstance(r, Metric)]
+    assert metric.value == 5.0
+    summary = next(r.summary for r in results if isinstance(r, Result) and r.summary)
+    assert summary == "Value: 5"
+
+
 def test_check_api_error_is_crit(check):
     # A section-level error surfaces as CRIT on any discovered item.
     items = _section(check, [_entry("X", value="1")]).items
