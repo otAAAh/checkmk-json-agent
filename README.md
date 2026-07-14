@@ -71,6 +71,11 @@ mkp enable json_api 0.8.0
 
 Or upload it in the GUI under **Setup → Extension packages**.
 
+Optionally also install the companion **in-site Explorer** wizard
+(`json_api_explorer`, Checkmk 2.5+) — a guided setup that builds a rule from a
+live API response. Install it after the `json_api` agent package; see
+[JSON API Explorer](#json-api-explorer).
+
 ## Configuration
 
 Create a rule under **Setup → Agents → Other integrations → Generic JSON API**
@@ -224,14 +229,25 @@ collision is auto-suffixed with ` (2)`, but explicit names read better).
 
 ## JSON API Explorer
 
-[`explorer/index.html`](explorer/index.html) is a standalone, dependency-free
-web page (open it directly in a browser — nothing is uploaded anywhere).
-Configure one or more endpoints (URL, method, auth, request body, headers,
-timeout, TLS/redirect toggles), paste each endpoint's sample JSON response,
-click the fields to monitor, set thresholds/labels, and it generates: the agent
-`--endpoint` command line for CLI testing, the rule value for `rules.mk`, and a
-REST API request body + `curl` to create the rule on a site. Auth is emitted as
-a password-store reference (create the entry under **Setup → Passwords**).
+There are two Explorers — a standalone browser page and an in-site wizard.
+
+**Standalone page** — [`explorer/index.html`](explorer/index.html) is a
+dependency-free web page (open it directly in a browser — nothing is uploaded
+anywhere). Configure one or more endpoints (URL, method, auth, request body,
+headers, timeout, TLS/redirect toggles), paste each endpoint's sample JSON
+response, click the fields to monitor, set thresholds/labels, and it generates:
+the agent `--endpoint` command line for CLI testing, the rule value for
+`rules.mk`, and a REST API request body + `curl` to create the rule on a site.
+Auth is emitted as a password-store reference (create the entry under **Setup →
+Passwords**).
+
+**In-site wizard (companion MKP)** — `json_api_explorer` is an optional, separate
+extension package that adds a guided setup under **Setup → Quick setup → Generic
+JSON API**. It fetches each endpoint's live response from the site, lets you
+point-and-pick fields with a preview of the resulting service states, and creates
+the rule for you. It is a companion to this agent — install the `json_api`
+package first — and requires **Checkmk 2.5+** (it builds on Checkmk's native
+Quick-Setup UI). See [`docs/exchange-listing-explorer.md`](docs/exchange-listing-explorer.md).
 
 ## Security notes
 

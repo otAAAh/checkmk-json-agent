@@ -35,7 +35,9 @@ included. One rule. Any API. Done.
 - 🔐 **Secure by default** — basic or bearer auth via the password store, TLS
   verification on.
 - 🧰 **Bonus field picker** — paste your JSON in the bundled explorer, click what
-  to monitor, copy the ready-made rule.
+  to monitor, copy the ready-made rule. On Checkmk 2.5+, install the optional
+  companion package **Generic JSON API – Explorer (extra)** for a guided in-site
+  wizard that builds the rule for you from a live API response.
 
 ## In 30 seconds
 
