@@ -127,6 +127,18 @@ def _coerce_match(raw: object, legacy_expected: object = None) -> _Match:
     return None
 
 
+def _coerce_calc(raw: object) -> str | None:
+    """The arithmetic transform expression, or ``None`` for "no transform".
+
+    A blank/whitespace-only value means no transform (the ruleset validator
+    accepts it as such): normalize it to ``None`` so it never reaches
+    ``ast.parse``, which would raise an uncaught ``SyntaxError`` on it.
+    """
+    if isinstance(raw, str) and raw.strip():
+        return raw
+    return None
+
+
 def parse_json_api(string_table: StringTable) -> Section | None:
     if not string_table:
         return None
@@ -148,7 +160,7 @@ def parse_json_api(string_table: StringTable) -> Section | None:
             levels_upper=_coerce_levels(result.get("levels_upper")),
             levels_lower=_coerce_levels(result.get("levels_lower")),
             match=_coerce_match(result.get("match"), result.get("expected")),
-            calc=result.get("calc") if isinstance(result.get("calc"), str) else None,
+            calc=_coerce_calc(result.get("calc")),
             metric_name=_metric_name(result.get("unit")),
             path=result.get("path", ""),
             url=result.get("url", ""),
