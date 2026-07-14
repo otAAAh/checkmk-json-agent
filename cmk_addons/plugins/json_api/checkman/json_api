@@ -30,7 +30,11 @@ description:
  response, or if its endpoint could not be reached or did not return JSON. An
  endpoint failure is confined to that endpoint's own services.
 
- Configure it in Setup with the rule {Generic JSON API}.
+ Configure it in Setup with the rule {Generic JSON API}. The levels and string
+ matching a field carries there become the service's defaults; you can override
+ them per folder, host or service with the check parameters rule {Generic JSON
+ API} (Setup > Service monitoring rules > Applications) without touching the
+ agent's connection settings.
 
 item:
  The service name configured for the extracted field.

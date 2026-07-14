@@ -17,7 +17,14 @@ from pathlib import Path
 
 import pytest
 
-FAMILY = Path(__file__).resolve().parent.parent / "cmk_addons" / "plugins" / "json_api"
+REPO_ROOT = Path(__file__).resolve().parent.parent
+FAMILY = REPO_ROOT / "cmk_addons" / "plugins" / "json_api"
+
+# The rulesets import shared form specs as ``cmk_addons.plugins.json_api.lib``
+# (an absolute import that resolves against the namespace package at runtime in
+# a site). Put the repo root on the path so that same import resolves here too.
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 
 
 def _load(name: str, relpath: str):
@@ -48,6 +55,11 @@ def ssc():
 @pytest.fixture(scope="session")
 def ruleset():
     return _load("ja_ruleset", "rulesets/special_agent.py")
+
+
+@pytest.fixture(scope="session")
+def check_ruleset():
+    return _load("ja_check_ruleset", "rulesets/check_parameters.py")
 
 
 @pytest.fixture(scope="session")

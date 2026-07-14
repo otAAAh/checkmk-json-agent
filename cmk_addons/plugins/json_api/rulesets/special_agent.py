@@ -22,11 +22,8 @@ from cmk.rulesets.v1.form_specs import (
     Dictionary,
     Float,
     InputHint,
-    LevelDirection,
     List,
     Password,
-    ServiceState,
-    SimpleLevels,
     SingleChoice,
     SingleChoiceElement,
     String,
@@ -35,14 +32,17 @@ from cmk.rulesets.v1.form_specs import (
 )
 from cmk.rulesets.v1.rule_specs import SpecialAgent, Topic
 
+from cmk_addons.plugins.json_api.lib import (
+    levels_lower,
+    levels_upper,
+    string_match,
+    validate_regex,
+)
 
-def _validate_regex(value: str) -> None:
-    try:
-        re.compile(value)
-    except re.error as exc:
-        raise validators.ValidationError(
-            Message("Invalid regular expression: %s") % str(exc)
-        ) from exc
+# Re-exported so the special-agent rule's field validators keep their original
+# names; the shared implementation now lives in ``lib`` (used by the
+# check-parameters rule too).
+_validate_regex = validate_regex
 
 
 # The AST node types a calc expression may contain: an arithmetic tree over
@@ -168,84 +168,6 @@ def _authentication() -> CascadingSingleChoice:
     )
 
 
-def _string_match() -> CascadingSingleChoice:
-    return CascadingSingleChoice(
-        title=Title("String matching"),
-        help_text=Help("How to turn a string value into a Checkmk service state."),
-        prefill=DefaultValue("must_match"),
-        elements=[
-            CascadingSingleChoiceElement(
-                name="must_match",
-                title=Title("Value must match a regular expression"),
-                parameter_form=Dictionary(
-                    elements={
-                        "pattern": DictElement(
-                            required=True,
-                            parameter_form=String(
-                                title=Title("Expected value (regex)"),
-                                help_text=Help(
-                                    "For string values: the value must fully match "
-                                    "this regular expression (e.g. 'UP|ok')."
-                                ),
-                                custom_validate=(_validate_regex,),
-                            ),
-                        ),
-                        "state_no_match": DictElement(
-                            required=False,
-                            parameter_form=ServiceState(
-                                title=Title("State when the value does not match"),
-                                prefill=DefaultValue(ServiceState.CRIT),
-                            ),
-                        ),
-                    },
-                ),
-            ),
-            CascadingSingleChoiceElement(
-                name="state_map",
-                title=Title("Map the value to a state (OK / WARN / CRIT)"),
-                parameter_form=Dictionary(
-                    help_text=Help(
-                        "For string values with several known states: each pattern "
-                        "is a regular expression matched against the whole value. "
-                        "They are tried in the order OK, WARN, CRIT and the first "
-                        "match wins."
-                    ),
-                    elements={
-                        "ok": DictElement(
-                            required=False,
-                            parameter_form=String(
-                                title=Title("OK when the value matches (regex)"),
-                                custom_validate=(_validate_regex,),
-                            ),
-                        ),
-                        "warn": DictElement(
-                            required=False,
-                            parameter_form=String(
-                                title=Title("WARN when the value matches (regex)"),
-                                custom_validate=(_validate_regex,),
-                            ),
-                        ),
-                        "crit": DictElement(
-                            required=False,
-                            parameter_form=String(
-                                title=Title("CRIT when the value matches (regex)"),
-                                custom_validate=(_validate_regex,),
-                            ),
-                        ),
-                        "state_no_match": DictElement(
-                            required=False,
-                            parameter_form=ServiceState(
-                                title=Title("State when nothing matches"),
-                                prefill=DefaultValue(ServiceState.OK),
-                            ),
-                        ),
-                    },
-                ),
-            ),
-        ],
-    )
-
-
 def _migrate_extraction(value: object) -> dict[str, object]:
     """Carry a pre-'match' extraction (flat ``expected`` regex) into the current
     ``match`` CascadingSingleChoice shape - ``expected`` becomes the equivalent
@@ -353,21 +275,11 @@ def _extraction() -> Dictionary:
             ),
             "levels_upper": DictElement(
                 required=False,
-                parameter_form=SimpleLevels(
-                    title=Title("Upper levels (for numeric values)"),
-                    form_spec_template=Float(),
-                    level_direction=LevelDirection.UPPER,
-                    prefill_fixed_levels=InputHint((0.0, 0.0)),
-                ),
+                parameter_form=levels_upper(),
             ),
             "levels_lower": DictElement(
                 required=False,
-                parameter_form=SimpleLevels(
-                    title=Title("Lower levels (for numeric values)"),
-                    form_spec_template=Float(),
-                    level_direction=LevelDirection.LOWER,
-                    prefill_fixed_levels=InputHint((0.0, 0.0)),
-                ),
+                parameter_form=levels_lower(),
             ),
             "calc": DictElement(
                 required=False,
@@ -387,7 +299,7 @@ def _extraction() -> Dictionary:
             ),
             "match": DictElement(
                 required=False,
-                parameter_form=_string_match(),
+                parameter_form=string_match(),
             ),
         },
     )
