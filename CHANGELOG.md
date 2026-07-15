@@ -3,6 +3,17 @@
 All notable changes to this project, one section per released version.
 Generated from the git history by `scripts/gen_changelog.py`.
 
+## [0.9.0] - 2026-07-15
+
+### Features
+
+- JSON API service/host labels + fix broken Explorer release ([`25a16c1`](https://github.com/otAAAh/checkmk-json-agent/commit/25a16c1))
+- Add check-parameters ruleset for per-folder threshold overrides ([`93dc597`](https://github.com/otAAAh/checkmk-json-agent/commit/93dc597))
+
+### Other
+
+- Add Exchange listing for the in-site Explorer package ([`02a4537`](https://github.com/otAAAh/checkmk-json-agent/commit/02a4537))
+
 ## [0.8.0] - 2026-07-14
 
 ### Features
