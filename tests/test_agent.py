@@ -210,6 +210,104 @@ def test_extract_nested_wildcard_missing_inner_array(agent):
     assert results[-1]["error"] == "array or object not found at wildcard path"
 
 
+def test_service_labels_resolved_per_element(agent):
+    doc = {"nodes": [{"name": "alpha", "up": True}, {"name": "beta", "up": False}]}
+    specs = [
+        {
+            "path": "nodes[*].up",
+            "service": "Node",
+            "label_path": "name",
+            "labels": [{"path": "name"}],
+        }
+    ]
+    results = agent._extract(doc, specs, "http://test/h")
+    assert [r["labels"] for r in results] == [
+        [{"key": "name", "value": "alpha"}],
+        [{"key": "name", "value": "beta"}],
+    ]
+
+
+def test_service_labels_key_override_and_default_from_path(agent):
+    doc = {"app": {"version": "1.2.3"}, "status": "UP"}
+    specs = [
+        {
+            "path": "status",
+            "service": "App",
+            "labels": [{"path": "app.version", "key": "ver"}, {"path": "app.version"}],
+        }
+    ]
+    (result,) = agent._extract(doc, specs, "http://test/h")
+    assert result["labels"] == [
+        {"key": "ver", "value": "1.2.3"},
+        {"key": "version", "value": "1.2.3"},
+    ]
+
+
+def test_service_labels_skip_missing_and_non_scalar_values(agent):
+    doc = {"items": [{"n": "a", "obj": {"x": 1}, "nil": None}]}
+    specs = [
+        {
+            "path": "items[*].n",
+            "service": "I",
+            "labels": [
+                {"path": "n"},  # kept
+                {"path": "obj"},  # object -> skipped
+                {"path": "nil"},  # null -> skipped
+                {"path": "missing"},  # absent -> skipped
+            ],
+        }
+    ]
+    (result,) = agent._extract(doc, specs, "http://test/h")
+    assert result["labels"] == [{"key": "n", "value": "a"}]
+
+
+def test_resolve_host_labels_from_root(agent):
+    doc = {"cluster": {"region": "eu"}, "version": "2.4.0", "bad": {"x": 1}}
+    specs = [
+        {"path": "cluster.region"},
+        {"path": "version", "key": "ver"},
+        {"path": "bad"},  # object -> skipped
+        {"path": "missing"},  # absent -> skipped
+    ]
+    assert agent._resolve_host_labels(specs, doc) == {"region": "eu", "ver": "2.4.0"}
+
+
+def test_resolve_host_labels_wildcard_membership(agent):
+    # A '[*]' map path -> one unique label per element; default value 'true'.
+    doc = {"components": {"db": {"status": "ok"}, "cache": {"status": "degraded"}}}
+    specs = [{"path": "components[*]", "key": "component"}]
+    assert agent._resolve_host_labels(specs, doc) == {
+        "component/db": "true",
+        "component/cache": "true",
+    }
+
+
+def test_resolve_host_labels_wildcard_value_field(agent):
+    # value_field picks the per-element value; key stays unique via the element id.
+    doc = {"components": {"db": {"status": "ok"}, "cache": {"status": "degraded"}}}
+    specs = [{"path": "components[*]", "key": "component", "value_field": "status"}]
+    assert agent._resolve_host_labels(specs, doc) == {
+        "component/db": "ok",
+        "component/cache": "degraded",
+    }
+
+
+def test_process_endpoint_emits_host_labels(agent, monkeypatch):
+    # _process_endpoint returns (results, host_labels); stub the fetch (no HTTP).
+    doc = {"version": "9.9", "nodes": [{"health": "ok"}]}
+    monkeypatch.setattr(agent, "_fetch", lambda endpoint, secret: (doc, None))
+    import argparse
+
+    endpoint = {
+        "url": "http://x",
+        "extractions": [{"path": "nodes[*].health", "service": "Node"}],
+        "host_labels": [{"path": "version"}],
+    }
+    results, host_labels = agent._process_endpoint(argparse.Namespace(), 0, endpoint)
+    assert host_labels == {"version": "9.9"}
+    assert results and results[0]["service"].startswith("Node")
+
+
 def test_build_session_defaults_json_content_type_for_body(agent):
     _session, headers = agent._build_session({"method": "POST", "body": "{}"}, None)
     assert headers["Content-Type"] == "application/json"
@@ -333,7 +431,10 @@ def test_process_endpoint_isolates_secret_failure(agent, monkeypatch):
         "auth": "auth_token",
         "extractions": [{"path": "s", "service": "S"}],
     }
-    (result,) = agent._process_endpoint(agent.parse_arguments(["--endpoint", "{}"]), 0, endpoint)
+    results, _labels = agent._process_endpoint(
+        agent.parse_arguments(["--endpoint", "{}"]), 0, endpoint
+    )
+    (result,) = results
     assert result["found"] is False
     assert result["error"].startswith("Secret resolution failed")
 
@@ -345,7 +446,10 @@ def test_process_endpoint_isolates_extraction_failure(agent, monkeypatch):
     monkeypatch.setattr(agent, "_extract", boom)
     monkeypatch.setattr(agent, "_fetch", lambda *_a: ({"ok": 1}, None))
     endpoint = {"url": "http://x", "extractions": [{"path": "s", "service": "S"}]}
-    (result,) = agent._process_endpoint(agent.parse_arguments(["--endpoint", "{}"]), 0, endpoint)
+    results, _labels = agent._process_endpoint(
+        agent.parse_arguments(["--endpoint", "{}"]), 0, endpoint
+    )
+    (result,) = results
     assert result["found"] is False
     assert result["error"].startswith("Endpoint processing failed")
 
@@ -353,7 +457,10 @@ def test_process_endpoint_isolates_extraction_failure(agent, monkeypatch):
 def test_process_endpoint_isolates_malformed_blob(agent):
     # An endpoint blob missing 'url' must not take down the whole data source.
     endpoint = {"extractions": [{"path": "s", "service": "S"}]}
-    (result,) = agent._process_endpoint(agent.parse_arguments(["--endpoint", "{}"]), 0, endpoint)
+    results, _labels = agent._process_endpoint(
+        agent.parse_arguments(["--endpoint", "{}"]), 0, endpoint
+    )
+    (result,) = results
     assert result["found"] is False
     assert result["error"].startswith("Endpoint processing failed")
 
@@ -362,7 +469,10 @@ def test_process_endpoint_failure_is_visible_without_extractions(agent, monkeypa
     # Even with no extractions to hang it on, a failure must surface as a result.
     monkeypatch.setattr(agent, "_fetch", lambda *_a: (None, "boom"))
     endpoint = {"url": "http://x"}
-    (result,) = agent._process_endpoint(agent.parse_arguments(["--endpoint", "{}"]), 0, endpoint)
+    results, _labels = agent._process_endpoint(
+        agent.parse_arguments(["--endpoint", "{}"]), 0, endpoint
+    )
+    (result,) = results
     assert result["found"] is False
     assert result["error"] == "boom"
 

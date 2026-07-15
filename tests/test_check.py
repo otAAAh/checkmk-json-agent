@@ -7,8 +7,8 @@ import json
 from cmk.agent_based.v2 import Metric, Result, State
 
 
-def _section(check, results):
-    payload = {"url": "u", "error": None, "results": results}
+def _section(check, results, host_labels=None):
+    payload = {"url": "u", "error": None, "results": results, "host_labels": host_labels or {}}
     return check.parse_json_api([[json.dumps(payload)]])
 
 
@@ -94,6 +94,74 @@ def test_check_unit_names_the_metric_without_levels(check):
     (metric,) = [r for r in check.check_json_api("Latency", {}, section) if isinstance(r, Metric)]
     assert metric.name == "json_api_seconds"
     assert metric.value == 0.5
+
+
+def _value_summary(check, name, section):
+    """The single 'Value: ...' summary line (skipping the details-only context)."""
+    return next(
+        r.summary
+        for r in check.check_json_api(name, {}, section)
+        if isinstance(r, Result) and r.summary.startswith("Value:")
+    )
+
+
+def test_check_unit_renders_value_in_summary_without_levels(check):
+    # 1.5 MiB should read as "1.50 MiB", not the raw byte count.
+    section = _section(check, [_entry("Mem", value=1572864, unit="bytes")])
+    assert "MiB" in _value_summary(check, "Mem", section)
+
+
+def test_check_unit_renders_value_in_summary_with_levels(check):
+    # The levels line's value is rendered with the unit too (via check_levels).
+    section = _section(
+        check,
+        [_entry("Mem", value=1572864, unit="bytes", levels_upper=["fixed", [5.0, 10.0]])],
+    )
+    assert "MiB" in _value_summary(check, "Mem", section)
+
+
+def test_check_percent_unit_renders_with_symbol(check):
+    section = _section(check, [_entry("Load", value=42.5, unit="percent")])
+    assert "%" in _value_summary(check, "Load", section)
+
+
+def test_check_without_unit_shows_raw_number(check):
+    # No unit: the summary keeps the plain number (no renderer applied).
+    section = _section(check, [_entry("Raw", value=1572864)])
+    assert _value_summary(check, "Raw", section) == "Value: 1572864"
+
+
+def test_discovery_attaches_namespaced_service_labels(check):
+    section = _section(
+        check,
+        [_entry("Node alpha", labels=[{"key": "name", "value": "alpha"}])],
+    )
+    (service,) = list(check.discover_json_api(section))
+    assert [(lab.name, lab.value) for lab in service.labels] == [("json_api/name", "alpha")]
+
+
+def test_discovery_without_labels_yields_no_labels(check):
+    section = _section(check, [_entry("Plain", value="ok")])
+    (service,) = list(check.discover_json_api(section))
+    assert list(service.labels) == []
+
+
+def test_host_labels_from_payload_are_namespaced(check):
+    # Host labels ride on the payload, not on any service.
+    section = _section(check, [_entry("A")], host_labels={"env": "prod", "region": "eu"})
+    assert {lab.name: lab.value for lab in check.host_label_json_api(section)} == {
+        "json_api/env": "prod",
+        "json_api/region": "eu",
+    }
+
+
+def test_host_labels_independent_of_services(check):
+    # No services at all, but host labels still emitted (decoupled).
+    section = _section(check, [], host_labels={"version": "2.4.0"})
+    assert list(check.discover_json_api(section)) == []
+    assert {lab.name: lab.value for lab in check.host_label_json_api(section)} == {
+        "json_api/version": "2.4.0"
+    }
 
 
 def test_check_invalid_regex_is_unknown_not_crash(check):
@@ -369,7 +437,9 @@ def test_check_calc_transforms_value_and_metric(check):
     (metric,) = [r for r in results if isinstance(r, Metric)]
     assert metric.value == 1.0
     summary = next(r.summary for r in results if isinstance(r, Result) and r.summary)
-    assert summary == "Value: 1"
+    # The unit renders the *transformed* number (what the metric records), so the
+    # summary reads the same as the graph: render.bytes(1.0) -> "1 B".
+    assert summary == "Value: 1 B"
 
 
 def test_check_calc_applies_before_levels(check):

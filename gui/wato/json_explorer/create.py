@@ -39,6 +39,7 @@ class JsonExplorerCreatePage(AjaxPage):
         from cmk.gui.plugins.wato.json_explorer.page import (
             connection_form_spec,
             extractions_form_spec,
+            host_labels_form_spec,
             placement_form_spec,
         )
 
@@ -46,6 +47,7 @@ class JsonExplorerCreatePage(AjaxPage):
 
         connection_spec = connection_form_spec()
         extractions_spec = extractions_form_spec()
+        host_labels_spec = host_labels_form_spec()
         placement_spec = placement_form_spec()
         payload = json.loads(request.get_str_input_mandatory("payload"))
 
@@ -63,6 +65,7 @@ class JsonExplorerCreatePage(AjaxPage):
         for i, entry in enumerate(payload.get("endpoints", []), start=1):
             _check(connection_spec, entry["connection"], f"Endpoint {i}")
             _check(extractions_spec, entry.get("extractions", []), f"Endpoint {i} services")
+            _check(host_labels_spec, entry.get("host_labels", []), f"Endpoint {i} host labels")
         placement_raw = payload.get("placement")
         if placement_raw is not None:
             _check(placement_spec, placement_raw, "Conditions")
@@ -79,7 +82,12 @@ class JsonExplorerCreatePage(AjaxPage):
             extractions = parse_and_validate_frontend_data(
                 extractions_spec, RawFrontendData(entry.get("extractions", []))
             )
-            endpoints.append({**connection, "extractions": extractions})
+            host_labels = parse_and_validate_frontend_data(
+                host_labels_spec, RawFrontendData(entry.get("host_labels", []))
+            )
+            endpoints.append(
+                {**connection, "extractions": extractions, "host_labels": host_labels}
+            )
 
         result: dict[str, Any] = {"ok": True, "value_raw": repr({"endpoints": endpoints})}
         if placement_raw is not None:

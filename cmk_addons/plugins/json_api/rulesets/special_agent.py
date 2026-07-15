@@ -225,16 +225,60 @@ def _extraction() -> Dictionary:
             "label_path": DictElement(
                 required=False,
                 parameter_form=String(
-                    title=Title("Item label path (for '[*]' wildcards)"),
+                    title=Title("Per-element name suffix (for '[*]' wildcards)"),
                     help_text=Help(
-                        "When the path contains a '[*]' wildcard, this optional "
-                        "path - relative to each array element, e.g. 'name' or "
-                        "'id' - provides the label appended to the service name. "
-                        "Defaults to the array index (or, for an object, the "
-                        "key). With multiple '[*]' "
-                        "wildcards it is resolved at every level and the labels "
-                        "are joined with ' / ' (e.g. '<pod> / <container>'). Pick "
-                        "a field that is unique and stable across runs."
+                        "When the JSON path contains a '[*]' wildcard, one service "
+                        "is created per element. This optional path - relative to "
+                        "each element, e.g. 'name' or 'id' - is appended to the "
+                        "service name to tell those services apart. It does NOT "
+                        "replace the service name. Defaults to the array index "
+                        "(or, for an object, the key). With multiple '[*]' "
+                        "wildcards it is resolved at every level and the parts are "
+                        "joined with ' / ' (e.g. '<pod> / <container>'). Pick a "
+                        "field that is unique and stable across runs."
+                    ),
+                ),
+            ),
+            "labels": DictElement(
+                required=False,
+                parameter_form=List(
+                    title=Title("Service labels"),
+                    help_text=Help(
+                        "Attach Checkmk service labels to THIS service, built from "
+                        "fields in the response. Each key is prefixed with "
+                        "'json_api/'. For a '[*]' path the value is resolved within "
+                        "each element (e.g. 'name'), so a per-element service gets "
+                        "its own label; for a non-wildcard path it is resolved from "
+                        "the response root. Host-wide facts belong in the endpoint's "
+                        "'Host labels' instead. Labels are set at discovery, so pick "
+                        "stable, low-cardinality fields - a value that changes churns "
+                        "the label."
+                    ),
+                    element_template=Dictionary(
+                        elements={
+                            "path": DictElement(
+                                required=True,
+                                parameter_form=String(
+                                    title=Title("JSON path"),
+                                    help_text=Help(
+                                        "Relative to each '[*]' element (like the name "
+                                        "suffix), or the response root for a "
+                                        "non-wildcard path."
+                                    ),
+                                    custom_validate=(validators.LengthInRange(min_value=1),),
+                                ),
+                            ),
+                            "key": DictElement(
+                                required=False,
+                                parameter_form=String(
+                                    title=Title("Label key (optional)"),
+                                    help_text=Help(
+                                        "Defaults to the path's last segment. The "
+                                        "'json_api/' prefix is added automatically."
+                                    ),
+                                ),
+                            ),
+                        }
                     ),
                 ),
             ),
@@ -398,6 +442,64 @@ def _endpoint() -> Dictionary:
                         "value found at the given JSON path."
                     ),
                     element_template=_extraction(),
+                ),
+            ),
+            "host_labels": DictElement(
+                required=False,
+                parameter_form=List(
+                    title=Title("Host labels"),
+                    help_text=Help(
+                        "Attach Checkmk host labels to the monitored host, built "
+                        "from fields in this endpoint's response. Each key is "
+                        "prefixed with 'json_api/' and the value is resolved from "
+                        "the response root - so these are host-wide facts (e.g. an "
+                        "environment, region or version) and need NO service. A "
+                        "path may contain a '[*]' wildcard (e.g. 'components[*]') "
+                        "to emit one label per element, keyed "
+                        "'<key>/<element>' so keys stay unique. Set at discovery, "
+                        "so pick stable, low-cardinality fields."
+                    ),
+                    element_template=Dictionary(
+                        elements={
+                            "path": DictElement(
+                                required=True,
+                                parameter_form=String(
+                                    title=Title("JSON path"),
+                                    help_text=Help(
+                                        "From the response root, e.g. 'version', "
+                                        "'cluster.region', or a '[*]' wildcard like "
+                                        "'components[*]' for one label per element."
+                                    ),
+                                    custom_validate=(validators.LengthInRange(min_value=1),),
+                                ),
+                            ),
+                            "key": DictElement(
+                                required=False,
+                                parameter_form=String(
+                                    title=Title("Label key (optional)"),
+                                    help_text=Help(
+                                        "Defaults to the path's last segment. For a "
+                                        "'[*]' path the element id is appended "
+                                        "('<key>/<element>'). The 'json_api/' prefix "
+                                        "is added automatically."
+                                    ),
+                                ),
+                            ),
+                            "value_field": DictElement(
+                                required=False,
+                                parameter_form=String(
+                                    title=Title("Value field (for '[*]' wildcards)"),
+                                    help_text=Help(
+                                        "For a '[*]' path: a path within each "
+                                        "element for the label value (e.g. "
+                                        "'status'). Defaults to 'true' (a "
+                                        "set-membership tag). Ignored without a "
+                                        "wildcard."
+                                    ),
+                                ),
+                            ),
+                        }
+                    ),
                 ),
             ),
         },

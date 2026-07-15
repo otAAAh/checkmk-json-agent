@@ -46,6 +46,7 @@ const status = ref<Status>({ kind: 'idle' })
 // placement Dictionary). Null when the site could not serialize a spec.
 const connectionSpec = ref<FormSpecPayload | null>(null)
 const extractionsSpec = ref<FormSpecPayload | null>(null)
+const hostLabelsSpec = ref<FormSpecPayload | null>(null)
 const placementSpec = ref<FormSpecPayload | null>(null)
 
 // Placement FormEdit value (target folder + host condition).
@@ -99,6 +100,9 @@ function setConnectionSpec(payload: FormSpecPayload): void {
 function setExtractionsSpec(payload: FormSpecPayload): void {
   extractionsSpec.value = payload
 }
+function setHostLabelsSpec(payload: FormSpecPayload): void {
+  hostLabelsSpec.value = payload
+}
 function setPlacementSpec(payload: FormSpecPayload): void {
   placementSpec.value = payload
   if (Object.keys(placementData.value).length === 0 && payload.data && typeof payload.data === 'object') {
@@ -116,24 +120,30 @@ const folder = computed(() => {
 // The host is a CascadingSingleChoice:
 //   ['existing', <name string>]
 //   ['new', { host_name, site }]
-const hostChoice = computed<{ mode: 'existing' | 'new'; name: string; site?: string }>(() => {
-  const value = placementData.value.host
-  if (Array.isArray(value)) {
-    const [mode, sub] = value
-    if (mode === 'new' && sub && typeof sub === 'object') {
-      const obj = sub as Record<string, unknown>
-      return {
-        mode: 'new',
-        name: typeof obj.host_name === 'string' ? obj.host_name : '',
-        site: typeof obj.site === 'string' ? obj.site : undefined,
+//   ['folder', null]            -> scope the rule to the target folder only
+const hostChoice = computed<{ mode: 'existing' | 'new' | 'folder'; name: string; site?: string }>(
+  () => {
+    const value = placementData.value.host
+    if (Array.isArray(value)) {
+      const [mode, sub] = value
+      if (mode === 'folder') {
+        return { mode: 'folder', name: '' }
+      }
+      if (mode === 'new' && sub && typeof sub === 'object') {
+        const obj = sub as Record<string, unknown>
+        return {
+          mode: 'new',
+          name: typeof obj.host_name === 'string' ? obj.host_name : '',
+          site: typeof obj.site === 'string' ? obj.site : undefined,
+        }
+      }
+      if (mode === 'existing' && typeof sub === 'string') {
+        return { mode: 'existing', name: sub }
       }
     }
-    if (mode === 'existing' && typeof sub === 'string') {
-      return { mode: 'existing', name: sub }
-    }
-  }
-  return { mode: 'existing', name: '' }
-})
+    return { mode: 'existing', name: '' }
+  },
+)
 const host = computed(() => hostChoice.value.name)
 
 const validExtractions = computed(() =>
@@ -284,6 +294,89 @@ function togglePath(
       : [...services.extractions, newExtractionEntry(path, valueType, sampleValue)]
 }
 
+/** Add a HOST label from the picker's "+ host label" button. Host labels are
+ * endpoint-level (resolved from the response root) and need NO service, so they
+ * live in the per-endpoint `hostLabels` store rather than on an extraction. */
+function addHostLabel(endpointIndex: number, path: string): void {
+  const services = state.services[endpointIndex]
+  if (!services) {
+    return
+  }
+  const existing = services.hostLabels ?? []
+  if (existing.some((l) => l.path === path)) {
+    return // already added
+  }
+  services.hostLabels = [...existing, { path }]
+}
+
+/** The label key the agent will use for a stored label spec: the explicit key,
+ * else the path's last segment (mirrors the agent's _label_key_from_path). */
+function labelKeyOf(spec: Record<string, unknown>): string {
+  if (typeof spec.key === 'string' && spec.key) {
+    return spec.key
+  }
+  const path = typeof spec.path === 'string' ? spec.path : ''
+  const tokens = path.replace(/\[\*\]/g, '').match(/[A-Za-z0-9_]+|\['[^']*'\]|\["[^"]*"\]/g)
+  if (!tokens || !tokens.length) {
+    return path
+  }
+  const last = tokens[tokens.length - 1]!
+  return last.startsWith("['") || last.startsWith('["') ? last.slice(2, -2) : last
+}
+
+/** Entry in an endpoint's label summary — a host label (endpoint-level, `hi`
+ * indexes hostLabels) or a service label (`xi`/`li` locate it on an extraction). */
+type LabelSummary =
+  | { key: string; scope: 'host'; path: string; hi: number }
+  | { key: string; scope: 'service'; path: string; xi: number; li: number }
+
+/** A flat readout of every label configured on an endpoint — host labels (from
+ * the endpoint store) plus service labels (from each extraction) — for the
+ * picker's summary list; shown as json_api/<key>. */
+function labelsForEndpoint(endpointIndex: number): LabelSummary[] {
+  const services = state.services[endpointIndex]
+  if (!services) {
+    return []
+  }
+  const out: LabelSummary[] = []
+  ;(services.hostLabels ?? []).forEach((spec, hi) => {
+    out.push({ key: labelKeyOf(spec), scope: 'host', path: spec.path, hi })
+  })
+  services.extractions.forEach((ext, xi) => {
+    const labels = Array.isArray(ext.labels) ? (ext.labels as Record<string, unknown>[]) : []
+    labels.forEach((spec, li) => {
+      out.push({
+        key: labelKeyOf(spec),
+        scope: 'service',
+        path: typeof spec.path === 'string' ? spec.path : '',
+        xi,
+        li,
+      })
+    })
+  })
+  return out
+}
+
+/** Remove a configured label (host label from the endpoint store, or a service
+ * label from its extraction). */
+function removeEndpointLabel(endpointIndex: number, entry: LabelSummary): void {
+  const services = state.services[endpointIndex]
+  if (!services) {
+    return
+  }
+  if (entry.scope === 'host') {
+    services.hostLabels = (services.hostLabels ?? []).filter((_, i) => i !== entry.hi)
+    return
+  }
+  const ext = services.extractions[entry.xi]
+  if (!ext) {
+    return
+  }
+  const labels = Array.isArray(ext.labels) ? (ext.labels as Record<string, unknown>[]) : []
+  const updated = { ...ext, labels: labels.filter((_, i) => i !== entry.li) }
+  services.extractions = services.extractions.map((x, i) => (i === entry.xi ? updated : x))
+}
+
 // URLs that appear on more than one endpoint (mirrors the ruleset's
 // _validate_unique_endpoints; enforced server-side too at rule creation).
 const duplicateUrls = computed(() => {
@@ -315,7 +408,10 @@ async function validateConnection(): Promise<boolean> {
   return state.connections.every((_, i) => preflight[i]?.kind === 'ok')
 }
 async function validateServices(): Promise<boolean> {
-  return validExtractions.value.length > 0
+  // At least one service OR one host label anywhere — an endpoint may contribute
+  // only host labels (no monitored service), which is a valid configuration.
+  const hasHostLabel = state.services.some((s) => (s.hostLabels?.length ?? 0) > 0)
+  return validExtractions.value.length > 0 || hasHostLabel
 }
 function extractionLabel(x: ExtractionValue): string {
   return extractionService(x) || '(unnamed service)'
@@ -323,21 +419,24 @@ function extractionLabel(x: ExtractionValue): string {
 
 const conditionsInvalid = ref(false)
 async function validateConditions(): Promise<boolean> {
-  const ok = hostChoice.value.name.trim().length > 0
+  // "Apply to the whole target folder" needs no host; the other modes require a
+  // host name (existing binding or new-host name).
+  const ok = hostChoice.value.mode === 'folder' || hostChoice.value.name.trim().length > 0
   conditionsInvalid.value = !ok
   return ok
 }
 
 async function createRuleOnSite(): Promise<void> {
   status.value = { kind: 'busy' }
-  if (!hostChoice.value.name.trim()) {
-    status.value = { kind: 'err', msg: 'Choose or enter a host on the Conditions step.' }
+  if (hostChoice.value.mode !== 'folder' && !hostChoice.value.name.trim()) {
+    status.value = { kind: 'err', msg: 'Choose a host, or apply to the whole folder, on the Conditions step.' }
     return
   }
   const payload = {
     endpoints: state.connections.map((connection, i) => ({
       connection,
       extractions: state.services[i]?.extractions ?? [],
+      host_labels: state.services[i]?.hostLabels ?? [],
     })),
     // Placement goes through the visitor too — its SingleChoice fields (folder,
     // site) are hashed tokens on the wire; only the visitor yields real values.
@@ -368,8 +467,11 @@ async function createRuleOnSite(): Promise<void> {
       hostName = sub
     }
   }
-  if (!hostName.trim()) {
-    status.value = { kind: 'err', msg: 'Choose or enter a host on the Conditions step.' }
+  // "Apply to the whole target folder": no host to require or create, and the
+  // rule carries no host_name condition — the folder placement is the scope.
+  const folderOnly = hostMode === 'folder'
+  if (!folderOnly && !hostName.trim()) {
+    status.value = { kind: 'err', msg: 'Choose a host, or apply to the whole folder, on the Conditions step.' }
     return
   }
 
@@ -385,7 +487,9 @@ async function createRuleOnSite(): Promise<void> {
     ruleset: 'special_agents:json_api',
     folder: folderPath,
     valueRaw: converted.valueRaw,
-    conditions: { host_name: { match_on: [hostName], operator: 'one_of' } },
+    conditions: folderOnly
+      ? undefined
+      : { host_name: { match_on: [hostName], operator: 'one_of' } },
   })
   status.value = result.ok
     ? { kind: 'ok', id: result.id }
@@ -415,10 +519,12 @@ export function useExplorer() {
     connectionValidation,
     connectionSpec,
     extractionsSpec,
+    hostLabelsSpec,
     placementSpec,
     placementData,
     setConnectionSpec,
     setExtractionsSpec,
+    setHostLabelsSpec,
     setPlacementSpec,
     validating,
     samplesLoading,
@@ -430,6 +536,9 @@ export function useExplorer() {
     fetchSample,
     fetchAllSamples,
     togglePath,
+    addHostLabel,
+    labelsForEndpoint,
+    removeEndpointLabel,
     validateConnection,
     validateServices,
     extractionLabel,

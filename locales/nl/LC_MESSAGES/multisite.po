@@ -6,7 +6,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: checkmk-json-agent\n"
 "Report-Msgid-Bugs-To: https://github.com/otAAAh/checkmk-json-agent/issues\n"
-"POT-Creation-Date: 2026-07-14 14:54+0200\n"
+"POT-Creation-Date: 2026-07-15 14:57+0200\n"
 "PO-Revision-Date: 2026-07-06 12:00+0000\n"
 "Last-Translator: checkmk-json-agent contributors\n"
 "Language-Team: Dutch\n"
@@ -162,6 +162,8 @@ msgid "Becomes the Checkmk service description for this field."
 msgstr "Wordt de Checkmk-servicebeschrijving voor dit veld."
 
 #: cmk_addons/plugins/json_api/rulesets/special_agent.py:206
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:262
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:467
 msgid "JSON path"
 msgstr "JSON-pad"
 
@@ -189,31 +191,77 @@ msgstr ""
 "\"data['foo.bar'].value\"."
 
 #: cmk_addons/plugins/json_api/rulesets/special_agent.py:228
-msgid "Item label path (for '[*]' wildcards)"
-msgstr "Pad voor item-label (voor '[*]'-jokertekens)"
+msgid "Per-element name suffix (for '[*]' wildcards)"
+msgstr "Naamsuffix per element (voor '[*]'-jokertekens)"
 
 #: cmk_addons/plugins/json_api/rulesets/special_agent.py:230
 msgid ""
-"When the path contains a '[*]' wildcard, this optional path - relative to "
-"each array element, e.g. 'name' or 'id' - provides the label appended to the "
-"service name. Defaults to the array index (or, for an object, the key). With "
-"multiple '[*]' wildcards it is resolved at every level and the labels are "
-"joined with ' / ' (e.g. '<pod> / <container>'). Pick a field that is unique "
-"and stable across runs."
+"When the JSON path contains a '[*]' wildcard, one service is created per "
+"element. This optional path - relative to each element, e.g. 'name' or 'id' "
+"- is appended to the service name to tell those services apart. It does NOT "
+"replace the service name. Defaults to the array index (or, for an object, "
+"the key). With multiple '[*]' wildcards it is resolved at every level and "
+"the parts are joined with ' / ' (e.g. '<pod> / <container>'). Pick a field "
+"that is unique and stable across runs."
 msgstr ""
-"Wanneer het pad een '[*]'-jokerteken bevat, levert dit optionele pad - "
-"relatief ten opzichte van elk array-element, bijv. 'name' of 'id' - het "
-"label dat aan de servicenaam wordt toegevoegd. Standaard wordt de array-"
-"index (of, voor een object, de sleutel) gebruikt. Bij meerdere '[*]'-"
-"jokertekens wordt het op elk niveau opgelost en worden de labels "
+"Wanneer het JSON-pad een '[*]'-jokerteken bevat, wordt er per element één "
+"service aangemaakt. Dit optionele pad - relatief ten opzichte van elk "
+"element, bijv. 'name' of 'id' - wordt aan de servicenaam toegevoegd om die "
+"services te onderscheiden. Het vervangt de servicenaam NIET. Standaard wordt "
+"de array-index gebruikt (of, voor een object, de sleutel). Bij meerdere "
+"'[*]'-jokertekens wordt het op elk niveau opgelost en worden de delen "
 "samengevoegd met ' / ' (bijv. '<pod> / <container>'). Kies een veld dat "
 "uniek en stabiel is over verschillende runs."
 
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:245
+msgid "Service labels"
+msgstr "Servicelabels"
+
 #: cmk_addons/plugins/json_api/rulesets/special_agent.py:247
+msgid ""
+"Attach Checkmk service labels to THIS service, built from fields in the "
+"response. Each key is prefixed with 'json_api/'. For a '[*]' path the value "
+"is resolved within each element (e.g. 'name'), so a per-element service gets "
+"its own label; for a non-wildcard path it is resolved from the response "
+"root. Host-wide facts belong in the endpoint's 'Host labels' instead. Labels "
+"are set at discovery, so pick stable, low-cardinality fields - a value that "
+"changes churns the label."
+msgstr ""
+"Koppelt Checkmk-servicelabels aan DEZE service, opgebouwd uit velden in de "
+"respons. Elke sleutel krijgt het voorvoegsel 'json_api/'. Bij een '[*]'-pad "
+"wordt de waarde binnen elk element opgelost (bijv. 'name'), zodat elke "
+"service per element zijn eigen label krijgt; bij een pad zonder jokerteken "
+"wordt hij opgelost vanaf de wortel van de respons. Host-brede gegevens horen "
+"in plaats daarvan bij de 'Hostlabels' van het endpoint. Labels worden "
+"ingesteld tijdens de detectie, dus kies stabiele velden met lage "
+"kardinaliteit - een waarde die verandert laat het label voortdurend wisselen."
+
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:264
+msgid ""
+"Relative to each '[*]' element (like the name suffix), or the response root "
+"for a non-wildcard path."
+msgstr ""
+"Relatief ten opzichte van elk '[*]'-element (zoals het naamsuffix), of de "
+"wortel van de respons voor een pad zonder jokerteken."
+
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:274
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:479
+msgid "Label key (optional)"
+msgstr "Labelsleutel (optioneel)"
+
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:276
+msgid ""
+"Defaults to the path's last segment. The 'json_api/' prefix is added "
+"automatically."
+msgstr ""
+"Standaard het laatste segment van het pad. Het voorvoegsel 'json_api/' wordt "
+"automatisch toegevoegd."
+
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:291
 msgid "Count the number of elements at this path"
 msgstr "Het aantal elementen op dit pad tellen"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:249
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:293
 msgid ""
 "When the path points at a JSON array or object, monitor the number of "
 "elements it contains instead of the value itself. The count is a number, so "
@@ -226,11 +274,11 @@ msgstr ""
 "zijn er allemaal op van toepassing. Als het pad niet naar een array of "
 "object wordt herleid, wordt de service UNKNOWN."
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:262
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:306
 msgid "Unit (for numeric values)"
 msgstr "Eenheid (voor numerieke waarden)"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:264
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:308
 msgid ""
 "Renders the metric and graph with this unit. Leave unset for a plain, unit-"
 "less value. Only affects numeric values."
@@ -238,31 +286,31 @@ msgstr ""
 "Geeft de metriek en grafiek met deze eenheid weer. Laat leeg voor een "
 "eenvoudige waarde zonder eenheid. Heeft alleen effect op numerieke waarden."
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:268
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:312
 msgid "Count (integer)"
 msgstr "Aantal (geheel getal)"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:269
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:313
 msgid "Bytes (IEC: KiB, MiB, ...)"
 msgstr "Bytes (IEC: KiB, MiB, ...)"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:270
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:314
 msgid "Seconds (duration)"
 msgstr "Seconden (duur)"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:271
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:315
 msgid "Percent"
 msgstr "Procent"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:273
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:317
 msgid "No unit"
 msgstr "Geen eenheid"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:287
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:331
 msgid "Transform the numeric value"
 msgstr "Numerieke waarde transformeren"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:289
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:333
 msgid ""
 "An arithmetic expression applied to a numeric value before the levels and "
 "the metric, using the variable 'value'. Only numbers, parentheses and + - "
@@ -276,15 +324,15 @@ msgstr ""
 "1024' (bytes naar MiB), 'value * 1000' (seconden naar milliseconden), "
 "'(value - 32) * 5 / 9' (Fahrenheit naar Celsius)."
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:310
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:354
 msgid "Endpoint"
 msgstr "Endpoint"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:315
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:359
 msgid "URL"
 msgstr "URL"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:317
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:361
 msgid ""
 "Full URL of the JSON endpoint, including scheme, e.g. 'https://app.example."
 "com/actuator/health'."
@@ -292,47 +340,47 @@ msgstr ""
 "Volledige URL van het JSON-endpoint, inclusief schema, bijv. 'https://app."
 "example.com/actuator/health'."
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:326
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:370
 msgid "HTTP method"
 msgstr "HTTP-methode"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:328
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:372
 msgid "GET"
 msgstr "GET"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:329
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:373
 msgid "POST"
 msgstr "POST"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:337
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:381
 msgid "Request body (for POST)"
 msgstr "Request-body (voor POST)"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:343
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:387
 msgid "Additional request headers"
 msgstr "Aanvullende request-headers"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:348
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:392
 msgid "Header name"
 msgstr "Headernaam"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:352
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:396
 msgid "Header value"
 msgstr "Headerwaarde"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:365
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:409
 msgid "Verify the TLS certificate"
 msgstr "Verifieer het TLS-certificaat"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:366
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:410
 msgid "Disabling certificate verification is insecure."
 msgstr "Het uitschakelen van certificaatverificatie is onveilig."
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:373
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:417
 msgid "Follow HTTP redirects"
 msgstr "HTTP-redirects volgen"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:375
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:419
 msgid ""
 "On by default. Disable in locked-down environments to harden against SSRF: a "
 "target that redirects (e.g. 3xx to an internal address) will then fail "
@@ -343,19 +391,19 @@ msgstr ""
 "intern adres) mislukt dan in plaats van dat de redirect-locatie wordt "
 "gevolgd."
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:386
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:430
 msgid "Request timeout (seconds)"
 msgstr "Request-timeout (seconden)"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:387
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:431
 msgid "Per-request timeout. Defaults to 30 seconds."
 msgstr "Timeout per request. Standaard 30 seconden."
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:395
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:439
 msgid "Fields to monitor"
 msgstr "Te monitoren velden"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:397
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:441
 msgid ""
 "Each entry becomes one Checkmk service, built from the value found at the "
 "given JSON path."
@@ -363,11 +411,65 @@ msgstr ""
 "Elke vermelding wordt één Checkmk-service, opgebouwd uit de waarde die op "
 "het opgegeven JSON-pad wordt gevonden."
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:424
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:450
+msgid "Host labels"
+msgstr "Hostlabels"
+
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:452
+msgid ""
+"Attach Checkmk host labels to the monitored host, built from fields in this "
+"endpoint's response. Each key is prefixed with 'json_api/' and the value is "
+"resolved from the response root - so these are host-wide facts (e.g. an "
+"environment, region or version) and need NO service. A path may contain a "
+"'[*]' wildcard (e.g. 'components[*]') to emit one label per element, keyed "
+"'<key>/<element>' so keys stay unique. Set at discovery, so pick stable, low-"
+"cardinality fields."
+msgstr ""
+"Koppelt Checkmk-hostlabels aan de bewaakte host, opgebouwd uit velden in de "
+"respons van dit endpoint. Elke sleutel krijgt het voorvoegsel 'json_api/' en "
+"de waarde wordt opgelost vanaf de wortel van de respons - dit zijn dus host-"
+"brede gegevens (bijv. een omgeving, regio of versie) en vereisen GEEN "
+"service. Een pad kan een '[*]'-jokerteken bevatten (bijv. 'components[*]') "
+"om één label per element te genereren, met de sleutel '<key>/<element>' "
+"zodat de sleutels uniek blijven. Ingesteld tijdens de detectie, dus kies "
+"stabiele velden met lage kardinaliteit."
+
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:469
+msgid ""
+"From the response root, e.g. 'version', 'cluster.region', or a '[*]' "
+"wildcard like 'components[*]' for one label per element."
+msgstr ""
+"Vanaf de wortel van de respons, bijv. 'version', 'cluster.region', of een "
+"'[*]'-jokerteken zoals 'components[*]' voor één label per element."
+
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:481
+msgid ""
+"Defaults to the path's last segment. For a '[*]' path the element id is "
+"appended ('<key>/<element>'). The 'json_api/' prefix is added automatically."
+msgstr ""
+"Standaard het laatste segment van het pad. Bij een '[*]'-pad wordt de "
+"element-id toegevoegd ('<key>/<element>'). Het voorvoegsel 'json_api/' wordt "
+"automatisch toegevoegd."
+
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:491
+msgid "Value field (for '[*]' wildcards)"
+msgstr "Waardeveld (voor '[*]'-jokertekens)"
+
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:493
+msgid ""
+"For a '[*]' path: a path within each element for the label value (e.g. "
+"'status'). Defaults to 'true' (a set-membership tag). Ignored without a "
+"wildcard."
+msgstr ""
+"Bij een '[*]'-pad: een pad binnen elk element voor de labelwaarde (bijv. "
+"'status'). Standaard 'true' (een lidmaatschapslabel). Zonder jokerteken "
+"wordt het genegeerd."
+
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:526
 msgid "Endpoints"
 msgstr "Endpoints"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:426
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:528
 msgid ""
 "One or more HTTP/JSON endpoints. Each is fetched with its own connection "
 "settings and extractions; all results are merged into one section. An "
@@ -378,7 +480,7 @@ msgstr ""
 "tot één sectie. Een endpoint dat niet bereikbaar is, beïnvloedt alleen zijn "
 "eigen services."
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:441
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:543
 #: cmk_addons/plugins/json_api/rulesets/check_parameters.py:48
 msgid "Generic JSON API"
 msgstr "Generieke JSON-API"
@@ -402,6 +504,12 @@ msgstr "Duur"
 #: cmk_addons/plugins/json_api/graphing/json_api.py:47
 msgid "Percentage"
 msgstr "Percentage"
+
+#~ msgid "Labels"
+#~ msgstr "Labels"
+
+#~ msgid "Attach to"
+#~ msgstr "Koppelen aan"
 
 #~ msgid "The URL must start with 'http://' or 'https://'."
 #~ msgstr "De URL moet beginnen met 'http://' of 'https://'."

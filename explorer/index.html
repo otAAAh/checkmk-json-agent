@@ -480,7 +480,7 @@ function renderFields() {
       `<button class="ghost rm" data-rm="${i}">remove</button>` +
       `<div class="muted">path: <code>${esc(e.path)}</code></div>` +
       `<div class="row"><label>Service</label><input type="text" data-f="service" data-i="${i}" value="${escAttr(e.service)}"></div>` +
-      (wild ? `<div class="row"><label>Label path</label><input type="text" data-f="label_path" data-i="${i}" value="${escAttr(e.label_path)}" placeholder="field in each element, e.g. name"></div>` : "") +
+      (wild ? `<div class="row"><label>Name suffix</label><input type="text" data-f="label_path" data-i="${i}" value="${escAttr(e.label_path)}" placeholder="field in each element, appended to the name, e.g. name"></div>` : "") +
       `<div class="row"><label>Count</label><label class="cb"><input type="checkbox" data-fb="count" data-i="${i}"${e.count ? " checked" : ""}> Count elements (monitor array/object length)</label></div>` +
       `<div class="row"><label>Unit</label><select data-f="unit" data-i="${i}">` +
         ["", "count", "bytes", "seconds", "percent"].map(u =>

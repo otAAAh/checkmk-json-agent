@@ -238,7 +238,15 @@ def _split_wildcards(path: str) -> list[str]:
     return [parts[0]] + [p[1:] if p.startswith(".") else p for p in parts[1:]]
 
 
-def _result(spec: dict, service: str, found: bool, value: object, error: str, url: str) -> dict:
+def _result(
+    spec: dict,
+    service: str,
+    found: bool,
+    value: object,
+    error: str,
+    url: str,
+    labels: list[dict] | None = None,
+) -> dict:
     # "Count elements": monitor the length of the list/object at the path instead
     # of the value itself. A scalar has no length to count, so that is surfaced as
     # a not-found misconfiguration rather than counting characters of a string.
@@ -263,6 +271,7 @@ def _result(spec: dict, service: str, found: bool, value: object, error: str, ur
         "match": spec.get("match"),
         "calc": spec.get("calc"),
         "unit": spec.get("unit"),
+        "labels": labels or [],
     }
 
 
@@ -284,16 +293,18 @@ def _iter_container(container: object) -> list[tuple[str, object]] | None:
 
 def _expand_wildcards(
     node: object, segments: list[str], label_path: str | None
-) -> list[tuple[list[str], bool, object, str]]:
+) -> list[tuple[list[str], bool, object, str, object]]:
     """Recursively expand the wildcard segments of a path under ``node``.
 
     ``segments`` is the output of :func:`_split_wildcards`: one entry per
     wildcard level plus the trailing value path. Returns one
-    ``(label_segments, found, value, error)`` tuple per leaf - i.e. per element
-    of the cartesian product of all wildcard levels. ``label_segments`` carries
-    one label per wildcard level (joined into the composite service name by the
-    caller); ``label_path`` is resolved relative to each level's element, with
-    the array index (or object key) as the fallback.
+    ``(label_segments, found, value, error, element)`` tuple per leaf - i.e. per
+    element of the cartesian product of all wildcard levels. ``label_segments``
+    carries one label per wildcard level (joined into the composite service name
+    by the caller); ``label_path`` is resolved relative to each level's element,
+    with the array index (or object key) as the fallback. ``element`` is the leaf
+    element node (``None`` when the container was missing) so the caller can
+    resolve per-element service labels against it.
     """
     # Base case: no more wildcards, ``segments[0]`` is the value path itself.
     if len(segments) == 1:
@@ -302,42 +313,157 @@ def _expand_wildcards(
             found, value = _resolve_path(node, value_path)
         else:
             found, value = True, node
-        return [([], found, value, "path not found in element")]
+        return [([], found, value, "path not found in element", node)]
 
     container_path, *rest = segments
     found_container, container = _resolve_path(node, container_path)
     pairs = _iter_container(container) if found_container else None
     if pairs is None:
-        return [([], False, None, "array or object not found at wildcard path")]
+        return [([], False, None, "array or object not found at wildcard path", None)]
 
-    expanded: list[tuple[list[str], bool, object, str]] = []
+    expanded: list[tuple[list[str], bool, object, str, object]] = []
     elements = [element for _default, element in pairs]
     for label, element in zip(_element_labels(pairs, label_path), elements):
-        for sub_labels, found, value, error in _expand_wildcards(element, rest, label_path):
-            expanded.append(([label, *sub_labels], found, value, error))
+        for sub_labels, found, value, error, leaf in _expand_wildcards(element, rest, label_path):
+            expanded.append(([label, *sub_labels], found, value, error, leaf))
     return expanded
 
 
 def _extract(document: object, extractions: list[dict], url: str) -> list[dict]:
     results = []
     for spec in extractions:
+        label_specs = spec.get("labels") or []
         segments = _split_wildcards(spec["path"])
         if len(segments) == 1:
             found, value = _resolve_path(document, spec["path"])
+            labels = _resolve_labels(label_specs, document)
             results.append(
-                _result(spec, spec["service"], found, value, "path not found in response", url)
+                _result(
+                    spec, spec["service"], found, value, "path not found in response", url, labels
+                )
             )
             continue
 
         # One or more array wildcards: one service per cartesian-product
         # element, labelled by a ' / '-joined composite (one segment per level).
-        for label_segments, found, value, error in _expand_wildcards(
+        for label_segments, found, value, error, element in _expand_wildcards(
             document, segments, spec.get("label_path")
         ):
             label = " / ".join(label_segments)
             service = f"{spec['service']} {label}" if label else spec["service"]
-            results.append(_result(spec, service, found, value, error, url))
+            labels = _resolve_labels(label_specs, element)
+            results.append(_result(spec, service, found, value, error, url, labels))
     return results
+
+
+def _label_value(value: object) -> str | None:
+    """A JSON scalar as a label string, or ``None`` for null/object/array.
+
+    Booleans render as JSON ('true'/'false') to match the value rendering; a
+    non-scalar makes no sense as a label value and is skipped by the caller.
+    """
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, (int, float)):
+        return str(value)
+    if isinstance(value, str):
+        return value
+    return None
+
+
+def _label_key_from_path(path: str) -> str:
+    """The last dict-key segment of a path, used as the default label key.
+
+    'metadata.name' -> 'name', "data['foo.bar']" -> 'foo.bar', 'components[*]' ->
+    'components'. Falls back to the cleaned path when it ends in an array index.
+    """
+    cleaned = path.strip()
+    if cleaned.startswith("$."):
+        cleaned = cleaned[2:]
+    elif cleaned.startswith("$"):
+        cleaned = cleaned[1:]
+    cleaned = cleaned.replace("[*]", "")  # a wildcard is not part of the key
+    key = None
+    for match in _PATH_TOKEN.finditer(cleaned):
+        token = match.group("sq")
+        if token is None:
+            token = match.group("dq")
+        if token is None:
+            token = match.group("key")
+        if token is not None:
+            key = token
+    return key or cleaned
+
+
+def _resolve_labels(label_specs: list[dict], element: object) -> list[dict]:
+    """Resolve SERVICE-label specs relative to ``element`` into ``{key, value}``.
+
+    ``element`` is each '[*]' element (or the whole document for a non-wildcard
+    extraction), so a per-element service gets its own label value. Unresolved
+    paths and non-scalar / null values are skipped, so a label is emitted only
+    when it has a value. The 'json_api/' key namespace is added by the check.
+    """
+    resolved = []
+    for spec in label_specs:
+        path = spec.get("path")
+        if not path:
+            continue
+        found, value = _resolve_path(element, path)
+        if not found:
+            continue
+        text = _label_value(value)
+        if text is None:
+            continue
+        resolved.append({"key": spec.get("key") or _label_key_from_path(path), "value": text})
+    return resolved
+
+
+def _resolve_host_labels(label_specs: list[dict], document: object) -> dict:
+    """Resolve HOST-label specs from the ``document`` root into ``{key: value}``.
+
+    Host labels are host-wide, so they attach to no service and are resolved once
+    per endpoint response. Two shapes are supported:
+
+    * plain path (no '[*]'): one label ``<key>: <scalar at path>`` where ``key``
+      is the given key or the path's last segment.
+    * wildcard path (contains '[*]', e.g. ``components[*]``): one label PER
+      element, keyed ``<key>/<element-id>`` so keys stay unique (a host label map
+      cannot repeat a key); the value comes from ``value_field`` resolved within
+      each element, defaulting to ``'true'`` (set-membership tags).
+
+    Later keys win on collision. The 'json_api/' namespace is added by the check.
+    """
+    labels: dict[str, str] = {}
+    for spec in label_specs:
+        path = spec.get("path")
+        if not path:
+            continue
+        base_key = spec.get("key") or _label_key_from_path(path)
+        value_field = spec.get("value_field") or ""
+        segments = _split_wildcards(path)
+        if len(segments) == 1:
+            found, value = _resolve_path(document, path)
+            text = _label_value(value) if found else None
+            if text is not None:
+                labels[base_key] = text
+            continue
+        # Wildcard: one unique label per element.
+        for label_segments, _found, _value, _error, element in _expand_wildcards(
+            document, segments, None
+        ):
+            if element is None:
+                continue
+            suffix = "/".join(str(part) for part in label_segments)
+            key = f"{base_key}/{suffix}" if suffix else base_key
+            if value_field:
+                found, value = _resolve_path(element, value_field)
+                text = _label_value(value) if found else None
+                if text is None:
+                    continue  # value field missing / non-scalar → skip this element
+            else:
+                text = "true"
+            labels[key] = text
+    return labels
 
 
 def _element_labels(pairs: list[tuple[str, object]], label_path: str | None) -> list[str]:
@@ -363,17 +489,20 @@ def _element_labels(pairs: list[tuple[str, object]], label_path: str | None) -> 
     ]
 
 
-def _process_endpoint(args: argparse.Namespace, index: int, endpoint: dict) -> list[dict]:
-    """Fetch one endpoint and return its extraction results.
+def _process_endpoint(
+    args: argparse.Namespace, index: int, endpoint: dict
+) -> tuple[list[dict], dict]:
+    """Fetch one endpoint and return its (extraction results, host labels).
 
     Any failure is confined to this endpoint: secret resolution, the fetch, and
     the extraction (including a malformed endpoint blob, e.g. one missing 'url')
     all fall back to a 'not found' result carrying the error, so the endpoint's
-    own services go bad while the rest of the section stays intact.
+    own services go bad while the rest of the section stays intact. A failed
+    endpoint contributes no host labels.
     """
     url = endpoint.get("url", "?")
 
-    def _fail(error: str) -> list[dict]:
+    def _fail(error: str) -> tuple[list[dict], dict]:
         results = [
             _result(
                 {"path": spec.get("path", "?")}, spec.get("service", "?"), False, None, error, url
@@ -383,7 +512,7 @@ def _process_endpoint(args: argparse.Namespace, index: int, endpoint: dict) -> l
         ]
         # Guarantee the failure is visible even when the blob carries no usable
         # extractions to hang it on (otherwise it would silently vanish).
-        return results or [_result({"path": "?"}, url, False, None, error, url)]
+        return (results or [_result({"path": "?"}, url, False, None, error, url)], {})
 
     try:
         secret = _reveal_secret(args, f"secret_{index}") if endpoint.get("auth") else None
@@ -394,7 +523,9 @@ def _process_endpoint(args: argparse.Namespace, index: int, endpoint: dict) -> l
         document, error = _fetch(endpoint, secret)
         if error is not None:
             return _fail(error)
-        return _extract(document, endpoint.get("extractions", []), url)
+        results = _extract(document, endpoint.get("extractions", []), url)
+        host_labels = _resolve_host_labels(endpoint.get("host_labels", []), document)
+        return (results, host_labels)
     except Exception as exc:  # malformed endpoint blob, unexpected extraction error, ...
         return _fail(f"Endpoint processing failed: {exc}")
 
@@ -404,6 +535,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     endpoints = [json.loads(raw) for raw in args.endpoint]
     results: list[dict] = []
+    host_labels: dict[str, str] = {}
     if endpoints:
         # Fetch endpoints concurrently so total runtime is the slowest endpoint,
         # not the sum. pool.map preserves input order, keeping the merged section
@@ -413,10 +545,11 @@ def main(argv: Sequence[str] | None = None) -> int:
                 lambda item: _process_endpoint(args, item[0], item[1]),
                 enumerate(endpoints),
             )
-            for endpoint_results in per_endpoint:
+            for endpoint_results, endpoint_host_labels in per_endpoint:
                 results.extend(endpoint_results)
+                host_labels.update(endpoint_host_labels)  # later endpoints win per key
 
-    payload = {"results": results}
+    payload = {"results": results, "host_labels": host_labels}
     sys.stdout.write("<<<json_api:sep(0)>>>\n")
     sys.stdout.write(json.dumps(payload) + "\n")
     # Flush explicitly so the section is delivered no matter how stdout is

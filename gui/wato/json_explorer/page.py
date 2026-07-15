@@ -75,18 +75,20 @@ def _vue_theme_stylesheets() -> list[str]:
 
 
 def connection_form_spec() -> object:
-    """The ruleset's endpoint Dictionary WITHOUT the extractions element.
+    """The ruleset's endpoint Dictionary WITHOUT the extractions / host_labels.
 
     One endpoint's connection (URL, method, TLS/redirect, auth incl. the
-    password-store Password). Used create-time to validate each list entry with
-    the visitor. Import inside the function: these are internal, drifting APIs.
+    password-store Password). Extractions and host labels are edited in step 2
+    (the picker + their own FormEdits), so they are excluded here. Import inside
+    the function: these are internal, drifting APIs.
     """
     from cmk.rulesets.v1.form_specs import Dictionary
 
     from cmk_addons.plugins.json_api.rulesets.special_agent import _endpoint
 
     endpoint = _endpoint()
-    elements = {key: element for key, element in endpoint.elements.items() if key != "extractions"}
+    step2 = {"extractions", "host_labels"}
+    elements = {key: element for key, element in endpoint.elements.items() if key not in step2}
     return Dictionary(elements=elements)
 
 
@@ -124,6 +126,18 @@ def extractions_form_spec() -> object:
     return _endpoint().elements["extractions"].parameter_form
 
 
+def host_labels_form_spec() -> object:
+    """The ruleset's endpoint ``host_labels`` element on its own (a ``List``).
+
+    Step 2's picker "+ host label" button appends entries into this value; the
+    create page validates + converts it like the extractions and merges it back
+    into the endpoint. Host labels are endpoint-level, so they need no service.
+    """
+    from cmk_addons.plugins.json_api.rulesets.special_agent import _endpoint
+
+    return _endpoint().elements["host_labels"].parameter_form
+
+
 def placement_form_spec() -> object:
     """Where the rule lands: target folder + the host it binds to.
 
@@ -140,13 +154,14 @@ def placement_form_spec() -> object:
     from cmk.gui.form_specs.generators.config_host_name import create_config_host_name
     from cmk.gui.form_specs.generators.folder import create_full_path_folder_choice
     from cmk.gui.form_specs.generators.setup_site_choice import create_setup_site_choice
-    from cmk.rulesets.v1 import Help, Title
+    from cmk.rulesets.v1 import Help, Label, Title
     from cmk.rulesets.v1.form_specs import (
         CascadingSingleChoice,
         CascadingSingleChoiceElement,
         DefaultValue,
         DictElement,
         Dictionary,
+        FixedValue,
         String,
         validators,
     )
@@ -202,6 +217,17 @@ def placement_form_spec() -> object:
                                 },
                             ),
                         ),
+                        CascadingSingleChoiceElement(
+                            name="folder",
+                            title=Title("Apply to the whole target folder"),
+                            parameter_form=FixedValue(
+                                value=None,
+                                label=Label(
+                                    "No host condition - the rule applies to every "
+                                    "host in the target folder above."
+                                ),
+                            ),
+                        ),
                     ],
                 ),
             ),
@@ -234,6 +260,7 @@ def _app_data() -> dict[str, Any]:
     specs = {
         "connectionSpec": (connection_list_form_spec(), "je_connections"),
         "extractionsSpec": (extractions_form_spec(), "je_extractions"),
+        "hostLabelsSpec": (host_labels_form_spec(), "je_host_labels"),
         "placementSpec": (placement_form_spec(), "je_placement"),
     }
     data: dict[str, Any] = {}
@@ -282,7 +309,20 @@ class ModeJsonExplorer(WatoMode):
         # Real theme tokens first, then our (small) app styles on top.
         for sheet in _vue_theme_stylesheets():
             html.stylesheet(sheet)
-        js, css = _bundle_urls()
+        # The wizard bundle is shipped in the `web` MKP part. If it is absent
+        # (e.g. a package built without the frontend, or a partial install),
+        # show an actionable notice instead of crashing the GUI with a raw
+        # FileNotFoundError / StopIteration.
+        try:
+            js, css = _bundle_urls()
+        except (FileNotFoundError, StopIteration):
+            html.show_error(
+                _(
+                    "The JSON API Explorer wizard bundle is missing. Reinstall the "
+                    "'json_api_explorer' package under Setup > Extension packages."
+                )
+            )
+            return
         if css is not None:
             html.stylesheet(css)
         # Load our self-contained bundle (defines the <cmk-json-explorer> element),
