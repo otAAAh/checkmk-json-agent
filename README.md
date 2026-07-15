@@ -111,6 +111,25 @@ Each **field to monitor** has:
 | **Upper / lower levels** | WARN/CRIT for numeric values |
 | **String matching** | Either *must match a regex* (choose the state when it does **not** match, default CRIT) or *map the value to a state* (separate OK / WARN / CRIT regexes, first full match wins; choose the state when nothing matches, default OK) |
 
+### Overriding thresholds per folder / host / service
+
+The levels and string matching a field carries in the special-agent rule are the
+service's **defaults**. Because a special-agent rule is matched first-match-wins
+(it can't be layered), those defaults alone can't be re-tuned for a subset of
+hosts without cloning the whole rule. So they are also exposed as a normal
+**check-parameters** rule:
+
+> **Setup → Service monitoring rules → Applications → Generic JSON API**
+> (ruleset `checkgroup_parameters:json_api`)
+
+A rule there overrides the upper/lower levels and the string matching for the
+matching `JSON <name>` services — with the usual Checkmk precedence (plugin
+defaults < the value configured in the agent rule < this rule) and the usual
+folder/host/service conditions. So you can set a default on a top folder and
+override it further down, or retune a level straight from a service's
+**Parameters** view, without touching the endpoint/auth configuration. Fields
+you leave untouched keep the agent-rule defaults.
+
 ### Service states
 
 - **Numeric value with levels** → checked against the levels, emitted as a

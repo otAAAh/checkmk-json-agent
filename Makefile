@@ -50,7 +50,9 @@ pot:
 		--package-name="checkmk-json-agent" \
 		--msgid-bugs-address="https://github.com/otAAAh/checkmk-json-agent/issues" \
 		-o locales/json_api.pot \
+		cmk_addons/plugins/json_api/lib.py \
 		cmk_addons/plugins/json_api/rulesets/special_agent.py \
+		cmk_addons/plugins/json_api/rulesets/check_parameters.py \
 		cmk_addons/plugins/json_api/graphing/json_api.py
 
 # Verify every shipped catalog is in sync with the current source strings.

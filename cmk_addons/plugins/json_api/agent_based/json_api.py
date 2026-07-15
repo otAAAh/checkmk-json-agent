@@ -169,8 +169,22 @@ def parse_json_api(string_table: StringTable) -> Section | None:
 
 
 def discover_json_api(section: Section) -> DiscoveryResult:
-    for service in section.items:
-        yield Service(item=service)
+    for name, entry in section.items.items():
+        # Seed each service's discovered parameters with the thresholds / match
+        # configured in the special-agent rule. These become the service's
+        # defaults; a "Generic JSON API" check-parameters rule then overrides
+        # them per folder/host/service (precedence: default < discovered < rule).
+        # Only carry the keys that are actually set, so an unset level stays
+        # absent (and the check falls back to the section for pre-upgrade
+        # autochecks that have no discovered parameters at all).
+        params: dict[str, object] = {}
+        if entry.levels_upper is not None:
+            params["levels_upper"] = entry.levels_upper
+        if entry.levels_lower is not None:
+            params["levels_lower"] = entry.levels_lower
+        if entry.match is not None:
+            params["match"] = entry.match
+        yield Service(item=name, parameters=params)
 
 
 def _render_value(value: object) -> str:
@@ -200,20 +214,22 @@ def _as_number(value: object) -> float | None:
     return number if math.isfinite(number) else None
 
 
-def _context(entry: Item) -> CheckResult:
+def _context(entry: Item, match: _Match) -> CheckResult:
     """Details-only lines describing where the value came from.
 
     Emitted as an OK result with ``notice``, so it never touches the summary
     line or the service state - it just enriches the Details view, which makes a
     misconfigured extraction (wrong path, wrong endpoint) far easier to debug.
+    ``match`` is the *effective* matching (after any check-parameters override),
+    so the details reflect what the check actually applied.
     """
     lines = []
     if entry.path:
         lines.append(f"JSON path: {entry.path}")
     if entry.url:
         lines.append(f"Source: {entry.url}")
-    if entry.match is not None:
-        kind, cfg = entry.match
+    if match is not None:
+        kind, cfg = match
         if kind == "must_match" and isinstance(cfg, dict) and isinstance(cfg.get("pattern"), str):
             lines.append(f"Expected pattern: {cfg['pattern']}")
         elif kind == "state_map" and isinstance(cfg, dict):
@@ -302,7 +318,12 @@ def _fmt_number(number: float) -> str:
     return str(int(number)) if number.is_integer() else str(number)
 
 
-def _value_results(entry: Item) -> CheckResult:
+def _value_results(
+    entry: Item,
+    levels_upper: _Levels,
+    levels_lower: _Levels,
+    match: _Match,
+) -> CheckResult:
     number = _as_number(entry.value)
 
     # A numeric value may be transformed by a small arithmetic expression before
@@ -322,13 +343,13 @@ def _value_results(entry: Item) -> CheckResult:
             )
             return
 
-    has_levels = bool(entry.levels_upper or entry.levels_lower)
+    has_levels = bool(levels_upper or levels_lower)
 
     if number is not None and has_levels:
         yield from check_levels(
             number,
-            levels_upper=entry.levels_upper,
-            levels_lower=entry.levels_lower,
+            levels_upper=levels_upper,
+            levels_lower=levels_lower,
             metric_name=entry.metric_name,
             label="Value",
         )
@@ -340,10 +361,10 @@ def _value_results(entry: Item) -> CheckResult:
     misconfigured_levels = has_levels and number is None
     misconfig_note = " (levels configured but value is not numeric)"
 
-    if entry.match is not None:
+    if match is not None:
         text = _render_value(entry.value)
         try:
-            state, description = _evaluate_match(entry.match, text)
+            state, description = _evaluate_match(match, text)
         except re.error as exc:
             yield Result(state=State.UNKNOWN, summary=f"Invalid match pattern: {exc}")
             return
@@ -376,20 +397,33 @@ def _value_results(entry: Item) -> CheckResult:
         yield Result(state=State.OK, summary=f"Value: {_render_value(entry.value)}")
 
 
-def check_json_api(item: str, section: Section) -> CheckResult:
+def check_json_api(item: str, params: Mapping[str, object], section: Section) -> CheckResult:
     if section.error:
         yield Result(state=State.CRIT, summary=f"API error: {section.error}")
         return
     entry = section.items.get(item)
     if entry is None:
         return
+
+    # Effective parameters: a check-parameters rule (or the discovered defaults)
+    # wins per key; where a key is absent we fall back to the value the agent
+    # embedded in the section, so services discovered by a pre-parameters
+    # version keep their thresholds until they are re-discovered.
+    levels_upper = (
+        _coerce_levels(params["levels_upper"]) if "levels_upper" in params else entry.levels_upper
+    )
+    levels_lower = (
+        _coerce_levels(params["levels_lower"]) if "levels_lower" in params else entry.levels_lower
+    )
+    match = _coerce_match(params["match"]) if "match" in params else entry.match
+
     if not entry.found:
         yield Result(state=State.UNKNOWN, summary=entry.error or "not found")
-        yield from _context(entry)
+        yield from _context(entry, match)
         return
 
-    yield from _value_results(entry)
-    yield from _context(entry)
+    yield from _value_results(entry, levels_upper, levels_lower, match)
+    yield from _context(entry, match)
 
 
 agent_section_json_api = AgentSection(
@@ -402,4 +436,6 @@ check_plugin_json_api = CheckPlugin(
     service_name="JSON %s",
     discovery_function=discover_json_api,
     check_function=check_json_api,
+    check_ruleset_name="json_api",
+    check_default_parameters={},
 )
