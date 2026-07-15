@@ -57,6 +57,7 @@ def test_basic_command_line(ssc):
             "service": "Health",
             "label_path": None,
             "unit": None,
+            "labels": [],
             "levels_upper": None,
             "levels_lower": None,
             # The CascadingSingleChoice tuple survives the JSON round-trip as a list.
@@ -146,6 +147,53 @@ def test_label_path_passed_through(ssc):
     )
     (endpoint,) = _endpoints(ssc, args)
     assert endpoint["extractions"][0]["label_path"] == "name"
+
+
+def test_service_labels_passed_through(ssc):
+    args = _command_args(
+        ssc,
+        {
+            "endpoints": [
+                {
+                    "url": "http://x",
+                    "verify_cert": True,
+                    "extractions": [
+                        {
+                            "path": "nodes[*].up",
+                            "service": "Node",
+                            "labels": [{"path": "name", "key": None}],
+                        }
+                    ],
+                }
+            ]
+        },
+    )
+    (endpoint,) = _endpoints(ssc, args)
+    assert endpoint["extractions"][0]["labels"] == [{"path": "name", "key": None}]
+
+
+def test_host_labels_passed_through(ssc):
+    args = _command_args(
+        ssc,
+        {
+            "endpoints": [
+                {
+                    "url": "http://x",
+                    "verify_cert": True,
+                    "extractions": [{"path": "status", "service": "S"}],
+                    "host_labels": [
+                        {"path": "version", "key": None},
+                        {"path": "cluster.region", "key": "region"},
+                    ],
+                }
+            ]
+        },
+    )
+    (endpoint,) = _endpoints(ssc, args)
+    assert endpoint["host_labels"] == [
+        {"path": "version", "key": None, "value_field": None},
+        {"path": "cluster.region", "key": "region", "value_field": None},
+    ]
 
 
 def test_unit_passed_through(ssc):

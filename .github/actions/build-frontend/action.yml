@@ -1,0 +1,117 @@
+# SPDX-License-Identifier: GPL-2.0-only
+name: Build Explorer frontend
+description: >
+  Build the Explorer's Vue app (which imports the REAL cmk-frontend-vue CmkWizard
+  via the build-time bridge in frontend/vite.config.ts) and assemble
+  web/htdocs/json_api/wizard/ (index.html + assets + .vite/manifest.json). Shared
+  by the frontend-build and release workflows so the fragile, version-matched
+  build recipe lives in exactly one place. Runs inline in the caller's job, so
+  the assembled web/ is present for the packaging step that follows.
+
+inputs:
+  cmk_ref:
+    description: "Checkmk git ref (>=2.5) to build cmk-frontend-vue from (CmkWizard does NOT exist in 2.4)"
+    required: false
+    default: "2.5.0"
+
+runs:
+  using: composite
+  steps:
+    # --- SOURCE: sparse shallow clone of just the packages we compile against
+    - name: Clone Checkmk source at pinned ref (sparse)
+      shell: bash
+      env:
+        CMK_REF: ${{ inputs.cmk_ref }}
+      run: |
+        git clone --filter=blob:none --depth 1 --branch "$CMK_REF" --sparse \
+          https://github.com/Checkmk/checkmk cmk-src
+        git -C cmk-src sparse-checkout set \
+          packages/cmk-frontend-vue packages/cmk-frontend packages/cmk-shared-typing
+        test -f cmk-src/packages/cmk-frontend-vue/src/components/CmkWizard/CmkWizard.vue \
+          || { echo "::error::CmkWizard not found at $CMK_REF — needs Checkmk >= 2.5"; exit 1; }
+        echo "CMK_SRC=$PWD/cmk-src" >> "$GITHUB_ENV"
+
+    # cmk-frontend-vue's RUNTIME deps (class-variance-authority, radix-vue, ...)
+    # must sit next to its src for the components' bare imports to resolve. 2.5
+    # ships no per-package lockfile, so `npm install --omit=dev` (skips the heavy
+    # devDeps — vite/eslint/etc. we don't need). The two @tsconfig/* configs are
+    # needed only so esbuild can parse the checkout's tsconfig chain.
+    - name: Install cmk-frontend-vue runtime deps
+      shell: bash
+      working-directory: cmk-src/packages/cmk-frontend-vue
+      run: |
+        npm install --omit=dev --no-audit --no-fund
+        npm install --no-save --no-audit --no-fund @tsconfig/node22 @vue/tsconfig
+
+    # cmk-shared-typing: generate TypeScript from the committed JSON schemas with
+    # json-schema-to-typescript directly (the package's `./run -b` is a bazel
+    # wrapper that a sparse clone can't drive). Types are erased from the output
+    # but the files must exist at build time.
+    - name: Generate cmk-shared-typing TypeScript
+      shell: bash
+      working-directory: cmk-src/packages/cmk-shared-typing
+      run: |
+        mkdir -p typescript
+        # Run from source/ so schemas' relative $refs (e.g. vue_formspec/*.json,
+        # used by vue_formspec_components.json) resolve against source/.
+        ( cd source && for f in *.json; do
+            npx --yes json-schema-to-typescript@latest -i "$f" -o "../typescript/${f%.json}.ts"
+          done )
+        echo "CMK_SHARED_TYPING=$PWD" >> "$GITHUB_ENV"
+
+    # --- BUILT: lift the version-matched cmk-frontend theme assets from Docker
+    - name: Resolve a matching check-mk-raw image
+      id: img
+      shell: bash
+      env:
+        CMK_REF: ${{ inputs.cmk_ref }}
+      run: |
+        series="${CMK_REF%.0}"   # 2.5.0 -> 2.5
+        newest="$(curl -fsSL "https://hub.docker.com/v2/repositories/checkmk/check-mk-raw/tags/?page_size=100&name=${series}.0-2" \
+          | python3 -c "import sys,json;ts=[t['name'] for t in json.load(sys.stdin)['results'] if t['name'].startswith('${series}.0-2')];print(sorted(ts)[-1] if ts else '')")"
+        test -n "$newest" || { echo "::error::no check-mk-raw image for ${series}"; exit 1; }
+        echo "image=checkmk/check-mk-raw:$newest" >> "$GITHUB_OUTPUT"
+    - name: Extract cmk-frontend dist from the image
+      shell: bash
+      run: |
+        IMG="${{ steps.img.outputs.image }}"
+        VER="$(docker run --rm --entrypoint bash "$IMG" -c 'ls /omd/versions | grep -v "^default$" | head -1')"
+        docker create --name cmk "$IMG" >/dev/null
+        docker cp "cmk:/omd/versions/$VER/share/check_mk/web/htdocs" ./cmk-frontend-dist
+        docker rm cmk >/dev/null
+        echo "CMK_FRONTEND_DIST=$PWD/cmk-frontend-dist" >> "$GITHUB_ENV"
+
+    # cmk-frontend-vue's icons.constants.ts EAGERLY imports every theme icon it
+    # knows about (`~cmk-frontend/themes/.../images/icon_*.svg?url`). The
+    # check-mk-raw (CRE) dist ships fewer icons than the full/enterprise set the
+    # constant enumerates, so a single missing file (e.g. icon_add_rule.svg)
+    # fails the whole Vite build even though the wizard uses none of them. Stub
+    # any referenced-but-absent icon with an empty SVG so the eager imports
+    # resolve; the wizard's own icons are present and unaffected.
+    - name: Stub theme icons the raw dist doesn't ship
+      shell: bash
+      run: |
+        set -euo pipefail
+        consts="$CMK_SRC/packages/cmk-frontend-vue/src/components/CmkIcon/icons.constants.ts"
+        stubbed=0
+        while IFS= read -r rel; do
+          f="$CMK_FRONTEND_DIST/$rel"
+          [ -f "$f" ] && continue
+          mkdir -p "$(dirname "$f")"
+          case "$rel" in
+            *.svg) printf '%s' '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1 1"/>' > "$f" ;;
+            *)     : > "$f" ;;
+          esac
+          stubbed=$((stubbed + 1))
+        done < <(grep -oE "themes/[A-Za-z0-9/_-]+\.(svg|png)" "$consts" | sort -u)
+        echo "stubbed $stubbed icon(s) missing from the raw dist"
+
+    # --- BUILD our app against the assembled artifacts and assemble web/
+    - name: Build the Explorer wizard + assemble web/
+      shell: bash
+      run: |
+        export CMK_FRONTEND_VUE_SRC="$CMK_SRC/packages/cmk-frontend-vue/src"
+        (cd frontend && npm ci && npm run lint:style && npm run build)
+        rm -rf web/htdocs/json_api/wizard
+        mkdir -p web/htdocs/json_api/wizard
+        cp -r frontend/dist/. web/htdocs/json_api/wizard/

@@ -15,10 +15,17 @@ export type ConnectionValue = Record<string, unknown>
 /** One entry of an endpoint's `extractions` `List` value (service/path/...). */
 export type ExtractionValue = Record<string, unknown>
 
+/** One endpoint `host_labels` entry ({path, optional key, optional value field
+ * for '[*]' paths}). */
+export type LabelValue = { path: string; key?: string; value_field?: string }
+
 /** Per-endpoint state that is NOT part of the connection FormSpec. */
 export interface EndpointServices {
   /** FormEdit value for the endpoint's `extractions` `List`. */
   extractions: ExtractionValue[]
+  /** Endpoint-level host labels (decoupled from any service) — the picker's
+   * "+ host label" writes here; resolved from the response root. */
+  hostLabels: LabelValue[]
   /** Transient: fetched/pasted sample for the field picker. */
   sampleJson: string
 }
@@ -31,7 +38,7 @@ export interface WizardState {
 }
 
 export function newServices(): EndpointServices {
-  return { extractions: [], sampleJson: '' }
+  return { extractions: [], hostLabels: [], sampleJson: '' }
 }
 
 /** The endpoint URL out of a connection FormEdit entry (for picker/preflight). */

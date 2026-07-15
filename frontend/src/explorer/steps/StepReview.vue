@@ -360,10 +360,27 @@ interface Row {
   value: Json | undefined
   defined: string[]
   state: StateKind
+  labels: string[]
 }
 interface EndpointReview {
   url: string
   rows: Row[]
+  hostLabels: Array<{ label: string; value: string }>
+}
+
+/** The label key the agent will use (explicit key, else the path's last segment)
+ * — mirrors the agent's _label_key_from_path. */
+function labelKeyOf(spec: Record<string, unknown>): string {
+  if (typeof spec.key === 'string' && spec.key) {
+    return spec.key
+  }
+  const path = typeof spec.path === 'string' ? spec.path : ''
+  const tokens = path.replace(/\[\*\]/g, '').match(/[A-Za-z0-9_]+|\['[^']*'\]|\["[^"]*"\]/g)
+  if (!tokens || !tokens.length) {
+    return path
+  }
+  const last = tokens[tokens.length - 1]!
+  return last.startsWith("['") || last.startsWith('["') ? last.slice(2, -2) : last
 }
 
 const reviews = computed<EndpointReview[]>(() =>
@@ -375,12 +392,43 @@ const reviews = computed<EndpointReview[]>(() =>
     } catch {
       sample = null
     }
+    // Mirror the agent's host-label resolution: a plain path -> one label with
+    // the scalar at the path; a '[*]' path -> one label per element, keyed
+    // <base>/<element> with value from value_field (default 'true').
+    const hostLabels: Array<{ label: string; value: string }> = []
+    for (const l of services?.hostLabels ?? []) {
+      const base = labelKeyOf(l)
+      const valueField = typeof l.value_field === 'string' ? l.value_field : ''
+      const matches = sample !== null ? resolvePath(sample, l.path) : []
+      if (!l.path.includes('[*]')) {
+        hostLabels.push({
+          label: `json_api/${base}`,
+          value: matches.length ? fmtValue(matches[0]!.value) : _t('(not found in sample)'),
+        })
+        continue
+      }
+      for (const m of matches) {
+        const key = m.label ? `${base}/${m.label}` : base
+        let value = 'true'
+        if (valueField) {
+          const inner = resolvePath(m.value, valueField)
+          if (!inner.length) {
+            continue
+          }
+          value = fmtValue(inner[0]!.value)
+        }
+        hostLabels.push({ label: `json_api/${key}`, value })
+      }
+    }
     const rows: Row[] = (services?.extractions ?? [])
       .filter((x) => extractionPath(x))
       .flatMap((x) => {
         const name = extractionService(x) || _t('(unnamed)')
         const path = extractionPath(x)
         const defined = definedSummary(x)
+        const labels = (Array.isArray(x.labels) ? (x.labels as Record<string, unknown>[]) : []).map(
+          (l) => `json_api/${labelKeyOf(l)}`,
+        )
         // Optional arithmetic transform applied to a NUMERIC value before
         // levels/display, e.g. `value / 1024 / 1024`.
         const calc = typeof x.calc === 'string' && x.calc ? x.calc : null
@@ -391,7 +439,9 @@ const reviews = computed<EndpointReview[]>(() =>
         const doCount = x.count === true
         const matches = sample !== null ? resolvePath(sample, path) : []
         if (!matches.length) {
-          return [{ service: name, path, value: undefined, defined, state: 'none' as StateKind }]
+          return [
+            { service: name, path, value: undefined, defined, state: 'none' as StateKind, labels },
+          ]
         }
         return matches.map((m): Row => {
           const service = matches.length > 1 && m.label ? `${name} ${m.label}` : name
@@ -404,7 +454,7 @@ const reviews = computed<EndpointReview[]>(() =>
               value = Object.keys(m.value).length
             } else {
               // Not a list/object: cannot count — show the raw value, unresolved.
-              return { service, path, value: m.value, defined, state: 'none' as StateKind }
+              return { service, path, value: m.value, defined, state: 'none' as StateKind, labels }
             }
           }
           // 2) Transform the (possibly counted) value when `calc` is set and it
@@ -413,14 +463,18 @@ const reviews = computed<EndpointReview[]>(() =>
           if (calc !== null && typeof value === 'number') {
             const transformed = evalCalc(calc, value)
             if (transformed === null) {
-              return { service, path, value, defined, state: 'none' as StateKind }
+              return { service, path, value, defined, state: 'none' as StateKind, labels }
             }
             value = transformed
           }
-          return { service, path, value, defined, state: evalState(value, x) }
+          return { service, path, value, defined, state: evalState(value, x), labels }
         })
       })
-    return { url: endpointUrl(connection) || _t('Endpoint %{n}', { n: ei + 1 }), rows }
+    return {
+      url: endpointUrl(connection) || _t('Endpoint %{n}', { n: ei + 1 }),
+      rows,
+      hostLabels,
+    }
   }),
 )
 </script>
@@ -441,7 +495,7 @@ const reviews = computed<EndpointReview[]>(() =>
         >
           <template #header>
             <CmkHeading type="h3" class="je-step-review__title">{{ review.url }}</CmkHeading>
-            <span class="je-step-review__count">{{ _t('%{n} services', { n: review.rows.length }) }}</span>
+            <span class="je-step-review__count">{{ _t('%{n} services, %{h} host labels', { n: review.rows.length, h: review.hostLabels.length }) }}</span>
           </template>
           <template #content>
             <p v-if="!review.rows.length" class="je-step-review__empty">{{ _t('No services selected.') }}</p>
@@ -463,9 +517,31 @@ const reviews = computed<EndpointReview[]>(() =>
                   <div v-if="row.defined.length" class="je-step-review__defined">
                     {{ row.defined.join(' · ') }}
                   </div>
+                  <div v-if="row.labels.length" class="je-step-review__labels">
+                    <span class="je-step-review__labels-title">{{ _t('Service labels:') }}</span>
+                    <CmkTag
+                      v-for="(lab, li) in row.labels"
+                      :key="li"
+                      size="small"
+                      variant="fill"
+                      color="default"
+                      :content="_t('%{s}', { s: lab })"
+                    />
+                  </div>
                 </div>
               </li>
             </ul>
+            <div v-if="review.hostLabels.length" class="je-step-review__hostlabels">
+              <span class="je-step-review__hostlabels-title">{{ _t('Host labels:') }}</span>
+              <CmkTag
+                v-for="(lab, li) in review.hostLabels"
+                :key="li"
+                size="small"
+                variant="fill"
+                color="default"
+                :content="_t('%{k}:%{v}', { k: lab.label, v: lab.value })"
+              />
+            </div>
           </template>
         </CmkAccordionItem>
       </CmkAccordion>
@@ -560,6 +636,32 @@ const reviews = computed<EndpointReview[]>(() =>
 .je-step-review__defined {
   margin-top: 2px;
   font-size: 12px;
+  color: var(--font-color-dimmed);
+}
+
+.je-step-review__labels {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--dimension-3, 6px);
+  align-items: center;
+  margin-top: 4px;
+  font-size: 12px;
+}
+
+.je-step-review__labels-title {
+  color: var(--font-color-dimmed);
+}
+
+.je-step-review__hostlabels {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--dimension-3, 6px);
+  align-items: center;
+  margin-top: var(--dimension-4, 8px);
+  font-size: 12px;
+}
+
+.je-step-review__hostlabels-title {
   color: var(--font-color-dimmed);
 }
 

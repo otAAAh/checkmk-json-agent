@@ -30,6 +30,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   'update:modelValue': [value: string]
   toggle: [path: string, valueType: string, sampleValue?: Json]
+  hostlabel: [path: string]
   refetch: []
 }>()
 
@@ -95,6 +96,7 @@ const viewOptions = [
               :node="node"
               :selected-paths="selectedPaths"
               @toggle="(p, t, v) => emit('toggle', p, t, v)"
+              @hostlabel="(p) => emit('hostlabel', p)"
             />
           </ul>
         </CmkScrollContainer>
@@ -180,6 +182,8 @@ const viewOptions = [
 }
 
 .je-json-picker__tree-list {
+  width: max-content;
+  min-width: 100%;
   padding: 0;
   margin: 0;
   list-style: none;

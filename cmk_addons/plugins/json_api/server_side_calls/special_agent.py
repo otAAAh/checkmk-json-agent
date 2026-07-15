@@ -35,11 +35,28 @@ class AuthToken(BaseModel, frozen=True):
     token: Secret
 
 
+class LabelSpec(BaseModel, frozen=True):
+    path: str
+    # Optional key override; the agent derives it from the path's last segment
+    # when unset. The check adds the json_api/ namespace prefix.
+    key: str | None = None
+
+
+class HostLabelSpec(BaseModel, frozen=True):
+    path: str
+    key: str | None = None
+    # For a '[*]' path: field within each element for the value (default 'true').
+    value_field: str | None = None
+
+
 class Extraction(BaseModel, frozen=True):
     path: str
     service: str
     label_path: str | None = None
     unit: str | None = None
+    # Fields attached as SERVICE labels on this service (resolved per '[*]'
+    # element by the agent). Host-wide labels live on the endpoint (host_labels).
+    labels: Sequence[LabelSpec] = ()
     # The level tuples are produced by the SimpleLevels form spec, i.e.
     # ("fixed", (warn, crit)) or ("no_levels", None). We pass them through
     # verbatim to the check via the agent section, so they stay opaque here.
@@ -67,6 +84,8 @@ class Endpoint(BaseModel, frozen=True):
         tuple[Literal["auth_login"], AuthLogin] | tuple[Literal["auth_token"], AuthToken] | None
     ) = None
     extractions: Sequence[Extraction] = ()
+    # Host-wide labels, resolved from the response root by the agent.
+    host_labels: Sequence[HostLabelSpec] = ()
 
 
 class Params(BaseModel, frozen=True):
@@ -93,6 +112,7 @@ def _endpoint_json(endpoint: Endpoint, macros: Mapping[str, str]) -> str:
         "timeout": endpoint.timeout,
         "auth": endpoint.auth[0] if endpoint.auth else None,
         "extractions": [e.model_dump() for e in endpoint.extractions],
+        "host_labels": [label.model_dump() for label in endpoint.host_labels],
     }
     if endpoint.auth and endpoint.auth[0] == "auth_login":
         spec["username"] = endpoint.auth[1].username

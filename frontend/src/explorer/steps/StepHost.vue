@@ -24,6 +24,9 @@ const { currentStep, placementSpec, placementData, host, hostChoice, validateCon
 // visitor yields the real path), so the recap shows the host + mode, which are
 // plain strings we can read directly.
 const recap = computed(() => {
+  if (hostChoice.value.mode === 'folder') {
+    return _t('Applies to the whole target folder')
+  }
   const where = hostChoice.value.mode === 'new' ? _t('new host') : _t('existing host')
   return host.value ? _t('Host: %{host} (%{where})', { host: host.value, where }) : _t('Host: (none)')
 })
@@ -45,7 +48,7 @@ const recap = computed(() => {
         {{ _t('Conditions form unavailable on this site.') }}
       </p>
       <CmkAlertBox v-if="conditionsInvalid" variant="error" size="small">
-        {{ _t('Choose or enter a host before continuing.') }}
+        {{ _t('Choose a host, or select "Apply to the whole target folder", before continuing.') }}
       </CmkAlertBox>
     </template>
     <template #actions>

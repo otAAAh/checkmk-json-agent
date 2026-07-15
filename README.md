@@ -99,9 +99,12 @@ Each **field to monitor** has:
 |---|---|
 | **Service name** | Becomes the service (shown as `JSON <name>`) |
 | **JSON path** | Dotted path; use `[*]` for array discovery |
-| **Item label path** | For `[*]`: field within each element to label the service (defaults to the array index) |
+| **Per-element name suffix** | For `[*]`: field within each element, appended to the service name to tell the per-element services apart (defaults to the array index); it does not replace the service name |
+| **Service labels** | Optional: attach Checkmk service labels to *this* service from response fields, each key prefixed with `json_api/`. For a `[*]` path the value is resolved within each element (e.g. `name`), so each per-element service gets its own label; otherwise from the response root. Host-wide facts go in the endpoint's **Host labels** instead. Set at discovery, so pick stable, low-cardinality fields |
+
+Each **endpoint** also has an optional **Host labels** list: fields resolved from the response root and attached to the monitored *host* (e.g. `version`, `cluster.region`) as `json_api/<key>` — host-wide, needing no service. A path may contain a `[*]` wildcard (e.g. `components[*]`) to emit **one label per element**, keyed `json_api/<key>/<element>` (unique keys), with the value taken from an optional per-element **value field** (default `true`, i.e. set-membership tags). In the wizard, the JSON picker's **`+ host label`** button adds these.
 | **Count the number of elements at this path** | Optional: when the path points at an array or object, monitor its number of elements (array length / object keys) instead of the value; the count is a number, so unit, levels, transform and metric all apply. A path that is not an array or object becomes UNKNOWN |
-| **Unit** | Optional: `count` / `bytes` / `seconds` / `percent` — renders the metric and graph with that unit (numeric values only) |
+| **Unit** | Optional: `count` / `bytes` / `seconds` / `percent` — renders the value in the summary/details *and* the metric and graph with that unit (numeric values only) |
 | **Transform the numeric value** | Optional arithmetic expression on the variable `value` (e.g. `value / 1024 / 1024`), applied to a numeric value before levels and the metric; only numbers, parentheses and `+ - * /` are allowed |
 | **Upper / lower levels** | WARN/CRIT for numeric values |
 | **String matching** | Either *must match a regex* (choose the state when it does **not** match, default CRIT) or *map the value to a state* (separate OK / WARN / CRIT regexes, first full match wins; choose the state when nothing matches, default OK) |
@@ -210,7 +213,7 @@ Given a payload with a `nodes` array:
 {"nodes": [{"name": "web-1", "status": "UP"}, {"name": "web-2", "status": "DOWN"}]}
 ```
 
-| Service name | JSON path | Item label path | Check |
+| Service name | JSON path | Per-element name suffix | Check |
 |---|---|---|---|
 | `Node` | `nodes[*].status` | `name` | must match `UP` (else CRIT) |
 

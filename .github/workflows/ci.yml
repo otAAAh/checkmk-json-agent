@@ -31,8 +31,12 @@ jobs:
         run: ruff check cmk_addons scripts tests
       - name: Type check
         run: mypy cmk_addons scripts
-      - name: Build MKP (stdlib only)
-        run: python3 scripts/build_mkp.py
+      # Only the agent package here: it is the stdlib-only, GUI-free one. The
+      # Explorer package needs the built wizard bundle (see the frontend-build
+      # and release workflows) and build_explorer() now refuses to package
+      # without it, so building it on this frontend-less checkout would fail.
+      - name: Build agent MKP (stdlib only)
+        run: python3 scripts/build_mkp.py --package agent
       - name: Changelog is current (released sections)
         run: |
           python3 scripts/gen_changelog.py --stdout > /tmp/fresh-changelog.md

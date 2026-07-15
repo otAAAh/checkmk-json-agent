@@ -13,6 +13,8 @@ import usei18n from '@/lib/i18n'
 
 import CmkAccordion from '@/components/CmkAccordion/CmkAccordion.vue'
 import CmkAccordionItem from '@/components/CmkAccordion/CmkAccordionItem.vue'
+import CmkCollapsible from '@/components/CmkCollapsible/CmkCollapsible.vue'
+import CmkCollapsibleTitle from '@/components/CmkCollapsible/CmkCollapsibleTitle.vue'
 import CmkIndent from '@/components/CmkIndent.vue'
 import { CmkWizardButton, CmkWizardStep } from '@/components/CmkWizard'
 import CmkHeading from '@/components/typography/CmkHeading.vue'
@@ -27,10 +29,12 @@ const {
   currentStep,
   state,
   extractionsSpec,
+  hostLabelsSpec,
   sampleLoading,
   sampleErrors,
   fetchSample,
   togglePath,
+  addHostLabel,
   validateServices,
   validExtractions,
 } = useExplorer()
@@ -39,6 +43,17 @@ const { _t } = usei18n()
 
 // Accordion: exactly one endpoint open at a time; the first opens by default.
 const openedItems = ref<string[]>(['0'])
+
+// The two right-column collapsibles, open per endpoint (default: both open).
+const servicesOpen = ref<Record<number, boolean>>({})
+const hostLabelsOpen = ref<Record<number, boolean>>({})
+const isOpen = (rec: Record<number, boolean>, ei: number): boolean => rec[ei] ?? true
+function toggle(rec: Record<number, boolean>, ei: number): void {
+  rec[ei] = !isOpen(rec, ei)
+}
+
+const hostLabelCount = (ei: number): number => state.services[ei]?.hostLabels?.length ?? 0
+const serviceCount = (ei: number): number => state.services[ei]?.extractions.length ?? 0
 
 // Recap: "x services on y endpoints" (endpoints that have at least one service).
 const recap = computed(() => {
@@ -53,8 +68,8 @@ const recap = computed(() => {
 <template>
   <CmkWizardStep :index="3" :is-completed="() => currentStep > 3">
     <template #header>
-      <CmkHeading>{{ _t('Configure services to monitor') }}</CmkHeading>
-      <CmkParagraph>{{ _t('Pick the JSON fields and paths to monitor. Configure values and thresholds per service.') }}</CmkParagraph>
+      <CmkHeading>{{ _t('Configure services & host labels') }}</CmkHeading>
+      <CmkParagraph>{{ _t('Pick the JSON fields to monitor as services, and tag the host with labels. Configure values and thresholds per service.') }}</CmkParagraph>
     </template>
     <template #content>
       <CmkAccordion v-model="openedItems" :min-open="1" :max-open="1">
@@ -68,7 +83,7 @@ const recap = computed(() => {
             <CmkHeading type="h3" class="je-step-services__title">
               {{ endpointUrl(connection) || _t('Endpoint %{n}', { n: ei + 1 }) }}
             </CmkHeading>
-            <span class="je-step-services__count">{{ _t('%{count} service(s)', { count: state.services[ei]?.extractions.length ?? 0 }) }}</span>
+            <span class="je-step-services__count">{{ _t('%{s} service(s), %{h} host label(s)', { s: serviceCount(ei), h: hostLabelCount(ei) }) }}</span>
           </template>
           <template #content>
             <div v-if="state.services[ei]" class="je-step-services__cols">
@@ -81,15 +96,36 @@ const recap = computed(() => {
                   :can-refetch="Boolean(endpointUrl(connection).trim())"
                   @refetch="() => fetchSample(ei)"
                   @toggle="(path, valueType, sampleValue) => togglePath(ei, path, valueType, sampleValue)"
+                  @hostlabel="(path) => addHostLabel(ei, path)"
                 />
               </div>
               <div class="je-step-services__col je-step-services__col--form">
-                <CmkIndent v-if="extractionsSpec">
-                  <FormSpecEdit
-                    :spec="extractionsSpec.spec"
-                    v-model:data="state.services[ei]!.extractions"
-                  />
-                </CmkIndent>
+                <CmkCollapsibleTitle
+                  :title="_t('Services to monitor')"
+                  :open="isOpen(servicesOpen, ei)"
+                  @toggle-open="toggle(servicesOpen, ei)"
+                />
+                <CmkCollapsible :open="isOpen(servicesOpen, ei)">
+                  <CmkIndent v-if="extractionsSpec">
+                    <FormSpecEdit
+                      :spec="extractionsSpec.spec"
+                      v-model:data="state.services[ei]!.extractions"
+                    />
+                  </CmkIndent>
+                </CmkCollapsible>
+                <CmkCollapsibleTitle
+                  :title="_t('Host labels')"
+                  :open="isOpen(hostLabelsOpen, ei)"
+                  @toggle-open="toggle(hostLabelsOpen, ei)"
+                />
+                <CmkCollapsible :open="isOpen(hostLabelsOpen, ei)">
+                  <CmkIndent v-if="hostLabelsSpec">
+                    <FormSpecEdit
+                      :spec="hostLabelsSpec.spec"
+                      v-model:data="state.services[ei]!.hostLabels"
+                    />
+                  </CmkIndent>
+                </CmkCollapsible>
               </div>
             </div>
           </template>

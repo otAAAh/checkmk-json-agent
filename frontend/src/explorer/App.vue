@@ -16,8 +16,14 @@ import StepServices from './steps/StepServices.vue'
 // The GUI page passes serialized FormSpec payload(s) via the custom element's
 // `data` attribute (html.vue_component("cmk-json-explorer", {...})).
 const props = defineProps<{ data?: string }>()
-const { currentStep, status, setConnectionSpec, setExtractionsSpec, setPlacementSpec } =
-  useExplorer()
+const {
+  currentStep,
+  status,
+  setConnectionSpec,
+  setExtractionsSpec,
+  setHostLabelsSpec,
+  setPlacementSpec,
+} = useExplorer()
 
 onMounted(() => {
   if (!props.data) {
@@ -27,6 +33,7 @@ onMounted(() => {
     const parsed = JSON.parse(props.data) as {
       connectionSpec?: FormSpecPayload
       extractionsSpec?: FormSpecPayload
+      hostLabelsSpec?: FormSpecPayload
       placementSpec?: FormSpecPayload
     }
     if (parsed.connectionSpec) {
@@ -34,6 +41,9 @@ onMounted(() => {
     }
     if (parsed.extractionsSpec) {
       setExtractionsSpec(parsed.extractionsSpec)
+    }
+    if (parsed.hostLabelsSpec) {
+      setHostLabelsSpec(parsed.hostLabelsSpec)
     }
     if (parsed.placementSpec) {
       setPlacementSpec(parsed.placementSpec)

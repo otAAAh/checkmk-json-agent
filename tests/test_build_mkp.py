@@ -10,6 +10,8 @@ import tarfile
 import tomllib
 from pathlib import Path
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 
 import build_mkp  # noqa: E402  (resolved via the path insert above)
@@ -17,6 +19,16 @@ import build_mkp  # noqa: E402  (resolved via the path insert above)
 # Every Checkmk-supported language we ship a catalog for.
 _LANGS = ["de", "es", "fr", "it", "ja", "nl", "pt_PT", "ro"]
 _MO = {lang: f"packages/json_api/{lang}/LC_MESSAGES/multisite.mo" for lang in _LANGS}
+
+# build_explorer() now refuses to package without the built wizard bundle. The
+# plain `test` CI job checks out the repo but does not run `make frontend`, so
+# the manifest is absent there; skip the explorer-packaging tests in that case.
+# The frontend-build workflow (which does build the bundle) still covers them.
+_WIZARD_MANIFEST = build_mkp.WEB_BASE / "htdocs" / "json_api" / "wizard" / ".vite" / "manifest.json"
+_needs_wizard = pytest.mark.skipif(
+    not _WIZARD_MANIFEST.is_file(),
+    reason="wizard bundle not built (run 'make frontend'); build_explorer would fail loudly",
+)
 
 
 def test_locale_entries_compile_and_translate():
@@ -57,6 +69,7 @@ def test_agent_ships_locales_and_no_gui():
         output.unlink()
 
 
+@_needs_wizard
 def test_explorer_package_ships_web_and_gui_parts():
     """The Explorer 'extra' package carries the 'web' (bundle) and 'gui' (page
     module) parts — and never the agent's cmk_addons_plugins/locales.
@@ -96,6 +109,7 @@ def test_explorer_package_ships_web_and_gui_parts():
         output.unlink()
 
 
+@_needs_wizard
 def test_both_packages_share_the_project_version():
     """Agent and Explorer are distinct packages but ship at the same version.
 

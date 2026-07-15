@@ -66,6 +66,13 @@ jobs:
             exit 1
           fi
 
+      # Build the Explorer's wizard bundle first (same composite action the
+      # frontend-build workflow uses). Without it, build_mkp.py has no wizard to
+      # package and the Explorer page crashes the GUI with a missing manifest;
+      # build_explorer() now hard-fails if this step is skipped.
+      - name: Build the Explorer frontend
+        uses: ./.github/actions/build-frontend
+
       # Build BOTH packages at the same version: the agent (json_api) and the
       # optional Explorer (json_api_explorer). Both are attached to the release.
       - name: Build the MKPs and their checksums

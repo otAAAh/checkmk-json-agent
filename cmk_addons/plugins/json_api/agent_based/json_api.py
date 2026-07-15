@@ -11,21 +11,29 @@ import ast
 import json
 import math
 import re
-from collections.abc import Mapping
-from dataclasses import dataclass
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass, field
 
 from cmk.agent_based.v2 import (
     AgentSection,
     CheckPlugin,
     CheckResult,
     DiscoveryResult,
+    HostLabel,
+    HostLabelGenerator,
     Metric,
     Result,
     Service,
+    ServiceLabel,
     State,
     StringTable,
     check_levels,
+    render,
 )
+
+# Checkmk label keys we create are namespaced so they never collide with the
+# built-in ``cmk/...`` labels or another plugin's.
+_LABEL_NS = "json_api/"
 
 # Level tuples come straight from the SimpleLevels form spec, JSON-encoded by
 # the agent: ("fixed", (warn, crit)) or ("no_levels", None) or absent.
@@ -55,6 +63,21 @@ def _metric_name(unit: object) -> str:
     return _UNIT_METRIC.get(unit if isinstance(unit, str) else None, "json_api_value")
 
 
+# The unit chosen in the rule also decides how the value is *rendered* in the
+# summary/details (and the levels line), so "1572864" with unit=bytes reads as
+# "1.50 MiB" like the graph does - not just as a bare number. Units without a
+# dedicated renderer ("count", or none) fall back to the plain number.
+_UNIT_RENDER: dict[str, Callable[[float], str]] = {
+    "bytes": render.bytes,
+    "seconds": render.timespan,
+    "percent": render.percent,
+}
+
+
+def _render_func(unit: object) -> Callable[[float], str] | None:
+    return _UNIT_RENDER.get(unit) if isinstance(unit, str) else None
+
+
 @dataclass(frozen=True)
 class Item:
     found: bool
@@ -65,14 +88,21 @@ class Item:
     match: _Match
     calc: str | None
     metric_name: str
+    render_func: Callable[[float], str] | None
     path: str
     url: str
+    # Service labels (key, value) the agent resolved for this service, sans the
+    # json_api/ namespace prefix (added when the ServiceLabel is emitted).
+    service_labels: tuple[tuple[str, str], ...] = ()
 
 
 @dataclass(frozen=True)
 class Section:
     error: str | None
     items: Mapping[str, Item]
+    # Host labels (key -> value) aggregated across all results on this host,
+    # last value wins per key. Emitted by the section's host_label_function.
+    host_labels: Mapping[str, str] = field(default_factory=dict)
 
 
 def _coerce_levels(raw: object) -> _Levels:
@@ -139,6 +169,29 @@ def _coerce_calc(raw: object) -> str | None:
     return None
 
 
+def _service_labels(raw: object) -> tuple[tuple[str, str], ...]:
+    """The (key, value) service labels the agent resolved for one result.
+
+    Each entry is ``{"key", "value"}`` with string key/value; anything else is
+    ignored defensively.
+    """
+    out: list[tuple[str, str]] = []
+    for label in raw if isinstance(raw, list) else []:
+        if not isinstance(label, dict):
+            continue
+        key, value = label.get("key"), label.get("value")
+        if isinstance(key, str) and key and isinstance(value, str):
+            out.append((key, value))
+    return tuple(out)
+
+
+def _coerce_host_labels(raw: object) -> dict[str, str]:
+    """The endpoint-level ``{key: value}`` host labels, string-validated."""
+    if not isinstance(raw, dict):
+        return {}
+    return {k: v for k, v in raw.items() if isinstance(k, str) and k and isinstance(v, str)}
+
+
 def parse_json_api(string_table: StringTable) -> Section | None:
     if not string_table:
         return None
@@ -162,10 +215,27 @@ def parse_json_api(string_table: StringTable) -> Section | None:
             match=_coerce_match(result.get("match"), result.get("expected")),
             calc=_coerce_calc(result.get("calc")),
             metric_name=_metric_name(result.get("unit")),
+            render_func=_render_func(result.get("unit")),
             path=result.get("path", ""),
             url=result.get("url", ""),
+            service_labels=_service_labels(result.get("labels")),
         )
-    return Section(error=payload.get("error"), items=items)
+    return Section(
+        error=payload.get("error"),
+        items=items,
+        host_labels=_coerce_host_labels(payload.get("host_labels")),
+    )
+
+
+def host_label_json_api(section: Section) -> HostLabelGenerator:
+    """Emit the host labels the agent resolved (namespaced, e.g. json_api/env).
+
+    Host-scope labels are configured per extraction but attached to the host, so
+    they are aggregated across every endpoint/extraction into section.host_labels
+    (last value wins per key) before being yielded here.
+    """
+    for key, value in section.host_labels.items():
+        yield HostLabel(f"{_LABEL_NS}{key}", value)
 
 
 def discover_json_api(section: Section) -> DiscoveryResult:
@@ -184,7 +254,10 @@ def discover_json_api(section: Section) -> DiscoveryResult:
             params["levels_lower"] = entry.levels_lower
         if entry.match is not None:
             params["match"] = entry.match
-        yield Service(item=name, parameters=params)
+        # Service labels the agent resolved for this service, namespaced. Attached
+        # at discovery, so they update when the service is re-discovered.
+        labels = [ServiceLabel(f"{_LABEL_NS}{key}", value) for key, value in entry.service_labels]
+        yield Service(item=name, parameters=params, labels=labels)
 
 
 def _render_value(value: object) -> str:
@@ -352,6 +425,7 @@ def _value_results(
             levels_lower=levels_lower,
             metric_name=entry.metric_name,
             label="Value",
+            render_func=entry.render_func,
         )
         return
 
@@ -386,11 +460,14 @@ def _value_results(
         )
         return
 
-    # No levels, no match: surface the value, add a metric if numeric. When a
-    # calculation transformed the number, show the transformed value (what the
-    # metric records), not the raw JSON.
+    # No levels, no match: surface the value, add a metric if numeric. A unit's
+    # render func formats it like the graph (bytes -> "1.50 MiB"); otherwise show
+    # the transformed number when a calculation ran, else the raw JSON value.
     if number is not None:
-        shown = _fmt_number(number) if entry.calc else _render_value(entry.value)
+        if entry.render_func is not None:
+            shown = entry.render_func(number)
+        else:
+            shown = _fmt_number(number) if entry.calc else _render_value(entry.value)
         yield Result(state=State.OK, summary=f"Value: {shown}")
         yield Metric(entry.metric_name, number)
     else:
@@ -429,6 +506,7 @@ def check_json_api(item: str, params: Mapping[str, object], section: Section) ->
 agent_section_json_api = AgentSection(
     name="json_api",
     parse_function=parse_json_api,
+    host_label_function=host_label_json_api,
 )
 
 check_plugin_json_api = CheckPlugin(

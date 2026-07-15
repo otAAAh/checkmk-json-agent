@@ -259,6 +259,16 @@ def build_explorer() -> Path | None:
     web_files = _web_files()
     if not web_files:
         return None
+    # web/ also holds committed, always-present assets (vue-eval.html), so a
+    # checkout with no built frontend still yields web_files. Guard on the built
+    # wizard's manifest explicitly: without it the Explorer page crashes the GUI
+    # with FileNotFoundError, so fail loudly here rather than ship that package.
+    wizard_manifest = WEB_BASE / "htdocs" / "json_api" / "wizard" / ".vite" / "manifest.json"
+    if not wizard_manifest.is_file():
+        raise SystemExit(
+            f"Wizard bundle not built: {wizard_manifest.relative_to(REPO)} is missing. "
+            "Run 'make frontend' before packaging the Explorer."
+        )
     gui_files = _gui_files()
 
     version = project["version"]
