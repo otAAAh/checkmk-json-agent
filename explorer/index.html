@@ -162,7 +162,7 @@ function makeEndpoint(withSample) {
     url: "", method: "GET", body: "",
     headers: [],                 // [{name, value}]
     auth: { type: "none", username: "", pwid: "" },  // none | login | token
-    verify_cert: true, follow_redirects: true, timeout: "",
+    verify_cert: true, follow_redirects: true, timeout: "", accept_status: "",
     json: withSample ? JSON.stringify(SAMPLE, null, 2) : "",
     parsedRoot: null, parseErr: "",
     extractions: [],
@@ -315,6 +315,7 @@ function renderConn() {
      <button class="ghost" id="c-addheader" style="margin-bottom:10px;">+ header</button>
      <div class="grid2">
        <label>Timeout (s)</label><input type="text" id="c-timeout" value="${escAttr(e.timeout)}" placeholder="30">
+       <label>Accept status codes</label><input type="text" id="c-accept" value="${escAttr(e.accept_status)}" placeholder="e.g. 503, 202">
      </div>
      <div class="toggles">
        <label><input type="checkbox" id="c-verify" ${e.verify_cert ? "checked" : ""}> Verify TLS certificate</label>
@@ -328,6 +329,7 @@ function renderConn() {
   const bind = (id, fn) => { const el = $(id); if (el) el.oninput = fn; };
   bind("c-url", () => { e.url = $("c-url").value; renderTabs(); renderOutputs(); });
   bind("c-timeout", () => { e.timeout = $("c-timeout").value; renderOutputs(); });
+  bind("c-accept", () => { e.accept_status = $("c-accept").value; renderOutputs(); });
   bind("c-user", () => { e.auth.username = $("c-user").value; renderOutputs(); });
   bind("c-pwid", () => { e.auth.pwid = $("c-pwid").value; renderOutputs(); });
   if ($("c-body")) $("c-body").oninput = () => { e.body = $("c-body").value; renderOutputs(); };
@@ -598,6 +600,17 @@ function pyAuth(auth) {
 
 function anyAuth() { return state.endpoints.some(e => e.auth.type !== "none"); }
 
+// Parse the "accept status codes" text field into a de-duplicated int array,
+// mirroring the ruleset's List(Integer) and the agent's _accepted_statuses.
+function parseStatuses(s) {
+  const out = [];
+  for (const part of String(s || "").split(",")) {
+    const n = parseInt(part.trim(), 10);
+    if (Number.isInteger(n) && !out.includes(n)) out.push(n);
+  }
+  return out;
+}
+
 function pyEndpoint(e, indent) {
   const i = " ".repeat(indent);
   const ei = " ".repeat(indent + 4);
@@ -613,6 +626,8 @@ function pyEndpoint(e, indent) {
   lines.push(`${i}'follow_redirects': ${e.follow_redirects ? "True" : "False"},`);
   const t = parseFloat(e.timeout);
   if (!Number.isNaN(t)) lines.push(`${i}'timeout': ${floatPy(t)},`);
+  const acc = parseStatuses(e.accept_status);
+  if (acc.length) lines.push(`${i}'accept_status': [${acc.join(", ")}],`);
   const exLines = extractionObjs(e).map(o => `${ei}${pyExtraction(o)},`).join("\n");
   lines.push(`${i}'extractions': [` + (exLines ? `\n${exLines}\n${i}]` : "]") + ",");
   return lines.join("\n");
@@ -635,6 +650,7 @@ function endpointCliObj(e) {
     verify_cert: !!e.verify_cert,
     follow_redirects: !!e.follow_redirects,
     timeout: Number.isNaN(parseFloat(e.timeout)) ? null : parseFloat(e.timeout),
+    accept_status: parseStatuses(e.accept_status),
     auth: e.auth.type === "none" ? null : (e.auth.type === "login" ? "auth_login" : "auth_token"),
     extractions: extractionObjs(e),
   };
