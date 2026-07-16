@@ -247,6 +247,33 @@ def _accepted_statuses(endpoint: dict) -> set[int]:
     return {code for code in endpoint.get("accept_status") or [] if isinstance(code, int)}
 
 
+def _verify_arg(endpoint: dict) -> bool | str:
+    """The ``verify`` value for requests: the configured flag, or a CA-bundle path.
+
+    ``verify_cert`` is the operator's explicit on/off toggle (off is the
+    documented, insecure opt-out; see the ruleset help). A custom CA bundle lets
+    a private-CA endpoint be verified without turning verification off, so it
+    only applies when verification is on. The disabled value is returned
+    straight from the config rather than as a literal, so this stays a single
+    source of truth for the toggle.
+    """
+    verify = endpoint.get("verify_cert", True)
+    ca_bundle = endpoint.get("ca_bundle")
+    if verify and ca_bundle:
+        return ca_bundle
+    return verify
+
+
+def _client_cert(endpoint: dict) -> str | tuple[str, str] | None:
+    """The ``cert`` value for requests (mutual TLS): None, certfile, or
+    (certfile, keyfile) when the key lives in a separate file."""
+    cert = endpoint.get("client_cert")
+    if not isinstance(cert, dict) or not cert.get("cert"):
+        return None
+    key = cert.get("key")
+    return (cert["cert"], key) if key else cert["cert"]
+
+
 def _fetch(
     endpoint: dict, secret: str | None, debug: bool = False
 ) -> tuple[object | None, str | None]:
@@ -270,7 +297,8 @@ def _fetch(
             endpoint["url"],
             data=body,
             headers=headers,
-            verify=endpoint.get("verify_cert", True),
+            verify=_verify_arg(endpoint),
+            cert=_client_cert(endpoint),
             allow_redirects=allow_redirects,
             timeout=timeout if timeout is not None else 30.0,
             stream=True,  # so _read_capped can bound the buffered body

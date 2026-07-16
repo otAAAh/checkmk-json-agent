@@ -705,3 +705,37 @@ def test_apply_proxy_absent_leaves_defaults(agent):
     session, _headers = agent._build_session({"url": "http://x"}, None)
     assert session.trust_env is True
     assert session.proxies == {}
+
+
+def test_verify_arg(agent):
+    assert agent._verify_arg({}) is True
+    assert agent._verify_arg({"verify_cert": True}) is True
+    assert agent._verify_arg({"verify_cert": False}) is False
+    # A CA bundle is used only when verification is on.
+    assert agent._verify_arg({"verify_cert": True, "ca_bundle": "/ca.pem"}) == "/ca.pem"
+    assert agent._verify_arg({"verify_cert": False, "ca_bundle": "/ca.pem"}) is False
+
+
+def test_client_cert(agent):
+    assert agent._client_cert({}) is None
+    assert agent._client_cert({"client_cert": {}}) is None
+    assert agent._client_cert({"client_cert": {"cert": "/c.pem"}}) == "/c.pem"
+    assert agent._client_cert({"client_cert": {"cert": "/c.pem", "key": "/k.pem"}}) == (
+        "/c.pem",
+        "/k.pem",
+    )
+
+
+def test_fetch_passes_verify_and_cert(agent, monkeypatch):
+    captured = _capture_request(agent, monkeypatch)
+    agent._fetch(
+        {
+            "url": "http://x",
+            "verify_cert": True,
+            "ca_bundle": "/ca.pem",
+            "client_cert": {"cert": "/c.pem", "key": "/k.pem"},
+        },
+        None,
+    )
+    assert captured["verify"] == "/ca.pem"
+    assert captured["cert"] == ("/c.pem", "/k.pem")

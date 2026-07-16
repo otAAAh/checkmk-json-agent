@@ -51,7 +51,9 @@ Targets **Checkmk 2.4+** and the current stable plugin APIs
   (with a configurable state when it does not, default CRIT), or map the value
   to a state by matching it against separate OK / WARN / CRIT regexes (tried in
   that order, first full match wins; configurable state when nothing matches)
-- TLS verification on by default (with an explicit opt-out)
+- TLS verification on by default (with an explicit opt-out); optionally a
+  **custom CA bundle** (to trust a private CA) and a **client certificate**
+  for mutual TLS
 - **Accept non-2xx status codes**: by default only 2xx is read, but you can
   opt extra codes in per endpoint — e.g. accept `503` to read a health
   endpoint that reports its problems with a 503 and a JSON body
@@ -96,6 +98,8 @@ Each endpoint has:
 | **Additional request headers** | Name/value pairs; macros are resolved in the values |
 | **Authentication** | None, basic, or bearer token |
 | **Verify the TLS certificate** | On by default |
+| **Custom CA bundle file** | Optional; path on the Checkmk server to a PEM file with the CA(s) to verify the server against — trust a private CA without disabling verification. Ignored when verification is off |
+| **Client certificate (mutual TLS)** | Optional; paths on the Checkmk server to the client certificate (PEM) and, if separate, the private key. The key must be unencrypted |
 | **Follow HTTP redirects** | On by default; turn off to harden against redirect-based SSRF |
 | **Request timeout (seconds)** | Optional; defaults to 30 |
 | **Additional accepted HTTP status codes** | Optional; by default only 2xx responses are read (any other status → UNKNOWN). List extra codes (e.g. `503`) to parse and extract their body too. 2xx is always accepted |

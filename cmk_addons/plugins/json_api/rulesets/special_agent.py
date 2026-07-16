@@ -414,6 +414,55 @@ def _endpoint() -> Dictionary:
                     prefill=DefaultValue(True),
                 ),
             ),
+            "ca_bundle": DictElement(
+                required=False,
+                parameter_form=String(
+                    title=Title("Custom CA bundle file"),
+                    help_text=Help(
+                        "Path on the Checkmk server to a PEM file holding the CA "
+                        "certificate(s) to verify the server's certificate against. "
+                        "Use this to trust an internal or private CA without turning "
+                        "verification off. Ignored when TLS verification is disabled."
+                    ),
+                    custom_validate=(validators.LengthInRange(min_value=1),),
+                ),
+            ),
+            "client_cert": DictElement(
+                required=False,
+                parameter_form=Dictionary(
+                    title=Title("Client certificate (mutual TLS)"),
+                    help_text=Help(
+                        "Present a client certificate to the server (mutual TLS). "
+                        "The files must exist on the Checkmk server. The private "
+                        "key must be unencrypted."
+                    ),
+                    elements={
+                        "cert": DictElement(
+                            required=True,
+                            parameter_form=String(
+                                title=Title("Client certificate file"),
+                                help_text=Help(
+                                    "Path to the client certificate (PEM). If the "
+                                    "file also contains the private key, leave the "
+                                    "key field empty."
+                                ),
+                                custom_validate=(validators.LengthInRange(min_value=1),),
+                            ),
+                        ),
+                        "key": DictElement(
+                            required=False,
+                            parameter_form=String(
+                                title=Title("Private key file"),
+                                help_text=Help(
+                                    "Path to the client private key (PEM), if it is "
+                                    "not bundled with the certificate."
+                                ),
+                                custom_validate=(validators.LengthInRange(min_value=1),),
+                            ),
+                        ),
+                    },
+                ),
+            ),
             "follow_redirects": DictElement(
                 required=True,
                 parameter_form=BooleanChoice(
