@@ -40,6 +40,10 @@ Targets **Checkmk 2.4+** and the current stable plugin APIs
   a single "how many" service (queue length, number of unhealthy nodes, ...).
   The count is a number, so a unit, WARN/CRIT levels, the transform and a metric
   all apply to it; a path that is not an array or object becomes UNKNOWN
+- **Filter elements by a condition**: restrict a `[*]` wildcard (or `count`) to
+  the elements whose sub-field matches — e.g. one service per node whose
+  `status` is *not* `ok`, or count only the pods that aren't `Running`
+  (operators: equals / not-equals / regex / not-regex)
 - **Transform the numeric value**: an optional arithmetic expression (using the
   variable `value`) applied to a numeric value before levels and the metric —
   e.g. `value / 1024 / 1024` for bytes→MiB or `(value - 32) * 5 / 9` for °F→°C;
@@ -120,6 +124,7 @@ Each **field to monitor** has:
 
 Each **endpoint** also has an optional **Host labels** list: fields resolved from the response root and attached to the monitored *host* (e.g. `version`, `cluster.region`) as `json_api/<key>` — host-wide, needing no service. A path may contain a `[*]` wildcard (e.g. `components[*]`) to emit **one label per element**, keyed `json_api/<key>/<element>` (unique keys), with the value taken from an optional per-element **value field** (default `true`, i.e. set-membership tags). In the wizard, the JSON picker's **`+ host label`** button adds these.
 | **Count the number of elements at this path** | Optional: when the path points at an array or object, monitor its number of elements (array length / object keys) instead of the value; the count is a number, so unit, levels, transform and metric all apply. A path that is not an array or object becomes UNKNOWN |
+| **Only elements matching a condition** | Optional: for a `[*]` wildcard or `count`, keep only elements whose sub-field matches (path + operator equals/not-equals/regex/not-regex + value). Resolved within each element; an element missing the field is dropped. No effect without a wildcard or count |
 | **Unit** | Optional: `count` / `bytes` / `seconds` / `percent` — renders the value in the summary/details *and* the metric and graph with that unit (numeric values only) |
 | **Transform the numeric value** | Optional arithmetic expression on the variable `value` (e.g. `value / 1024 / 1024`), applied to a numeric value before levels and the metric; only numbers, parentheses and `+ - * /` are allowed |
 | **Upper / lower levels** | WARN/CRIT for numeric values |

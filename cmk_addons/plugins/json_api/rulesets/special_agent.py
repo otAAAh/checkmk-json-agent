@@ -303,6 +303,57 @@ def _extraction() -> Dictionary:
                     prefill=DefaultValue(False),
                 ),
             ),
+            "filter": DictElement(
+                required=False,
+                parameter_form=Dictionary(
+                    title=Title("Only elements matching a condition"),
+                    help_text=Help(
+                        "For a '[*]' wildcard or a 'count' path: keep only the "
+                        "elements whose sub-field matches this condition - e.g. one "
+                        "service per node whose 'status' is not 'ok', or count only "
+                        "the pods that are not 'Running'. The field path is resolved "
+                        "within each element; an element whose field is missing or "
+                        "is not a scalar is dropped. Without a '[*]' wildcard or "
+                        "'count' this has no effect."
+                    ),
+                    elements={
+                        "path": DictElement(
+                            required=True,
+                            parameter_form=String(
+                                title=Title("Field path (within each element)"),
+                                help_text=Help(
+                                    "Resolved within each element, e.g. 'status' or "
+                                    "'metadata.phase'."
+                                ),
+                                custom_validate=(validators.LengthInRange(min_value=1),),
+                            ),
+                        ),
+                        "op": DictElement(
+                            required=True,
+                            parameter_form=SingleChoice(
+                                title=Title("Condition"),
+                                elements=[
+                                    SingleChoiceElement("equals", Title("equals")),
+                                    SingleChoiceElement("not_equals", Title("does not equal")),
+                                    SingleChoiceElement("regex", Title("matches regex")),
+                                    SingleChoiceElement("not_regex", Title("does not match regex")),
+                                ],
+                                prefill=DefaultValue("not_equals"),
+                            ),
+                        ),
+                        "value": DictElement(
+                            required=True,
+                            parameter_form=String(
+                                title=Title("Comparison value / pattern"),
+                                help_text=Help(
+                                    "The value to compare against, or the regular "
+                                    "expression for the regex conditions."
+                                ),
+                            ),
+                        ),
+                    },
+                ),
+            ),
             "unit": DictElement(
                 required=False,
                 parameter_form=SingleChoice(

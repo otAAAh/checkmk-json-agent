@@ -52,10 +52,20 @@ class HostLabelSpec(BaseModel, frozen=True):
     value_field: str | None = None
 
 
+class FilterSpec(BaseModel, frozen=True):
+    # Restrict a '[*]'/count extraction to elements whose sub-path matches.
+    path: str
+    op: Literal["equals", "not_equals", "regex", "not_regex"] = "equals"
+    value: str = ""
+
+
 class Extraction(BaseModel, frozen=True):
     path: str
     service: str
     label_path: str | None = None
+    # Keep only wildcard/count elements matching this predicate (opaque to the
+    # server-side call; the agent applies it). Serialized via model_dump below.
+    filter: FilterSpec | None = None
     unit: str | None = None
     # Fields attached as SERVICE labels on this service (resolved per '[*]'
     # element by the agent). Host-wide labels live on the endpoint (host_labels).
