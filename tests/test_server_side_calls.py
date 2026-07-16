@@ -389,3 +389,67 @@ def test_accept_status_defaults_empty(ssc):
     )
     (endpoint,) = _endpoints(ssc, args)
     assert endpoint["accept_status"] == []
+
+
+def test_proxy_url_serialized(ssc):
+    from cmk.server_side_calls.v1 import URLProxy
+
+    args = _command_args(
+        ssc,
+        {
+            "endpoints": [
+                {
+                    "url": "https://example.com/health",
+                    "method": "GET",
+                    "verify_cert": True,
+                    "proxy": URLProxy(url="http://proxy:3128"),
+                    "extractions": [{"path": "status", "service": "Health"}],
+                }
+            ]
+        },
+    )
+    (endpoint,) = _endpoints(ssc, args)
+    assert endpoint["proxy"] == {"mode": "url", "url": "http://proxy:3128"}
+
+
+def test_proxy_no_proxy_serialized(ssc):
+    from cmk.server_side_calls.v1 import NoProxy
+
+    args = _command_args(
+        ssc,
+        {
+            "endpoints": [
+                {
+                    "url": "https://example.com/health",
+                    "method": "GET",
+                    "verify_cert": True,
+                    "proxy": NoProxy(),
+                    "extractions": [{"path": "status", "service": "Health"}],
+                }
+            ]
+        },
+    )
+    (endpoint,) = _endpoints(ssc, args)
+    assert endpoint["proxy"] == {"mode": "no_proxy"}
+
+
+def test_proxy_environment_and_absent_are_null(ssc):
+    from cmk.server_side_calls.v1 import EnvProxy
+
+    for proxy in (EnvProxy(), None):
+        args = _command_args(
+            ssc,
+            {
+                "endpoints": [
+                    {
+                        "url": "https://example.com/health",
+                        "method": "GET",
+                        "verify_cert": True,
+                        "proxy": proxy,
+                        "extractions": [{"path": "status", "service": "Health"}],
+                    }
+                ]
+            },
+        )
+        (endpoint,) = _endpoints(ssc, args)
+        assert endpoint["proxy"] is None

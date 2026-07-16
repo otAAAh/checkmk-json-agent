@@ -163,6 +163,7 @@ function makeEndpoint(withSample) {
     headers: [],                 // [{name, value}]
     auth: { type: "none", username: "", pwid: "" },  // none | login | token
     verify_cert: true, follow_redirects: true, timeout: "", accept_status: "",
+    proxy_mode: "default", proxy_url: "",   // default (env) | url | no_proxy
     json: withSample ? JSON.stringify(SAMPLE, null, 2) : "",
     parsedRoot: null, parseErr: "",
     extractions: [],
@@ -316,6 +317,13 @@ function renderConn() {
      <div class="grid2">
        <label>Timeout (s)</label><input type="text" id="c-timeout" value="${escAttr(e.timeout)}" placeholder="30">
        <label>Accept status codes</label><input type="text" id="c-accept" value="${escAttr(e.accept_status)}" placeholder="e.g. 503, 202">
+       <label>HTTP proxy</label>
+       <select id="c-proxymode">
+         <option value="default" ${e.proxy_mode === "default" ? "selected" : ""}>From environment</option>
+         <option value="url" ${e.proxy_mode === "url" ? "selected" : ""}>Explicit URL</option>
+         <option value="no_proxy" ${e.proxy_mode === "no_proxy" ? "selected" : ""}>No proxy</option>
+       </select>
+       ${e.proxy_mode === "url" ? `<label>Proxy URL</label><input type="text" id="c-proxyurl" value="${escAttr(e.proxy_url)}" placeholder="http://proxy:3128">` : ""}
      </div>
      <div class="toggles">
        <label><input type="checkbox" id="c-verify" ${e.verify_cert ? "checked" : ""}> Verify TLS certificate</label>
@@ -330,6 +338,7 @@ function renderConn() {
   bind("c-url", () => { e.url = $("c-url").value; renderTabs(); renderOutputs(); });
   bind("c-timeout", () => { e.timeout = $("c-timeout").value; renderOutputs(); });
   bind("c-accept", () => { e.accept_status = $("c-accept").value; renderOutputs(); });
+  bind("c-proxyurl", () => { e.proxy_url = $("c-proxyurl").value; renderOutputs(); });
   bind("c-user", () => { e.auth.username = $("c-user").value; renderOutputs(); });
   bind("c-pwid", () => { e.auth.pwid = $("c-pwid").value; renderOutputs(); });
   if ($("c-body")) $("c-body").oninput = () => { e.body = $("c-body").value; renderOutputs(); };
@@ -337,6 +346,7 @@ function renderConn() {
   // structural selects → re-render the form
   $("c-method").onchange = () => { e.method = $("c-method").value; renderConn(); renderOutputs(); };
   $("c-authtype").onchange = () => { e.auth.type = $("c-authtype").value; renderConn(); renderOutputs(); };
+  $("c-proxymode").onchange = () => { e.proxy_mode = $("c-proxymode").value; renderConn(); renderOutputs(); };
   $("c-verify").onchange = () => { e.verify_cert = $("c-verify").checked; renderOutputs(); };
   $("c-redir").onchange = () => { e.follow_redirects = $("c-redir").checked; renderOutputs(); };
   $("c-addheader").onclick = () => { e.headers.push({ name: "", value: "" }); renderConn(); renderOutputs(); };
@@ -611,6 +621,23 @@ function parseStatuses(s) {
   return out;
 }
 
+// The Proxy FormSpec value (rule value_raw). "default" == the environment's
+// proxy, which is also what an absent field does, so it emits nothing.
+function proxyPy(e) {
+  if (e.proxy_mode === "url" && e.proxy_url.trim())
+    return `('cmk_postprocessed', 'explicit_proxy', ${pyStr(e.proxy_url.trim())})`;
+  if (e.proxy_mode === "no_proxy") return "('cmk_postprocessed', 'no_proxy', '')";
+  return null;
+}
+
+// The resolved proxy blob, mirroring the server-side call's _proxy_spec().
+function proxyCli(e) {
+  if (e.proxy_mode === "url" && e.proxy_url.trim())
+    return { mode: "url", url: e.proxy_url.trim() };
+  if (e.proxy_mode === "no_proxy") return { mode: "no_proxy" };
+  return null;
+}
+
 function pyEndpoint(e, indent) {
   const i = " ".repeat(indent);
   const ei = " ".repeat(indent + 4);
@@ -628,6 +655,8 @@ function pyEndpoint(e, indent) {
   if (!Number.isNaN(t)) lines.push(`${i}'timeout': ${floatPy(t)},`);
   const acc = parseStatuses(e.accept_status);
   if (acc.length) lines.push(`${i}'accept_status': [${acc.join(", ")}],`);
+  const px = proxyPy(e);
+  if (px) lines.push(`${i}'proxy': ${px},`);
   const exLines = extractionObjs(e).map(o => `${ei}${pyExtraction(o)},`).join("\n");
   lines.push(`${i}'extractions': [` + (exLines ? `\n${exLines}\n${i}]` : "]") + ",");
   return lines.join("\n");
@@ -651,6 +680,7 @@ function endpointCliObj(e) {
     follow_redirects: !!e.follow_redirects,
     timeout: Number.isNaN(parseFloat(e.timeout)) ? null : parseFloat(e.timeout),
     accept_status: parseStatuses(e.accept_status),
+    proxy: proxyCli(e),
     auth: e.auth.type === "none" ? null : (e.auth.type === "login" ? "auth_login" : "auth_token"),
     extractions: extractionObjs(e),
   };
