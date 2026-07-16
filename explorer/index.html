@@ -164,6 +164,7 @@ function makeEndpoint(withSample) {
     auth: { type: "none", username: "", pwid: "" },  // none | login | token
     verify_cert: true, follow_redirects: true, timeout: "", accept_status: "",
     proxy_mode: "default", proxy_url: "",   // default (env) | url | no_proxy
+    ca_bundle: "", client_cert: "", client_key: "",
     json: withSample ? JSON.stringify(SAMPLE, null, 2) : "",
     parsedRoot: null, parseErr: "",
     extractions: [],
@@ -324,6 +325,9 @@ function renderConn() {
          <option value="no_proxy" ${e.proxy_mode === "no_proxy" ? "selected" : ""}>No proxy</option>
        </select>
        ${e.proxy_mode === "url" ? `<label>Proxy URL</label><input type="text" id="c-proxyurl" value="${escAttr(e.proxy_url)}" placeholder="http://proxy:3128">` : ""}
+       <label>CA bundle file</label><input type="text" id="c-cabundle" value="${escAttr(e.ca_bundle)}" placeholder="/etc/ssl/certs/internal-ca.pem">
+       <label>Client cert file</label><input type="text" id="c-clientcert" value="${escAttr(e.client_cert)}" placeholder="(mutual TLS) /path/client.pem">
+       <label>Client key file</label><input type="text" id="c-clientkey" value="${escAttr(e.client_key)}" placeholder="(optional) /path/client.key">
      </div>
      <div class="toggles">
        <label><input type="checkbox" id="c-verify" ${e.verify_cert ? "checked" : ""}> Verify TLS certificate</label>
@@ -339,6 +343,9 @@ function renderConn() {
   bind("c-timeout", () => { e.timeout = $("c-timeout").value; renderOutputs(); });
   bind("c-accept", () => { e.accept_status = $("c-accept").value; renderOutputs(); });
   bind("c-proxyurl", () => { e.proxy_url = $("c-proxyurl").value; renderOutputs(); });
+  bind("c-cabundle", () => { e.ca_bundle = $("c-cabundle").value; renderOutputs(); });
+  bind("c-clientcert", () => { e.client_cert = $("c-clientcert").value; renderOutputs(); });
+  bind("c-clientkey", () => { e.client_key = $("c-clientkey").value; renderOutputs(); });
   bind("c-user", () => { e.auth.username = $("c-user").value; renderOutputs(); });
   bind("c-pwid", () => { e.auth.pwid = $("c-pwid").value; renderOutputs(); });
   if ($("c-body")) $("c-body").oninput = () => { e.body = $("c-body").value; renderOutputs(); };
@@ -638,6 +645,15 @@ function proxyCli(e) {
   return null;
 }
 
+// The client-cert object ({cert, key?}), or null. Mirrors _client_cert / the
+// server-side call's ClientCert model.
+function clientCertObj(e) {
+  const cert = (e.client_cert || "").trim();
+  if (!cert) return null;
+  const key = (e.client_key || "").trim();
+  return key ? { cert, key } : { cert };
+}
+
 function pyEndpoint(e, indent) {
   const i = " ".repeat(indent);
   const ei = " ".repeat(indent + 4);
@@ -650,6 +666,12 @@ function pyEndpoint(e, indent) {
   const authPy = pyAuth(e.auth);
   if (authPy) lines.push(`${i}'auth': ${authPy},`);
   lines.push(`${i}'verify_cert': ${e.verify_cert ? "True" : "False"},`);
+  if (e.ca_bundle && e.ca_bundle.trim()) lines.push(`${i}'ca_bundle': ${pyStr(e.ca_bundle.trim())},`);
+  const cc = clientCertObj(e);
+  if (cc) {
+    const inner = cc.key ? `'cert': ${pyStr(cc.cert)}, 'key': ${pyStr(cc.key)}` : `'cert': ${pyStr(cc.cert)}`;
+    lines.push(`${i}'client_cert': {${inner}},`);
+  }
   lines.push(`${i}'follow_redirects': ${e.follow_redirects ? "True" : "False"},`);
   const t = parseFloat(e.timeout);
   if (!Number.isNaN(t)) lines.push(`${i}'timeout': ${floatPy(t)},`);
@@ -677,6 +699,8 @@ function endpointCliObj(e) {
     body: (e.body && e.body.trim()) ? e.body : null,
     headers: e.headers.filter(h => h.name).map(h => [h.name, h.value]),
     verify_cert: !!e.verify_cert,
+    ca_bundle: (e.ca_bundle && e.ca_bundle.trim()) ? e.ca_bundle.trim() : null,
+    client_cert: clientCertObj(e),
     follow_redirects: !!e.follow_redirects,
     timeout: Number.isNaN(parseFloat(e.timeout)) ? null : parseFloat(e.timeout),
     accept_status: parseStatuses(e.accept_status),

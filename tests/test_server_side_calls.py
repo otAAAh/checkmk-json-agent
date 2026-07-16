@@ -453,3 +453,46 @@ def test_proxy_environment_and_absent_are_null(ssc):
         )
         (endpoint,) = _endpoints(ssc, args)
         assert endpoint["proxy"] is None
+
+
+def test_tls_ca_and_client_cert_serialized(ssc):
+    args = _command_args(
+        ssc,
+        {
+            "endpoints": [
+                {
+                    "url": "https://example.com/health",
+                    "method": "GET",
+                    "verify_cert": True,
+                    "ca_bundle": "/etc/ssl/internal-ca.pem",
+                    "client_cert": {"cert": "/etc/ssl/client.pem", "key": "/etc/ssl/client.key"},
+                    "extractions": [{"path": "status", "service": "Health"}],
+                }
+            ]
+        },
+    )
+    (endpoint,) = _endpoints(ssc, args)
+    assert endpoint["ca_bundle"] == "/etc/ssl/internal-ca.pem"
+    assert endpoint["client_cert"] == {
+        "cert": "/etc/ssl/client.pem",
+        "key": "/etc/ssl/client.key",
+    }
+
+
+def test_tls_ca_and_client_cert_default_null(ssc):
+    args = _command_args(
+        ssc,
+        {
+            "endpoints": [
+                {
+                    "url": "https://example.com/health",
+                    "method": "GET",
+                    "verify_cert": True,
+                    "extractions": [{"path": "status", "service": "Health"}],
+                }
+            ]
+        },
+    )
+    (endpoint,) = _endpoints(ssc, args)
+    assert endpoint["ca_bundle"] is None
+    assert endpoint["client_cert"] is None

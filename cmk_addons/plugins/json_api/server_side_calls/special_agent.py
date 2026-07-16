@@ -75,12 +75,22 @@ class Extraction(BaseModel, frozen=True):
     count: bool = False
 
 
+class ClientCert(BaseModel, frozen=True):
+    cert: str
+    # Separate private-key file; omit when the key is bundled into the cert file.
+    key: str | None = None
+
+
 class Endpoint(BaseModel, frozen=True):
     url: str
     method: Literal["GET", "POST"] = "GET"
     body: str | None = None
     headers: Sequence[Header] = ()
     verify_cert: bool = True
+    # Path to a custom CA bundle to verify the server against (private CAs).
+    ca_bundle: str | None = None
+    # Client certificate for mutual TLS.
+    client_cert: ClientCert | None = None
     follow_redirects: bool = True
     timeout: float | None = None
     # Extra HTTP status codes to accept beyond 2xx (the agent reads their body).
@@ -131,6 +141,8 @@ def _endpoint_json(endpoint: Endpoint, macros: Mapping[str, str]) -> str:
         "body": replace_macros(endpoint.body, macros) if endpoint.body is not None else None,
         "headers": [[h.name, replace_macros(h.value, macros)] for h in endpoint.headers],
         "verify_cert": endpoint.verify_cert,
+        "ca_bundle": endpoint.ca_bundle,
+        "client_cert": endpoint.client_cert.model_dump() if endpoint.client_cert else None,
         "follow_redirects": endpoint.follow_redirects,
         "timeout": endpoint.timeout,
         "accept_status": list(endpoint.accept_status),
