@@ -739,3 +739,85 @@ def test_fetch_passes_verify_and_cert(agent, monkeypatch):
     )
     assert captured["verify"] == "/ca.pem"
     assert captured["cert"] == ("/c.pem", "/k.pem")
+
+
+def test_matches_filter(agent):
+    el = {"status": "critical", "n": 5}
+    assert agent._matches_filter(el, None) is True  # no filter → keep
+    assert (
+        agent._matches_filter(el, {"path": "status", "op": "equals", "value": "critical"}) is True
+    )
+    assert agent._matches_filter(el, {"path": "status", "op": "equals", "value": "ok"}) is False
+    assert agent._matches_filter(el, {"path": "status", "op": "not_equals", "value": "ok"}) is True
+    assert agent._matches_filter(el, {"path": "status", "op": "regex", "value": "crit.*"}) is True
+    assert agent._matches_filter(el, {"path": "status", "op": "not_regex", "value": "ok"}) is True
+    # A missing field drops the element regardless of the operator.
+    assert (
+        agent._matches_filter(el, {"path": "missing", "op": "not_equals", "value": "ok"}) is False
+    )
+    # Numeric values are compared as their string form.
+    assert agent._matches_filter(el, {"path": "n", "op": "equals", "value": "5"}) is True
+
+
+def test_extract_wildcard_filter_keeps_only_matching(agent):
+    doc = {
+        "nodes": [
+            {"name": "a", "health": "ok"},
+            {"name": "b", "health": "critical"},
+            {"name": "c", "health": "ok"},
+        ]
+    }
+    specs = [
+        {
+            "path": "nodes[*].health",
+            "service": "Node",
+            "label_path": "name",
+            "filter": {"path": "health", "op": "not_equals", "value": "ok"},
+        }
+    ]
+    results = agent._extract(doc, specs, "http://t")
+    assert [(r["service"], r["value"]) for r in results] == [("Node b", "critical")]
+
+
+def test_extract_wildcard_filter_missing_container_still_errors(agent):
+    # The filter must not swallow the "container not found" diagnostic.
+    doc = {"other": 1}
+    specs = [
+        {
+            "path": "nodes[*].health",
+            "service": "Node",
+            "filter": {"path": "health", "op": "not_equals", "value": "ok"},
+        }
+    ]
+    (result,) = agent._extract(doc, specs, "http://t")
+    assert result["found"] is False
+    assert "not found" in result["error"]
+
+
+def test_count_with_filter_array(agent):
+    doc = {"nodes": [{"s": "ok"}, {"s": "bad"}, {"s": "bad"}]}
+    specs = [
+        {
+            "path": "nodes",
+            "service": "Bad nodes",
+            "count": True,
+            "filter": {"path": "s", "op": "equals", "value": "bad"},
+        }
+    ]
+    (result,) = agent._extract(doc, specs, "http://t")
+    assert result["found"] is True
+    assert result["value"] == 2
+
+
+def test_count_with_filter_object_map(agent):
+    doc = {"comps": {"db": {"status": "UP"}, "cache": {"status": "DOWN"}}}
+    specs = [
+        {
+            "path": "comps",
+            "service": "Down comps",
+            "count": True,
+            "filter": {"path": "status", "op": "not_equals", "value": "UP"},
+        }
+    ]
+    (result,) = agent._extract(doc, specs, "http://t")
+    assert result["value"] == 1

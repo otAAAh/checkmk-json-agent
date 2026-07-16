@@ -360,6 +360,42 @@ def _split_wildcards(path: str) -> list[str]:
     return [parts[0]] + [p[1:] if p.startswith(".") else p for p in parts[1:]]
 
 
+def _matches_filter(element: object, filt: object) -> bool:
+    """Whether a wildcard/count element satisfies the configured filter.
+
+    The filter path is resolved WITHIN the element and the resolved scalar is
+    compared per the operator (equals / not_equals / regex / not_regex, the
+    regexes being full matches). A missing path, a non-scalar value, or a bad
+    regex all count as "no match" (the element is dropped), so a filter only
+    ever keeps elements it can positively confirm - including for the negated
+    operators, where an element lacking the field is dropped rather than kept.
+    """
+    if not isinstance(filt, dict) or not filt.get("path"):
+        return True  # no filter configured → keep everything
+    found, value = _resolve_path(element, filt["path"])
+    if not found:
+        return False
+    text = _label_value(value)
+    if text is None:
+        return False
+    target = filt.get("value", "")
+    match filt.get("op"):
+        case "not_equals":
+            return text != target
+        case "regex":
+            try:
+                return re.fullmatch(target, text) is not None
+            except re.error:
+                return False
+        case "not_regex":
+            try:
+                return re.fullmatch(target, text) is None
+            except re.error:
+                return False
+        case _:  # "equals" (the default)
+            return text == target
+
+
 def _result(
     spec: dict,
     service: str,
@@ -374,7 +410,13 @@ def _result(
     # a not-found misconfiguration rather than counting characters of a string.
     if found and spec.get("count"):
         if isinstance(value, (list, dict)):
-            value = len(value)
+            elements = value if isinstance(value, list) else list(value.values())
+            filt = spec.get("filter")
+            if isinstance(filt, dict) and filt.get("path"):
+                # Count only the elements matching the filter (e.g. how many
+                # nodes are NOT 'ok'), not the whole collection.
+                elements = [element for element in elements if _matches_filter(element, filt)]
+            value = len(elements)
         else:
             found = False
             error = "value at path is not a list or object (cannot count elements)"
@@ -468,9 +510,16 @@ def _extract(document: object, extractions: list[dict], url: str) -> list[dict]:
 
         # One or more array wildcards: one service per cartesian-product
         # element, labelled by a ' / '-joined composite (one segment per level).
+        # An optional filter keeps only the elements whose sub-field matches
+        # (e.g. only the nodes that are NOT 'ok'); a not-found leaf is kept so
+        # the "array or object not found" error still surfaces.
+        filt = spec.get("filter")
         for label_segments, found, value, error, element in _expand_wildcards(
             document, segments, spec.get("label_path")
         ):
+            if found and isinstance(filt, dict) and filt.get("path"):
+                if not _matches_filter(element, filt):
+                    continue
             label = " / ".join(label_segments)
             service = f"{spec['service']} {label}" if label else spec["service"]
             labels = _resolve_labels(label_specs, element)

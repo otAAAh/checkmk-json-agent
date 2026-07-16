@@ -56,6 +56,7 @@ def test_basic_command_line(ssc):
             "path": "status",
             "service": "Health",
             "label_path": None,
+            "filter": None,
             "unit": None,
             "labels": [],
             "levels_upper": None,
@@ -496,3 +497,46 @@ def test_tls_ca_and_client_cert_default_null(ssc):
     (endpoint,) = _endpoints(ssc, args)
     assert endpoint["ca_bundle"] is None
     assert endpoint["client_cert"] is None
+
+
+def test_filter_serialized(ssc):
+    args = _command_args(
+        ssc,
+        {
+            "endpoints": [
+                {
+                    "url": "https://example.com/health",
+                    "method": "GET",
+                    "verify_cert": True,
+                    "extractions": [
+                        {
+                            "path": "nodes[*].health",
+                            "service": "Node",
+                            "filter": {"path": "health", "op": "not_equals", "value": "ok"},
+                        }
+                    ],
+                }
+            ]
+        },
+    )
+    (endpoint,) = _endpoints(ssc, args)
+    (extraction,) = endpoint["extractions"]
+    assert extraction["filter"] == {"path": "health", "op": "not_equals", "value": "ok"}
+
+
+def test_filter_defaults_null(ssc):
+    args = _command_args(
+        ssc,
+        {
+            "endpoints": [
+                {
+                    "url": "https://example.com/health",
+                    "method": "GET",
+                    "verify_cert": True,
+                    "extractions": [{"path": "status", "service": "Health"}],
+                }
+            ]
+        },
+    )
+    (endpoint,) = _endpoints(ssc, args)
+    assert endpoint["extractions"][0]["filter"] is None
