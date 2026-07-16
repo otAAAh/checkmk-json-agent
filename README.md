@@ -271,6 +271,23 @@ the rule for you. It is a companion to this agent — install the `json_api`
 package first — and requires **Checkmk 2.5+** (it builds on Checkmk's native
 Quick-Setup UI). See [`docs/exchange-listing-explorer.md`](docs/exchange-listing-explorer.md).
 
+## Troubleshooting
+
+When a service reports "path not found" or an endpoint won't come up, run the
+agent by hand with `--debug`. Copy the program call from `cmk -D <host>` (or
+build one with the Explorer) and add `--debug`:
+
+```sh
+agent_json_api --endpoint '{"url": "https://app/health", "extractions": [...]}' --debug
+```
+
+Diagnostics go to **stderr** (the parsed section still goes to stdout, so the
+run stays valid), and show, per endpoint: the request method/URL, the request
+headers (the `Authorization` value is masked), the HTTP status and body size, a
+preview of the raw response, and how each configured path resolved
+(found/​not-found, one line per resulting service). This makes a wrong path or an
+unexpected response shape obvious without reproducing the request elsewhere.
+
 ## Security notes
 
 - The agent performs **HTTP requests from the Checkmk server** to operator-configured

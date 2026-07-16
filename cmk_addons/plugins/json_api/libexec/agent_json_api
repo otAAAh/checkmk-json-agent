@@ -122,6 +122,13 @@ def parse_arguments(argv: Sequence[str]) -> argparse.Namespace:
         metavar="JSON",
         help="JSON endpoint spec, repeatable. One '--secret_<i>' may accompany each.",
     )
+    parser.add_argument(
+        "--debug",
+        action="store_true",
+        help="Write request/response diagnostics to stderr (never into the section on "
+        "stdout). Intended for running the program by hand - e.g. the call copied out "
+        "of 'cmk -D <host>' - while building or debugging a rule.",
+    )
     for index in range(len(known.endpoint)):
         _add_secret_option(
             parser, f"secret_{index}", f"Secret for endpoint {index}", required=False
@@ -179,12 +186,50 @@ def _build_session(endpoint: dict, secret: str | None) -> tuple[requests.Session
     return session, headers
 
 
-def _fetch(endpoint: dict, secret: str | None) -> tuple[object | None, str | None]:
+# Body preview length in --debug output: enough to see the shape of a response
+# without dumping a whole (possibly huge) document to the terminal.
+_DEBUG_BODY_PREVIEW = 4000
+
+
+def _debug(enabled: bool, message: str) -> None:
+    """Write one diagnostic line to stderr when --debug is set.
+
+    Kept strictly on stderr so a --debug run stays parseable by Checkmk (the
+    section still goes to stdout untouched) while a consultant watches the
+    request/response detail on the terminal.
+    """
+    if enabled:
+        sys.stderr.write(f"[json_api debug] {message}\n")
+
+
+def _redacted_headers(headers: dict[str, str]) -> dict[str, str]:
+    """Headers with the Authorization value masked, for safe debug output.
+
+    Bearer tokens live in the Authorization header; basic-auth credentials live
+    on ``session.auth`` (never in ``headers``), so they cannot leak here.
+    """
+    return {
+        name: ("<redacted>" if name.lower() == "authorization" else value)
+        for name, value in headers.items()
+    }
+
+
+def _fetch(
+    endpoint: dict, secret: str | None, debug: bool = False
+) -> tuple[object | None, str | None]:
     session, headers = _build_session(endpoint, secret)
     timeout = endpoint.get("timeout")
     method = endpoint.get("method", "GET")
     allow_redirects = endpoint.get("follow_redirects", True)
     body = _effective_body(endpoint)
+    if debug:
+        _debug(debug, f"{method} {endpoint.get('url', '?')}")
+        for name, value in _redacted_headers(headers).items():
+            _debug(debug, f"  header {name}: {value}")
+        if session.auth is not None:
+            _debug(debug, "  basic auth: <redacted>")
+        if body is not None:
+            _debug(debug, f"  body: {body}")
     try:
         response = session.request(
             method,
@@ -203,14 +248,23 @@ def _fetch(endpoint: dict, secret: str | None) -> tuple[object | None, str | Non
             # hardening path, where a silent "not valid JSON" would mislead).
             if not allow_redirects and 300 <= response.status_code < 400:
                 location = response.headers.get("Location", "?")
+                _debug(debug, f"  HTTP {response.status_code} redirect to {location} (blocked)")
                 return None, (
                     f"Unexpected {response.status_code} redirect to {location} (redirects disabled)"
                 )
             raw = _read_capped(response, _MAX_RESPONSE_BYTES)
     except _ResponseTooLarge as exc:
+        _debug(debug, f"  {exc}")
         return None, str(exc)
     except requests.exceptions.RequestException as exc:
+        _debug(debug, f"  request failed: {exc}")
         return None, f"Request failed: {exc}"
+
+    if debug:
+        preview = raw[:_DEBUG_BODY_PREVIEW].decode("utf-8", "replace")
+        suffix = " ...(truncated)" if len(raw) > _DEBUG_BODY_PREVIEW else ""
+        _debug(debug, f"  HTTP {response.status_code}, {len(raw)} bytes")
+        _debug(debug, f"  body: {preview}{suffix}")
 
     try:
         return json.loads(raw), None
@@ -501,6 +555,8 @@ def _process_endpoint(
     endpoint contributes no host labels.
     """
     url = endpoint.get("url", "?")
+    debug = getattr(args, "debug", False)
+    _debug(debug, f"endpoint {index}: {url}")
 
     def _fail(error: str) -> tuple[list[dict], dict]:
         results = [
@@ -520,11 +576,21 @@ def _process_endpoint(
         return _fail(f"Secret resolution failed: {exc}")
 
     try:
-        document, error = _fetch(endpoint, secret)
+        document, error = _fetch(endpoint, secret, debug)
         if error is not None:
             return _fail(error)
         results = _extract(document, endpoint.get("extractions", []), url)
         host_labels = _resolve_host_labels(endpoint.get("host_labels", []), document)
+        if debug:
+            for result in results:
+                outcome = (
+                    f"found: {result['value']!r}"
+                    if result["found"]
+                    else f"NOT FOUND: {result['error']}"
+                )
+                _debug(debug, f"  service {result['service']!r} <- {result['path']} -> {outcome}")
+            for key, value in host_labels.items():
+                _debug(debug, f"  host label json_api/{key} = {value}")
         return (results, host_labels)
     except Exception as exc:  # malformed endpoint blob, unexpected extraction error, ...
         return _fail(f"Endpoint processing failed: {exc}")
