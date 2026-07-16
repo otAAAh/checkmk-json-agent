@@ -171,8 +171,30 @@ def _effective_body(endpoint: dict) -> object | None:
     return endpoint.get("body") if endpoint.get("method", "GET") == "POST" else None
 
 
+def _apply_proxy(session: requests.Session, endpoint: dict) -> None:
+    """Configure the session's HTTP proxy from the endpoint's 'proxy' spec.
+
+    The server-side call resolves the rule's Proxy choice into one of:
+      {"mode": "url", "url": "http://proxy:3128"} - route via this proxy
+      {"mode": "no_proxy"}                        - ignore any environment proxy
+      {"mode": "environment"} / absent            - honour HTTP(S)_PROXY from
+                                                    the monitoring host's env
+    An explicit proxy URL takes precedence over the environment; 'no_proxy'
+    turns off requests' env-based proxy lookup for this request.
+    """
+    proxy = endpoint.get("proxy")
+    if not isinstance(proxy, dict):
+        return
+    match proxy.get("mode"):
+        case "url" if proxy.get("url"):
+            session.proxies = {"http": proxy["url"], "https": proxy["url"]}
+        case "no_proxy":
+            session.trust_env = False
+
+
 def _build_session(endpoint: dict, secret: str | None) -> tuple[requests.Session, dict[str, str]]:
     session = requests.Session()
+    _apply_proxy(session, endpoint)
     headers = {name: value for name, value in endpoint.get("headers", [])}
     match endpoint.get("auth"):
         case "auth_login":

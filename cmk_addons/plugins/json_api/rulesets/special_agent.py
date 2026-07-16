@@ -25,10 +25,12 @@ from cmk.rulesets.v1.form_specs import (
     Integer,
     List,
     Password,
+    Proxy,
     SingleChoice,
     SingleChoiceElement,
     String,
     migrate_to_password,
+    migrate_to_proxy,
     validators,
 )
 from cmk.rulesets.v1.rule_specs import SpecialAgent, Topic
@@ -450,6 +452,22 @@ def _endpoint() -> Dictionary:
                         title=Title("Status code"),
                         custom_validate=(validators.NumberInRange(min_value=100, max_value=599),),
                     ),
+                ),
+            ),
+            "proxy": DictElement(
+                required=False,
+                parameter_form=Proxy(
+                    title=Title("HTTP proxy"),
+                    help_text=Help(
+                        "Route this endpoint's request through an HTTP proxy - "
+                        "useful when the Checkmk server reaches the API only via a "
+                        "corporate egress proxy. Choose the environment's "
+                        "HTTP_PROXY / HTTPS_PROXY variables, an explicit proxy URL, "
+                        "or 'no proxy' to bypass any proxy set in the environment. "
+                        "Without this setting the environment's proxy variables are "
+                        "honoured."
+                    ),
+                    migrate=migrate_to_proxy,
                 ),
             ),
             "extractions": DictElement(

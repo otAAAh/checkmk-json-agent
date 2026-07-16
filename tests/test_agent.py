@@ -686,3 +686,22 @@ def test_fetch_non_accepted_status_still_fails(agent, monkeypatch):
     doc, error = agent._fetch({"url": "http://x", "accept_status": [503]}, None)
     assert doc is None
     assert error == "HTTP 500"
+
+
+def test_apply_proxy_url_sets_session_proxies(agent):
+    session, _headers = agent._build_session(
+        {"proxy": {"mode": "url", "url": "http://proxy:3128"}}, None
+    )
+    assert session.proxies == {"http": "http://proxy:3128", "https": "http://proxy:3128"}
+    assert session.trust_env is True
+
+
+def test_apply_proxy_no_proxy_disables_env(agent):
+    session, _headers = agent._build_session({"proxy": {"mode": "no_proxy"}}, None)
+    assert session.trust_env is False
+
+
+def test_apply_proxy_absent_leaves_defaults(agent):
+    session, _headers = agent._build_session({"url": "http://x"}, None)
+    assert session.trust_env is True
+    assert session.proxies == {}

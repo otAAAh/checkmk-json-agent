@@ -12,10 +12,13 @@ from collections.abc import Iterable, Mapping, Sequence
 from typing import Literal
 
 from cmk.server_side_calls.v1 import (
+    EnvProxy,
     HostConfig,
+    NoProxy,
     Secret,
     SpecialAgentCommand,
     SpecialAgentConfig,
+    URLProxy,
     replace_macros,
 )
 from pydantic import BaseModel
@@ -82,6 +85,9 @@ class Endpoint(BaseModel, frozen=True):
     timeout: float | None = None
     # Extra HTTP status codes to accept beyond 2xx (the agent reads their body).
     accept_status: Sequence[int] = ()
+    # HTTP proxy: the framework resolves the rule's Proxy choice into one of
+    # these before parsing (stored_proxy ids are resolved to a URLProxy).
+    proxy: URLProxy | NoProxy | EnvProxy | None = None
     auth: (
         tuple[Literal["auth_login"], AuthLogin] | tuple[Literal["auth_token"], AuthToken] | None
     ) = None
@@ -92,6 +98,21 @@ class Endpoint(BaseModel, frozen=True):
 
 class Params(BaseModel, frozen=True):
     endpoints: Sequence[Endpoint] = ()
+
+
+def _proxy_spec(proxy: URLProxy | NoProxy | EnvProxy | None) -> dict[str, str] | None:
+    """The agent-facing proxy blob, or None to honour the environment.
+
+    'environment' and an absent proxy both mean "use HTTP(S)_PROXY", so they
+    collapse to None; only an explicit URL or 'no proxy' need to be carried.
+    """
+    match proxy:
+        case URLProxy(url=url):
+            return {"mode": "url", "url": url}
+        case NoProxy():
+            return {"mode": "no_proxy"}
+        case _:  # EnvProxy or None
+            return None
 
 
 def _endpoint_json(endpoint: Endpoint, macros: Mapping[str, str]) -> str:
@@ -113,6 +134,7 @@ def _endpoint_json(endpoint: Endpoint, macros: Mapping[str, str]) -> str:
         "follow_redirects": endpoint.follow_redirects,
         "timeout": endpoint.timeout,
         "accept_status": list(endpoint.accept_status),
+        "proxy": _proxy_spec(endpoint.proxy),
         "auth": endpoint.auth[0] if endpoint.auth else None,
         "extractions": [e.model_dump() for e in endpoint.extractions],
         "host_labels": [label.model_dump() for label in endpoint.host_labels],
