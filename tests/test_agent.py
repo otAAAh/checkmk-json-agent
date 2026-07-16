@@ -295,7 +295,7 @@ def test_resolve_host_labels_wildcard_value_field(agent):
 def test_process_endpoint_emits_host_labels(agent, monkeypatch):
     # _process_endpoint returns (results, host_labels); stub the fetch (no HTTP).
     doc = {"version": "9.9", "nodes": [{"health": "ok"}]}
-    monkeypatch.setattr(agent, "_fetch", lambda endpoint, secret: (doc, None))
+    monkeypatch.setattr(agent, "_fetch", lambda endpoint, secret, debug=False: (doc, None))
     import argparse
 
     endpoint = {
@@ -516,7 +516,9 @@ def test_secret_resolution_v1_direct(agent):
 
 def test_main_merges_multiple_endpoints(agent, monkeypatch, capsys):
     docs = {"http://a": {"s": "UP"}, "http://b": {"s": "DOWN"}}
-    monkeypatch.setattr(agent, "_fetch", lambda endpoint, secret: (docs[endpoint["url"]], None))
+    monkeypatch.setattr(
+        agent, "_fetch", lambda endpoint, secret, debug=False: (docs[endpoint["url"]], None)
+    )
     endpoints = [
         {"url": "http://a", "extractions": [{"path": "s", "service": "A"}]},
         {"url": "http://b", "extractions": [{"path": "s", "service": "B"}]},
@@ -533,7 +535,7 @@ def test_main_merges_multiple_endpoints(agent, monkeypatch, capsys):
 
 
 def test_main_isolates_endpoint_failure(agent, monkeypatch, capsys):
-    def fake_fetch(endpoint, secret):
+    def fake_fetch(endpoint, secret, debug=False):
         if endpoint["url"] == "http://down":
             return None, "Request failed: boom"
         return {"s": "UP"}, None
@@ -561,7 +563,7 @@ def test_main_flushes_stdout(agent, monkeypatch):
     import io
     import sys
 
-    monkeypatch.setattr(agent, "_fetch", lambda endpoint, secret: ({"s": "UP"}, None))
+    monkeypatch.setattr(agent, "_fetch", lambda endpoint, secret, debug=False: ({"s": "UP"}, None))
 
     flushed = []
 
@@ -584,3 +586,69 @@ def test_main_flushes_stdout(agent, monkeypatch):
     assert lines[0] == "<<<json_api:sep(0)>>>"
     assert json.loads(lines[1])["results"][0]["service"] == "Up"
     assert flushed, "main() must flush stdout so the section is delivered on a TTY"
+
+
+def test_parse_arguments_debug_flag(agent):
+    # --debug is off by default and toggles on when passed.
+    args = agent.parse_arguments(["--endpoint", '{"url": "http://x"}'])
+    assert args.debug is False
+    args = agent.parse_arguments(["--endpoint", '{"url": "http://x"}', "--debug"])
+    assert args.debug is True
+
+
+def test_redacted_headers_masks_authorization(agent):
+    headers = {"Authorization": "Bearer sekret", "X-Api": "v1"}
+    assert agent._redacted_headers(headers) == {
+        "Authorization": "<redacted>",
+        "X-Api": "v1",
+    }
+
+
+def test_debug_writes_to_stderr_not_stdout(agent):
+    # _debug writes only when enabled, and only to stderr.
+    import io
+
+    err = io.StringIO()
+    import contextlib
+
+    with contextlib.redirect_stderr(err):
+        agent._debug(False, "should not appear")
+        agent._debug(True, "hello")
+    assert err.getvalue() == "[json_api debug] hello\n"
+
+
+def test_fetch_debug_redacts_bearer_and_reports_status(agent, monkeypatch, capsys):
+    _capture_request(agent, monkeypatch, response=_FakeResponse(body=b'{"ok": 1}'))
+    doc, error = agent._fetch({"url": "http://x", "auth": "auth_token"}, "topsecret", debug=True)
+    assert error is None and doc == {"ok": 1}
+    captured = capsys.readouterr()
+    assert captured.out == ""  # nothing leaks onto stdout (the section channel)
+    assert "topsecret" not in captured.err  # the bearer token is never printed
+    assert "header Authorization: <redacted>" in captured.err
+    assert "HTTP 200, 9 bytes" in captured.err
+    assert '"ok": 1' in captured.err  # body preview shown
+
+
+def test_fetch_without_debug_is_silent(agent, monkeypatch, capsys):
+    _capture_request(agent, monkeypatch)
+    agent._fetch({"url": "http://x"}, None)
+    captured = capsys.readouterr()
+    assert captured.out == "" and captured.err == ""
+
+
+def test_main_debug_keeps_stdout_clean(agent, monkeypatch, capsys):
+    # With --debug, diagnostics go to stderr; stdout still carries ONLY the section.
+    monkeypatch.setattr(agent, "_fetch", lambda endpoint, secret, debug=False: ({"s": "UP"}, None))
+    argv = [
+        "--endpoint",
+        json.dumps({"url": "http://x", "extractions": [{"path": "s", "service": "S"}]}),
+        "--debug",
+    ]
+    rc = agent.main(argv)
+    captured = capsys.readouterr()
+    assert rc == 0
+    assert captured.out.startswith("<<<json_api:sep(0)>>>\n")
+    payload = json.loads(captured.out.splitlines()[1])
+    assert payload["results"][0]["service"] == "S"
+    assert "[json_api debug]" in captured.err
+    assert "endpoint 0: http://x" in captured.err
