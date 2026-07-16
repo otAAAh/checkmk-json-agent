@@ -52,6 +52,9 @@ Targets **Checkmk 2.4+** and the current stable plugin APIs
   to a state by matching it against separate OK / WARN / CRIT regexes (tried in
   that order, first full match wins; configurable state when nothing matches)
 - TLS verification on by default (with an explicit opt-out)
+- **Accept non-2xx status codes**: by default only 2xx is read, but you can
+  opt extra codes in per endpoint — e.g. accept `503` to read a health
+  endpoint that reports its problems with a 503 and a JSON body
 - Unreachable endpoints and non-JSON responses surface as UNKNOWN on the
   affected services, not a crash
 
@@ -93,6 +96,7 @@ Each endpoint has:
 | **Verify the TLS certificate** | On by default |
 | **Follow HTTP redirects** | On by default; turn off to harden against redirect-based SSRF |
 | **Request timeout (seconds)** | Optional; defaults to 30 |
+| **Additional accepted HTTP status codes** | Optional; by default only 2xx responses are read (any other status → UNKNOWN). List extra codes (e.g. `503`) to parse and extract their body too. 2xx is always accepted |
 | **Fields to monitor** | One entry per service (see below) |
 
 Service names must be unique across the whole rule; if two endpoints produce the

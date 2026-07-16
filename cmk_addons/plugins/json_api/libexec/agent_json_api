@@ -214,6 +214,17 @@ def _redacted_headers(headers: dict[str, str]) -> dict[str, str]:
     }
 
 
+def _accepted_statuses(endpoint: dict) -> set[int]:
+    """Extra HTTP status codes to accept beyond 2xx, from the endpoint config.
+
+    Some APIs signal state through the status code - e.g. a '/health' endpoint
+    that answers 503 with a JSON body describing what is down. Listing those
+    codes here lets the agent read and extract that body instead of failing the
+    whole endpoint. 2xx is always accepted; this only widens the set.
+    """
+    return {code for code in endpoint.get("accept_status") or [] if isinstance(code, int)}
+
+
 def _fetch(
     endpoint: dict, secret: str | None, debug: bool = False
 ) -> tuple[object | None, str | None]:
@@ -221,6 +232,7 @@ def _fetch(
     timeout = endpoint.get("timeout")
     method = endpoint.get("method", "GET")
     allow_redirects = endpoint.get("follow_redirects", True)
+    accepted = _accepted_statuses(endpoint)
     body = _effective_body(endpoint)
     if debug:
         _debug(debug, f"{method} {endpoint.get('url', '?')}")
@@ -242,16 +254,22 @@ def _fetch(
             stream=True,  # so _read_capped can bound the buffered body
         )
         with response:
-            response.raise_for_status()
+            status = response.status_code
             # With redirects disabled a 3xx is not an error to requests, but it
             # is not the JSON we asked for - report it clearly (this is the SSRF
             # hardening path, where a silent "not valid JSON" would mislead).
-            if not allow_redirects and 300 <= response.status_code < 400:
+            if not allow_redirects and 300 <= status < 400:
                 location = response.headers.get("Location", "?")
                 _debug(debug, f"  HTTP {response.status_code} redirect to {location} (blocked)")
                 return None, (
-                    f"Unexpected {response.status_code} redirect to {location} (redirects disabled)"
+                    f"Unexpected {status} redirect to {location} (redirects disabled)"
                 )
+            # 2xx is always fine; extra codes can be opted in per endpoint so an
+            # API that signals via the status code (e.g. 503 + a JSON health
+            # body) can still be read. Anything else fails, carrying the code.
+            if not (200 <= status < 300 or status in accepted):
+                reason = getattr(response, "reason", "") or ""
+                return None, f"HTTP {status}{f' {reason}' if reason else ''}"
             raw = _read_capped(response, _MAX_RESPONSE_BYTES)
     except _ResponseTooLarge as exc:
         _debug(debug, f"  {exc}")

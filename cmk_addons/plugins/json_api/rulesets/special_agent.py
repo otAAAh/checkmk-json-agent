@@ -22,6 +22,7 @@ from cmk.rulesets.v1.form_specs import (
     Dictionary,
     Float,
     InputHint,
+    Integer,
     List,
     Password,
     SingleChoice,
@@ -431,6 +432,24 @@ def _endpoint() -> Dictionary:
                     help_text=Help("Per-request timeout. Defaults to 30 seconds."),
                     prefill=DefaultValue(30.0),
                     custom_validate=(validators.NumberInRange(min_value=0.1),),
+                ),
+            ),
+            "accept_status": DictElement(
+                required=False,
+                parameter_form=List(
+                    title=Title("Additional accepted HTTP status codes"),
+                    help_text=Help(
+                        "By default only 2xx responses are read; any other status "
+                        "makes the endpoint's services UNKNOWN. Add extra status "
+                        "codes to accept here - for example 503 for a health "
+                        "endpoint that reports its problems with a 503 and a JSON "
+                        "body. The body of an accepted response is parsed and "
+                        "extracted as usual. 2xx is always accepted."
+                    ),
+                    element_template=Integer(
+                        title=Title("Status code"),
+                        custom_validate=(validators.NumberInRange(min_value=100, max_value=599),),
+                    ),
                 ),
             ),
             "extractions": DictElement(

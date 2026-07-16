@@ -352,3 +352,40 @@ def test_login_secret_keeps_username_in_blob(ssc):
     assert endpoint["auth"] == "auth_login"
     assert endpoint["username"] == "user"
     assert "--secret_0-id" in args
+
+
+def test_accept_status_serialized(ssc):
+    args = _command_args(
+        ssc,
+        {
+            "endpoints": [
+                {
+                    "url": "https://example.com/health",
+                    "method": "GET",
+                    "verify_cert": True,
+                    "accept_status": [503, 202],
+                    "extractions": [{"path": "status", "service": "Health"}],
+                }
+            ]
+        },
+    )
+    (endpoint,) = _endpoints(ssc, args)
+    assert endpoint["accept_status"] == [503, 202]
+
+
+def test_accept_status_defaults_empty(ssc):
+    args = _command_args(
+        ssc,
+        {
+            "endpoints": [
+                {
+                    "url": "https://example.com/health",
+                    "method": "GET",
+                    "verify_cert": True,
+                    "extractions": [{"path": "status", "service": "Health"}],
+                }
+            ]
+        },
+    )
+    (endpoint,) = _endpoints(ssc, args)
+    assert endpoint["accept_status"] == []

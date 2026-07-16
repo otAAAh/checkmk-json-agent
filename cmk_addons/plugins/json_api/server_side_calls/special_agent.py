@@ -80,6 +80,8 @@ class Endpoint(BaseModel, frozen=True):
     verify_cert: bool = True
     follow_redirects: bool = True
     timeout: float | None = None
+    # Extra HTTP status codes to accept beyond 2xx (the agent reads their body).
+    accept_status: Sequence[int] = ()
     auth: (
         tuple[Literal["auth_login"], AuthLogin] | tuple[Literal["auth_token"], AuthToken] | None
     ) = None
@@ -110,6 +112,7 @@ def _endpoint_json(endpoint: Endpoint, macros: Mapping[str, str]) -> str:
         "verify_cert": endpoint.verify_cert,
         "follow_redirects": endpoint.follow_redirects,
         "timeout": endpoint.timeout,
+        "accept_status": list(endpoint.accept_status),
         "auth": endpoint.auth[0] if endpoint.auth else None,
         "extractions": [e.model_dump() for e in endpoint.extractions],
         "host_labels": [label.model_dump() for label in endpoint.host_labels],

@@ -652,3 +652,37 @@ def test_main_debug_keeps_stdout_clean(agent, monkeypatch, capsys):
     assert payload["results"][0]["service"] == "S"
     assert "[json_api debug]" in captured.err
     assert "endpoint 0: http://x" in captured.err
+
+
+def test_accepted_statuses_helper(agent):
+    assert agent._accepted_statuses({"accept_status": [503, 202]}) == {503, 202}
+    assert agent._accepted_statuses({}) == set()
+    assert agent._accepted_statuses({"accept_status": None}) == set()
+
+
+def test_fetch_rejects_non_2xx_by_default(agent, monkeypatch):
+    _capture_request(
+        agent, monkeypatch, response=_FakeResponse(body=b'{"status": "DOWN"}', status_code=503)
+    )
+    doc, error = agent._fetch({"url": "http://x"}, None)
+    assert doc is None
+    assert error == "HTTP 503"
+
+
+def test_fetch_reads_body_of_accepted_status(agent, monkeypatch):
+    # A health endpoint that reports DOWN with a 503 + JSON body can be read
+    # when 503 is opted in.
+    _capture_request(
+        agent, monkeypatch, response=_FakeResponse(body=b'{"status": "DOWN"}', status_code=503)
+    )
+    doc, error = agent._fetch({"url": "http://x", "accept_status": [503]}, None)
+    assert error is None
+    assert doc == {"status": "DOWN"}
+
+
+def test_fetch_non_accepted_status_still_fails(agent, monkeypatch):
+    # Opting 503 in does not widen acceptance to other error codes.
+    _capture_request(agent, monkeypatch, response=_FakeResponse(body=b"{}", status_code=500))
+    doc, error = agent._fetch({"url": "http://x", "accept_status": [503]}, None)
+    assert doc is None
+    assert error == "HTTP 500"

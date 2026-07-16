@@ -27,8 +27,11 @@ description:
  added when it is numeric.
 
  The service goes {UNKNOWN} if the configured path is not present in the
- response, or if its endpoint could not be reached or did not return JSON. An
- endpoint failure is confined to that endpoint's own services.
+ response, or if its endpoint could not be reached or did not return JSON. By
+ default only 2xx responses are read; additional HTTP status codes can be
+ accepted per endpoint in the rule (so a health endpoint that answers with a
+ non-2xx status and a JSON body can still be monitored). An endpoint failure is
+ confined to that endpoint's own services.
 
  Configure it in Setup with the rule {Generic JSON API}. The levels and string
  matching a field carries there become the service's defaults; you can override
