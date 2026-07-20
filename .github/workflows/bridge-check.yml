@@ -36,7 +36,14 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Build the Explorer MKP (stdlib only)
+      # Build the Explorer's wizard bundle first (same composite action the
+      # frontend-build and release workflows use). Without it, build_mkp.py has
+      # no wizard to package and build_explorer() hard-fails on the missing
+      # web/htdocs/json_api/wizard/.vite/manifest.json.
+      - name: Build the Explorer frontend
+        uses: ./.github/actions/build-frontend
+
+      - name: Build the Explorer MKP
         id: build
         run: |
           set -euo pipefail
