@@ -3,6 +3,23 @@
 All notable changes to this project, one section per released version.
 Generated from the git history by `scripts/gen_changelog.py`.
 
+## [0.10.0] - 2026-07-21
+
+### Features
+
+- Filter wildcard/count elements by a predicate ([`0dc3b7e`](https://github.com/otAAAh/checkmk-json-agent/commit/0dc3b7e))
+- Custom CA bundle and client certificate (mTLS) ([`9129ec9`](https://github.com/otAAAh/checkmk-json-agent/commit/9129ec9))
+- HTTP proxy support per endpoint ([`2ea0ba0`](https://github.com/otAAAh/checkmk-json-agent/commit/2ea0ba0))
+- Accept configurable non-2xx HTTP status codes ([`ef0ce65`](https://github.com/otAAAh/checkmk-json-agent/commit/ef0ce65))
+- Add --debug flag to the special agent ([`e21fcf2`](https://github.com/otAAAh/checkmk-json-agent/commit/e21fcf2))
+
+### Other
+
+- Build the Explorer frontend before packaging in bridge-check ([`1e19116`](https://github.com/otAAAh/checkmk-json-agent/commit/1e19116))
+- Deps: Bump mypy from 2.2.0 to 2.3.0 ([`3064c93`](https://github.com/otAAAh/checkmk-json-agent/commit/3064c93))
+- Bump the actions group with 3 updates ([`fa05877`](https://github.com/otAAAh/checkmk-json-agent/commit/fa05877))
+- Deps: Bump ruff from 0.15.21 to 0.15.22 ([`7ec301b`](https://github.com/otAAAh/checkmk-json-agent/commit/7ec301b))
+
 ## [0.9.0] - 2026-07-15
 
 ### Features
