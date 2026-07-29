@@ -34,16 +34,18 @@ Targets **Checkmk 2.4+** and the current stable plugin APIs
   labelled by a field you pick (or the index/key); multiple wildcards
   (e.g. `pods[*].containers[*].ready`) expand the cartesian product, with
   composite `<pod> / <container>` labels
-- **Count elements**: instead of monitoring a value, monitor *how many*
-  elements a path holds — array length or number of object keys. Where `[*]`
-  fans a collection out into one service per element, `count` collapses it into
-  a single "how many" service (queue length, number of unhealthy nodes, ...).
-  The count is a number, so a unit, WARN/CRIT levels, the transform and a metric
-  all apply to it; a path that is not an array or object becomes UNKNOWN
-- **Filter elements by a condition**: restrict a `[*]` wildcard (or `count`) to
-  the elements whose sub-field matches — e.g. one service per node whose
-  `status` is *not* `ok`, or count only the pods that aren't `Running`
-  (operators: equals / not-equals / regex / not-regex)
+- **Aggregate a collection into one value**: where `[*]` fans a collection out
+  into one service per element, an aggregation collapses it into a single
+  service — the **number of elements** (queue length, number of unhealthy
+  nodes), or their **sum / average / minimum / maximum**. Point the path at an
+  array or object (`jobs`) or at a `[*]` wildcard over the values
+  (`nodes[*].load`). The result is a number, so a unit, WARN/CRIT levels, the
+  transform and a metric all apply to it; a path that is neither an array nor
+  an object becomes UNKNOWN
+- **Filter elements by a condition**: restrict a `[*]` wildcard (or an
+  aggregation) to the elements whose sub-field matches — e.g. one service per
+  node whose `status` is *not* `ok`, or count only the pods that aren't
+  `Running` (operators: equals / not-equals / regex / not-regex)
 - **Transform the numeric value**: an optional arithmetic expression (using the
   variable `value`) applied to a numeric value before levels and the metric —
   e.g. `value / 1024 / 1024` for bytes→MiB or `(value - 32) * 5 / 9` for °F→°C;
@@ -76,8 +78,8 @@ Download the `.mkp` from the [Releases](https://github.com/otAAAh/checkmk-json-a
 page (or [build it](#building-from-source)), then, as the site user:
 
 ```sh
-mkp add json_api-0.10.0.mkp
-mkp enable json_api 0.10.0
+mkp add json_api-0.11.0.mkp
+mkp enable json_api 0.11.0
 ```
 
 Or upload it in the GUI under **Setup → Extension packages**.
@@ -121,14 +123,14 @@ Each **field to monitor** has:
 | **JSON path** | Dotted path; use `[*]` for array discovery |
 | **Per-element name suffix** | For `[*]`: field within each element, appended to the service name to tell the per-element services apart (defaults to the array index); it does not replace the service name |
 | **Service labels** | Optional: attach Checkmk service labels to *this* service from response fields, each key prefixed with `json_api/`. For a `[*]` path the value is resolved within each element (e.g. `name`), so each per-element service gets its own label; otherwise from the response root. Host-wide facts go in the endpoint's **Host labels** instead. Set at discovery, so pick stable, low-cardinality fields |
-
-Each **endpoint** also has an optional **Host labels** list: fields resolved from the response root and attached to the monitored *host* (e.g. `version`, `cluster.region`) as `json_api/<key>` — host-wide, needing no service. A path may contain a `[*]` wildcard (e.g. `components[*]`) to emit **one label per element**, keyed `json_api/<key>/<element>` (unique keys), with the value taken from an optional per-element **value field** (default `true`, i.e. set-membership tags). In the wizard, the JSON picker's **`+ host label`** button adds these.
-| **Count the number of elements at this path** | Optional: when the path points at an array or object, monitor its number of elements (array length / object keys) instead of the value; the count is a number, so unit, levels, transform and metric all apply. A path that is not an array or object becomes UNKNOWN |
-| **Only elements matching a condition** | Optional: for a `[*]` wildcard or `count`, keep only elements whose sub-field matches (path + operator equals/not-equals/regex/not-regex + value). Resolved within each element; an element missing the field is dropped. No effect without a wildcard or count |
+| **Aggregate a collection into one value** | Optional: `count` (number of elements) / `sum` / `avg` / `min` / `max` over the array or object at the path — or over the values a `[*]` wildcard expands to, which then yields *one* service instead of one per element. The result is a number, so unit, levels, transform and metric all apply. A path that is neither an array nor an object becomes UNKNOWN, as does `avg`/`min`/`max` over no elements (`sum` over none is `0`) |
+| **Only elements matching a condition** | Optional: for a `[*]` wildcard or an aggregation, keep only elements whose sub-field matches (path + operator equals/not-equals/regex/not-regex + value). Resolved within each element; an element missing the field is dropped. No effect without a wildcard or an aggregation |
 | **Unit** | Optional: `count` / `bytes` / `seconds` / `percent` — renders the value in the summary/details *and* the metric and graph with that unit (numeric values only) |
 | **Transform the numeric value** | Optional arithmetic expression on the variable `value` (e.g. `value / 1024 / 1024`), applied to a numeric value before levels and the metric; only numbers, parentheses and `+ - * /` are allowed |
 | **Upper / lower levels** | WARN/CRIT for numeric values |
 | **String matching** | Either *must match a regex* (choose the state when it does **not** match, default CRIT) or *map the value to a state* (separate OK / WARN / CRIT regexes, first full match wins; choose the state when nothing matches, default OK) |
+
+Each **endpoint** also has an optional **Host labels** list: fields resolved from the response root and attached to the monitored *host* (e.g. `version`, `cluster.region`) as `json_api/<key>` — host-wide, needing no service. A path may contain a `[*]` wildcard (e.g. `components[*]`) to emit **one label per element**, keyed `json_api/<key>/<element>` (unique keys), with the value taken from an optional per-element **value field** (default `true`, i.e. set-membership tags). In the wizard, the JSON picker's **`+ host label`** button adds these.
 
 ### Overriding thresholds per folder / host / service
 
@@ -162,9 +164,11 @@ you leave untouched keep the agent-rule defaults.
 - **Value with a state map** → tried against the OK, WARN, then CRIT regexes in
   that order; the first full match sets the state, and if none matches your
   chosen no-match state applies (default OK)
-- **Count enabled on an array or object** → the number of elements is what the
+- **Aggregation on an array or object** → the aggregated number is what the
   levels check, the metric records and the summary shows (after any transform)
-- **Count enabled on a non-array/object path** → UNKNOWN
+- **Aggregation on a non-array/object path** → UNKNOWN; likewise `avg`/`min`/`max`
+  when no element is left to aggregate, and any aggregation over a non-numeric
+  element
 - **Plain value** → shown in the summary (numeric values still get a metric)
 - **Levels set on a non-numeric value** → WARN (so the misconfig is visible)
 - **Path not found** → UNKNOWN
@@ -179,9 +183,10 @@ automatically to must-match with the CRIT no-match default, so their behaviour
 is unchanged.
 
 The service **Details** view additionally shows where the value came from — the
-JSON path, the source endpoint URL, and the match pattern (when set) — which
-makes a misconfigured extraction (wrong path or wrong endpoint) easy to spot.
-This is details-only and never changes the summary line or the service state.
+JSON path, the source endpoint URL, the aggregation (when set), and the match
+pattern — which makes a misconfigured extraction (wrong path or wrong endpoint)
+easy to spot. This is details-only and never changes the summary line or the
+service state.
 
 ## Examples
 
@@ -242,19 +247,28 @@ Produces `JSON Node web-1` (OK) and `JSON Node web-2` (CRIT). If a label value
 repeats across elements, every occurrence is suffixed with its index so two
 elements never collapse into one service.
 
-### Counting elements
+### Aggregating a collection
 
-When you care about *how many*, not each one, enable **Count** instead of a
-`[*]` wildcard. Given `GET /status` → `{"jobs": [{"id": 1}, {"id": 2}, {"id": 3}]}`:
+When you care about the collection as a whole, not each element, pick an
+**aggregation** instead of a `[*]` wildcard. Given `GET /status`:
 
-| Service name | JSON path | Count | Check |
+```json
+{"jobs": [{"id": 1}, {"id": 2}, {"id": 3}],
+ "queues": [{"name": "a", "depth": 3}, {"name": "b", "depth": 12}]}
+```
+
+| Service name | JSON path | Aggregate | Check |
 |---|---|---|---|
-| `Queued jobs` | `jobs` | yes | upper levels `100 / 500` |
+| `Queued jobs` | `jobs` | number of elements | upper levels `100 / 500` |
+| `Total queue depth` | `queues[*].depth` | sum of the values | upper levels `50 / 100` |
+| `Deepest queue` | `queues[*].depth` | largest of the values | upper levels `20 / 40` |
 
-Produces a single service `JSON Queued jobs` that reports `3` and alerts on the
-queue length — where `jobs[*]` would instead have created one service per job.
-The same works on an object (e.g. `components` → number of components). If the
-path resolves to anything other than an array or object, the service is UNKNOWN.
+Produces one service each: `JSON Queued jobs` reports `3`, `JSON Total queue
+depth` reports `15` and `JSON Deepest queue` reports `12` — where `jobs[*]` or
+`queues[*].depth` alone would have created one service per element. Counting
+works on an object too (e.g. `components` → number of components). Add a
+**condition** to aggregate only part of the collection, e.g. *count only the
+nodes whose `status` does not equal `ok`*.
 
 ### Multiple endpoints
 
@@ -413,6 +427,9 @@ cmk_addons/plugins/json_api/
   fall back to the unit-less `json_api_value` metric
 - `label_path` uniqueness is enforced by index-suffixing at runtime, not
   validated at config time (the JSON isn't known then)
+- The in-site wizard's review step does not preview an aggregated value: which
+  aggregation was picked is a hashed ident on the form's wire, so it says what
+  the site will compute instead of showing a number that might differ
 
 ## License
 

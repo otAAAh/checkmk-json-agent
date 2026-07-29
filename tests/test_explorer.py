@@ -87,7 +87,7 @@ def test_ruleset_has_required_keys_to_check():
     # Guard the guard: if the AST parse found nothing, the checks below are
     # vacuous and the whole test is worthless.
     assert _required_keys("_endpoint") >= {"url", "method", "extractions"}
-    assert _required_keys("_extraction") == {"service", "path", "count"}
+    assert _required_keys("_extraction") == {"service", "path"}
 
 
 def test_explorer_value_raw_covers_required_endpoint_keys(rule_value: dict):
@@ -110,3 +110,26 @@ def test_explorer_cli_object_covers_required_endpoint_keys(explorer_output: dict
     cli = explorer_output["cli"][0]
     missing = _required_keys("_endpoint") - set(cli)
     assert not missing, f"Explorer CLI object omits required keys: {missing}"
+
+
+def test_explorer_emits_the_aggregation(rule_value: dict, explorer_output: dict):
+    # The 'count' boolean is gone; the aggregate choice replaces it and must be
+    # emitted in the ruleset's own shape (a bare choice name).
+    by_service = {x["service"]: x for x in rule_value["endpoints"][0]["extractions"]}
+    assert "count" not in by_service["Health"]
+    assert by_service["Node"]["aggregate"] == "avg"
+    # A field without an aggregation must not carry the key at all (it is optional).
+    assert "aggregate" not in by_service["Health"]
+
+    cli = {x["service"]: x for x in explorer_output["cli"][0]["extractions"]}
+    assert cli["Node"]["aggregate"] == "avg"
+
+
+def test_explorer_choices_match_the_ruleset(explorer_output: dict):
+    # Every aggregation the Explorer offers must exist in the ruleset, or it
+    # generates a rule Checkmk rejects.
+    source = (_ROOT / "explorer" / "index.html").read_text()
+    ruleset = _RULESET.read_text()
+    for choice in ("count", "sum", "avg", "min", "max"):
+        assert f'SingleChoiceElement("{choice}"' in ruleset
+        assert f'"{choice}"' in source

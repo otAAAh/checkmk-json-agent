@@ -4,7 +4,9 @@
 
 import json
 
+import pytest
 from cmk.server_side_calls.v1 import HostConfig, IPv4Config, Secret
+from pydantic import ValidationError
 
 
 def _host(macros=None):
@@ -64,6 +66,8 @@ def test_basic_command_line(ssc):
             # The CascadingSingleChoice tuple survives the JSON round-trip as a list.
             "match": ["must_match", {"pattern": "UP"}],
             "calc": None,
+            "aggregate": None,
+            # Superseded by 'aggregate', still passed on for unmigrated rules.
             "count": False,
         }
     ]
@@ -540,3 +544,77 @@ def test_filter_defaults_null(ssc):
     )
     (endpoint,) = _endpoints(ssc, args)
     assert endpoint["extractions"][0]["filter"] is None
+
+
+def test_aggregate_reaches_the_agent(ssc):
+    args = _command_args(
+        ssc,
+        {
+            "endpoints": [
+                {
+                    "url": "https://example.com/health",
+                    "extractions": [
+                        {
+                            "path": "nodes[*].load",
+                            "service": "Load",
+                            "aggregate": "avg",
+                        }
+                    ],
+                }
+            ]
+        },
+    )
+    (endpoint,) = _endpoints(ssc, args)
+    (extraction,) = endpoint["extractions"]
+    assert extraction["aggregate"] == "avg"
+
+
+def test_unmigrated_count_flag_still_reaches_the_agent(ssc):
+    # A rule stored before the aggregate dropdown carries count=True; the ruleset
+    # migrates it only when the rule is next opened in Setup, so it must survive
+    # the trip to the agent (which reads it as aggregate="count").
+    args = _command_args(
+        ssc,
+        {
+            "endpoints": [
+                {
+                    "url": "https://x/health",
+                    "extractions": [{"path": "jobs", "service": "Jobs", "count": True}],
+                }
+            ]
+        },
+    )
+    (endpoint,) = _endpoints(ssc, args)
+    assert endpoint["extractions"][0]["count"] is True
+
+
+@pytest.mark.parametrize("aggregate", ["count", "sum", "avg", "min", "max"])
+def test_every_aggregate_choice_validates(ssc, aggregate):
+    args = _command_args(
+        ssc,
+        {
+            "endpoints": [
+                {
+                    "url": "https://x/health",
+                    "extractions": [{"path": "v", "service": "V", "aggregate": aggregate}],
+                }
+            ]
+        },
+    )
+    (endpoint,) = _endpoints(ssc, args)
+    assert endpoint["extractions"][0]["aggregate"] == aggregate
+
+
+def test_unknown_aggregate_is_rejected(ssc):
+    # The Literal on the model is what keeps a typo out of the agent blob.
+    with pytest.raises(ValidationError):
+        ssc.Params.model_validate(
+            {
+                "endpoints": [
+                    {
+                        "url": "https://x/health",
+                        "extractions": [{"path": "v", "service": "V", "aggregate": "median"}],
+                    }
+                ]
+            }
+        )

@@ -23,6 +23,7 @@ The section payload looks like:
 
 import argparse
 import json
+import math
 import re
 import sys
 from collections.abc import Sequence
@@ -396,6 +397,139 @@ def _matches_filter(element: object, filt: object) -> bool:
             return text == target
 
 
+def _aggregate_mode(spec: dict) -> str | None:
+    """The configured aggregation ('count'/'sum'/'avg'/'min'/'max'), or None.
+
+    ``count: true`` is the superseded boolean form of ``aggregate: "count"``: a
+    rule saved before the aggregate dropdown still carries it (the ruleset
+    migrates it only when the rule is next opened in Setup), and so may a
+    hand-written '--endpoint' blob. Reading it here keeps both working.
+    """
+    mode = spec.get("aggregate")
+    if isinstance(mode, str) and mode:
+        return mode
+    return "count" if spec.get("count") else None
+
+
+def _as_float(value: object) -> float | None:
+    """A JSON value as a finite float, or None when it is not numeric.
+
+    Numeric strings are accepted (APIs do quote numbers); booleans are not (they
+    are states, and summing them is never what was meant).
+    """
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        number = float(value)
+    elif isinstance(value, str):
+        try:
+            number = float(value)
+        except ValueError:
+            return None
+    else:
+        return None
+    return number if math.isfinite(number) else None
+
+
+_AGGREGATE_NOT_NUMERIC = (
+    "element is not numeric (use a '[*]' path to aggregate a field inside each element)"
+)
+
+
+def _aggregate_numbers(mode: str, values: list[object]) -> tuple[bool, object, str]:
+    """Reduce ``values`` with ``mode`` into ``(found, value, error)``.
+
+    Every value must be numeric; one that is not fails the whole aggregation
+    rather than being skipped, so a wrong path is visible instead of quietly
+    changing the result. An empty input sums to 0 (a filter that matched nothing
+    legitimately totals zero) but has no average, minimum or maximum.
+    """
+    numbers: list[float] = []
+    for value in values:
+        number = _as_float(value)
+        if number is None:
+            return False, None, _AGGREGATE_NOT_NUMERIC
+        numbers.append(number)
+    if not numbers:
+        if mode == "sum":
+            return True, 0, ""
+        return False, None, "no elements to aggregate"
+    match mode:
+        case "sum":
+            return True, _trim(sum(numbers)), ""
+        case "avg":
+            return True, _trim(sum(numbers) / len(numbers)), ""
+        case "min":
+            return True, _trim(min(numbers)), ""
+        case "max":
+            return True, _trim(max(numbers)), ""
+    return False, None, f"unknown aggregation '{mode}'"
+
+
+def _trim(number: float) -> float | int:
+    """An integral result as an int, so a sum of integers reads as '15', not '15.0'.
+
+    Every value goes through ``_as_float`` to be aggregated, which makes even a
+    sum of plain integers a float; the check renders the value as it arrives, so
+    trimming here is what keeps the service summary looking like the JSON did.
+    """
+    return int(number) if number.is_integer() else number
+
+
+def _aggregate_container(mode: str, container: object, filt: object) -> tuple[bool, object, str]:
+    """Aggregate the elements of the array/object at a wildcard-free path.
+
+    'count' is the number of elements (array length or number of object keys);
+    the numeric functions reduce the elements themselves, so this form fits a
+    collection of numbers - a collection of objects wants a '[*]' path naming the
+    field to aggregate. A scalar has nothing to aggregate and is surfaced as a
+    misconfiguration rather than, say, counting the characters of a string.
+    """
+    pairs = _iter_container(container)
+    if pairs is None:
+        return False, None, "value at path is not a list or object (cannot aggregate)"
+    elements = [element for _default, element in pairs]
+    if isinstance(filt, dict) and filt.get("path"):
+        # Aggregate only the matching elements (e.g. how many nodes are NOT 'ok').
+        elements = [element for element in elements if _matches_filter(element, filt)]
+    if mode == "count":
+        return True, len(elements), ""
+    return _aggregate_numbers(mode, elements)
+
+
+def _aggregate_leaves(
+    mode: str,
+    leaves: list[tuple[list[str], bool, object, str, object]],
+    filt: object,
+) -> tuple[bool, object, str]:
+    """Aggregate the leaves of a '[*]' expansion into one value.
+
+    This is the counterpart of fanning a wildcard out into one service per
+    element: 'nodes[*].load' with 'avg' yields a single service holding the
+    average load instead of one service per node. The filter applies to the
+    element the leaf came from, exactly as it does when fanning out.
+
+    A leaf whose value path is missing is skipped (only the elements that have
+    the field are aggregated), but if NO leaf resolved at all that is reported -
+    a mistyped value path must not read as an empty collection.
+    """
+    # A missing container yields exactly one leaf, with no element behind it.
+    if len(leaves) == 1 and not leaves[0][1] and leaves[0][4] is None:
+        return False, None, leaves[0][3]
+    filtering = isinstance(filt, dict) and bool(filt.get("path"))
+    kept = [
+        (found, value)
+        for _labels, found, value, _error, element in leaves
+        if not filtering or _matches_filter(element, filt)
+    ]
+    if mode == "count":
+        return True, len(kept), ""
+    values = [value for found, value in kept if found]
+    if kept and not values:
+        return False, None, "path not found in any element"
+    return _aggregate_numbers(mode, values)
+
+
 def _result(
     spec: dict,
     service: str,
@@ -405,21 +539,6 @@ def _result(
     url: str,
     labels: list[dict] | None = None,
 ) -> dict:
-    # "Count elements": monitor the length of the list/object at the path instead
-    # of the value itself. A scalar has no length to count, so that is surfaced as
-    # a not-found misconfiguration rather than counting characters of a string.
-    if found and spec.get("count"):
-        if isinstance(value, (list, dict)):
-            elements = value if isinstance(value, list) else list(value.values())
-            filt = spec.get("filter")
-            if isinstance(filt, dict) and filt.get("path"):
-                # Count only the elements matching the filter (e.g. how many
-                # nodes are NOT 'ok'), not the whole collection.
-                elements = [element for element in elements if _matches_filter(element, filt)]
-            value = len(elements)
-        else:
-            found = False
-            error = "value at path is not a list or object (cannot count elements)"
     # Values that are not JSON scalars (dict/list) are reported as strings.
     if found and isinstance(value, (dict, list)):
         value = json.dumps(value)
@@ -435,6 +554,9 @@ def _result(
         "match": spec.get("match"),
         "calc": spec.get("calc"),
         "unit": spec.get("unit"),
+        # Already applied here; carried along only so the check can say so in the
+        # service's Details.
+        "aggregate": _aggregate_mode(spec),
         "labels": labels or [],
     }
 
@@ -498,14 +620,28 @@ def _extract(document: object, extractions: list[dict], url: str) -> list[dict]:
     for spec in extractions:
         label_specs = spec.get("labels") or []
         segments = _split_wildcards(spec["path"])
+        aggregate = _aggregate_mode(spec)
+        filt = spec.get("filter")
         if len(segments) == 1:
             found, value = _resolve_path(document, spec["path"])
+            error = "path not found in response"
+            # Aggregating a wildcard-free path reduces the array/object it holds.
+            if found and aggregate:
+                found, value, error = _aggregate_container(aggregate, value, filt)
             labels = _resolve_labels(label_specs, document)
-            results.append(
-                _result(
-                    spec, spec["service"], found, value, "path not found in response", url, labels
-                )
-            )
+            results.append(_result(spec, spec["service"], found, value, error, url, labels))
+            continue
+
+        leaves = _expand_wildcards(document, segments, spec.get("label_path"))
+
+        # Aggregating a '[*]' path collapses the expansion into ONE service (the
+        # sum/average/... over the elements) instead of fanning it out. Service
+        # labels then have no single element to resolve against, so they come
+        # from the response root.
+        if aggregate:
+            found, value, error = _aggregate_leaves(aggregate, leaves, filt)
+            labels = _resolve_labels(label_specs, document)
+            results.append(_result(spec, spec["service"], found, value, error, url, labels))
             continue
 
         # One or more array wildcards: one service per cartesian-product
@@ -513,10 +649,7 @@ def _extract(document: object, extractions: list[dict], url: str) -> list[dict]:
         # An optional filter keeps only the elements whose sub-field matches
         # (e.g. only the nodes that are NOT 'ok'); a not-found leaf is kept so
         # the "array or object not found" error still surfaces.
-        filt = spec.get("filter")
-        for label_segments, found, value, error, element in _expand_wildcards(
-            document, segments, spec.get("label_path")
-        ):
+        for label_segments, found, value, error, element in leaves:
             if found and isinstance(filt, dict) and filt.get("path"):
                 if not _matches_filter(element, filt):
                     continue

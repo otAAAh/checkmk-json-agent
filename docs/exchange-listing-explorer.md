@@ -22,7 +22,7 @@ This is the optional companion to the **Generic JSON API** package. It adds an i
 
 - 🧭 **Guided, step by step** — choose the target folder and host, define one or more endpoints (URL, method, auth, headers, TLS/redirect options), then pick the fields to monitor.
 - 🔎 **Fetches the real response** — the wizard calls each endpoint from the site and shows you the actual JSON, so you click the fields that exist instead of guessing paths.
-- 🎯 **Point-and-pick fields** — select values by path, set WARN/CRIT thresholds, units, a numeric transform, element counting, or string matching — the same options the agent supports.
+- 🎯 **Point-and-pick fields** — select values by path, set WARN/CRIT thresholds, units, a numeric transform, an aggregation over a collection, or string matching — the same options the agent supports.
 - ✅ **Live preview before you commit** — the review step evaluates every chosen field against the fetched sample and shows the resulting service state, so you catch a wrong path or threshold before the rule exists.
 - 🔐 **Secure by default** — credentials are stored in the Checkmk password store and referenced, never written in clear text; TLS verification stays on.
 - 🚀 **One click to create** — the wizard writes the finished Generic JSON API rule for you.

@@ -172,9 +172,16 @@ def _authentication() -> CascadingSingleChoice:
 
 
 def _migrate_extraction(value: object) -> dict[str, object]:
-    """Carry a pre-'match' extraction (flat ``expected`` regex) into the current
-    ``match`` CascadingSingleChoice shape - ``expected`` becomes the equivalent
-    ``("must_match", <regex>)`` so existing rules keep their behaviour."""
+    """Carry an older extraction shape into the current one.
+
+    Two historical shapes are migrated:
+
+    * the pre-'match' flat ``expected`` regex becomes the equivalent
+      ``("must_match", <regex>)``, so existing rules keep their behaviour;
+    * the boolean ``count`` ("count the elements at this path") becomes the
+      ``"count"`` choice of the richer ``aggregate`` dropdown, which now also
+      offers sum / average / minimum / maximum.
+    """
     if not isinstance(value, dict):
         raise TypeError(f"Unexpected extraction value: {value!r}")
     migrated = dict(value)
@@ -184,9 +191,10 @@ def _migrate_extraction(value: object) -> dict[str, object]:
             # The old flat regex was OK-on-match, CRIT otherwise - keep that
             # exactly by omitting state_no_match (its CRIT default).
             migrated["match"] = ("must_match", {"pattern": expected})
-    # 'count' is required as of the count-elements feature; a rule saved before it
-    # lacks the key, so default it here (off) to satisfy the required element.
-    migrated.setdefault("count", False)
+    if "count" in migrated:
+        counted = migrated.pop("count")
+        if counted and "aggregate" not in migrated:
+            migrated["aggregate"] = "count"
     return migrated
 
 
@@ -285,22 +293,31 @@ def _extraction() -> Dictionary:
                     ),
                 ),
             ),
-            "count": DictElement(
-                # Required (a plain, always-present labelled checkbox like the
-                # TLS/redirect toggles) - a required=False boolean would render as
-                # an unlabelled "enable this option" checkbox, which is confusing.
-                required=True,
-                parameter_form=BooleanChoice(
-                    label=Label("Count the number of elements at this path"),
+            "aggregate": DictElement(
+                required=False,
+                parameter_form=SingleChoice(
+                    title=Title("Aggregate a collection into one value"),
                     help_text=Help(
-                        "When the path points at a JSON array or object, monitor "
-                        "the number of elements it contains instead of the value "
-                        "itself. The count is a number, so a unit, levels, a "
-                        "transform and a metric all apply to it. If the path does "
-                        "not resolve to an array or object, the service becomes "
-                        "UNKNOWN."
+                        "Collapse a collection of elements into a single number "
+                        "instead of monitoring one value (or, with a '[*]' "
+                        "wildcard, one service per element). Point the JSON path "
+                        "either at an array / object (e.g. 'jobs') or at a '[*]' "
+                        "wildcard over the values to aggregate (e.g. "
+                        "'nodes[*].load'). 'Number of elements' just counts them; "
+                        "the other functions need numeric values. The result is a "
+                        "number, so a unit, levels, a transform and a metric all "
+                        "apply to it. Combine it with the condition below to "
+                        "aggregate only the matching elements. A path that holds "
+                        "neither an array nor an object makes the service UNKNOWN."
                     ),
-                    prefill=DefaultValue(False),
+                    elements=[
+                        SingleChoiceElement("count", Title("Number of elements")),
+                        SingleChoiceElement("sum", Title("Sum of the values")),
+                        SingleChoiceElement("avg", Title("Average of the values")),
+                        SingleChoiceElement("min", Title("Smallest of the values")),
+                        SingleChoiceElement("max", Title("Largest of the values")),
+                    ],
+                    prefill=DefaultValue("count"),
                 ),
             ),
             "filter": DictElement(
@@ -308,13 +325,13 @@ def _extraction() -> Dictionary:
                 parameter_form=Dictionary(
                     title=Title("Only elements matching a condition"),
                     help_text=Help(
-                        "For a '[*]' wildcard or a 'count' path: keep only the "
+                        "For a '[*]' wildcard or an aggregated path: keep only the "
                         "elements whose sub-field matches this condition - e.g. one "
                         "service per node whose 'status' is not 'ok', or count only "
                         "the pods that are not 'Running'. The field path is resolved "
                         "within each element; an element whose field is missing or "
-                        "is not a scalar is dropped. Without a '[*]' wildcard or "
-                        "'count' this has no effect."
+                        "is not a scalar is dropped. Without a '[*]' wildcard or an "
+                        "aggregation this has no effect."
                     ),
                     elements={
                         "path": DictElement(

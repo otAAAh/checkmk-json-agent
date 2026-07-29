@@ -91,21 +91,66 @@ def test_migrate_extraction_expected_becomes_must_match(ruleset):
     assert migrated["unit"] == "count"
 
 
-def test_migrate_extraction_leaves_match_untouched_but_adds_count(ruleset):
-    # An already-migrated 'match' rule keeps its match; 'count' (required as of
-    # the count feature) is defaulted in for rules saved before it existed.
+def test_migrate_extraction_leaves_match_untouched(ruleset):
     new = {"service": "S", "path": "p", "match": ("state_map", {"crit": "DOWN"})}
     migrated = ruleset._migrate_extraction(new)
     assert migrated["match"] == ("state_map", {"crit": "DOWN"})
-    assert migrated["count"] is False
 
 
-def test_migrate_extraction_defaults_count(ruleset):
+def test_migrate_extraction_leaves_a_plain_extraction_alone(ruleset):
     plain = {"service": "S", "path": "p"}
-    assert ruleset._migrate_extraction(plain) == {"service": "S", "path": "p", "count": False}
+    assert ruleset._migrate_extraction(plain) == {"service": "S", "path": "p"}
 
 
-def test_migrate_extraction_keeps_existing_count(ruleset):
-    assert (
-        ruleset._migrate_extraction({"service": "S", "path": "p", "count": True})["count"] is True
+def test_migrate_extraction_count_becomes_aggregate(ruleset):
+    # The 'count' boolean is now the 'count' choice of the aggregate dropdown.
+    migrated = ruleset._migrate_extraction({"service": "S", "path": "p", "count": True})
+    assert migrated["aggregate"] == "count"
+    assert "count" not in migrated
+
+
+def test_migrate_extraction_drops_a_disabled_count(ruleset):
+    # count=False was the default for every rule saved while it was required, so
+    # it must not turn into an aggregation.
+    migrated = ruleset._migrate_extraction({"service": "S", "path": "p", "count": False})
+    assert "aggregate" not in migrated
+    assert "count" not in migrated
+
+
+def test_migrate_extraction_keeps_an_explicit_aggregate(ruleset):
+    # A rule that already has an aggregation wins over the legacy boolean.
+    migrated = ruleset._migrate_extraction(
+        {"service": "S", "path": "p", "count": True, "aggregate": "sum"}
     )
+    assert migrated["aggregate"] == "sum"
+
+
+def test_extraction_form_has_the_expected_keys(ruleset):
+    # The 'count' boolean was replaced by the 'aggregate' choice.
+    assert set(ruleset._extraction().elements) == {
+        "service",
+        "path",
+        "label_path",
+        "labels",
+        "aggregate",
+        "filter",
+        "unit",
+        "levels_upper",
+        "levels_lower",
+        "calc",
+        "match",
+    }
+    assert "count" not in ruleset._extraction().elements
+
+
+def test_aggregate_offers_every_function_the_agent_implements(ruleset, agent):
+    choices = {
+        element.name
+        for element in ruleset._extraction().elements["aggregate"].parameter_form.elements
+    }
+    assert choices == {"count", "sum", "avg", "min", "max"}
+    # Every offered function must actually reduce something in the agent.
+    for mode in choices - {"count"}:
+        found, value, error = agent._aggregate_numbers(mode, [1, 2])
+        assert found, f"{mode}: {error}"
+        assert value is not None

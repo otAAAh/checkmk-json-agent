@@ -81,7 +81,13 @@ class Extraction(BaseModel, frozen=True):
     match: object = None
     # Arithmetic expression over 'value', applied to a numeric value by the check.
     calc: str | None = None
-    # Monitor the length of the list/object at the path (resolved by the agent).
+    # Collapse the collection at the path into one number: count / sum / avg /
+    # min / max (resolved by the agent, which has the document).
+    aggregate: Literal["count", "sum", "avg", "min", "max"] | None = None
+    # Superseded by ``aggregate``: the old boolean "count the elements at this
+    # path". A rule saved before the aggregate dropdown still carries it (the
+    # ruleset migrates it only when the rule is next opened in Setup), so it is
+    # passed on and the agent reads it as aggregate="count".
     count: bool = False
 
 
