@@ -91,6 +91,8 @@ class Item:
     render_func: Callable[[float], str] | None
     path: str
     url: str
+    # The aggregation the agent already applied ('count'/'sum'/...), for Details.
+    aggregate: str | None = None
     # Service labels (key, value) the agent resolved for this service, sans the
     # json_api/ namespace prefix (added when the ServiceLabel is emitted).
     service_labels: tuple[tuple[str, str], ...] = ()
@@ -169,6 +171,10 @@ def _coerce_calc(raw: object) -> str | None:
     return None
 
 
+def _coerce_aggregate(raw: object) -> str | None:
+    return raw if isinstance(raw, str) and raw else None
+
+
 def _service_labels(raw: object) -> tuple[tuple[str, str], ...]:
     """The (key, value) service labels the agent resolved for one result.
 
@@ -218,6 +224,7 @@ def parse_json_api(string_table: StringTable) -> Section | None:
             render_func=_render_func(result.get("unit")),
             path=result.get("path", ""),
             url=result.get("url", ""),
+            aggregate=_coerce_aggregate(result.get("aggregate")),
             service_labels=_service_labels(result.get("labels")),
         )
     return Section(
@@ -287,6 +294,15 @@ def _as_number(value: object) -> float | None:
     return number if math.isfinite(number) else None
 
 
+_AGGREGATE_LABEL = {
+    "count": "number of elements",
+    "sum": "sum of the elements",
+    "avg": "average of the elements",
+    "min": "smallest element",
+    "max": "largest element",
+}
+
+
 def _context(entry: Item, match: _Match) -> CheckResult:
     """Details-only lines describing where the value came from.
 
@@ -301,6 +317,8 @@ def _context(entry: Item, match: _Match) -> CheckResult:
         lines.append(f"JSON path: {entry.path}")
     if entry.url:
         lines.append(f"Source: {entry.url}")
+    if entry.aggregate:
+        lines.append(f"Aggregation: {_AGGREGATE_LABEL.get(entry.aggregate, entry.aggregate)}")
     if match is not None:
         kind, cfg = match
         if kind == "must_match" and isinstance(cfg, dict) and isinstance(cfg.get("pattern"), str):

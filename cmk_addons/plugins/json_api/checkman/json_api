@@ -13,21 +13,26 @@ description:
  expression on the variable {value}, e.g. {value / 1024 / 1024}) that is applied
  to the numeric value first, so the levels, the metric and the summary all use
  the transformed value; a broken expression or a non-finite result makes the
- service {UNKNOWN}. A field may instead be configured to count the number of
- elements at its path: when the path resolves to an array or object the service
- monitors the element count (array length or number of object keys) as a
- number, to which the unit, levels, transform and metric all apply, and it goes
- {UNKNOWN} if the path is neither an array nor an object. A {[*]} wildcard or a
- count may additionally be restricted with a filter, so that only the elements
- whose sub-field matches a condition (equals, does not equal, matches or does
- not match a regular expression) become services or are counted. String matching
- offers two modes: a value can be required
- to fully match a regular expression, with a configurable state (default {CRIT})
- when it does not; or the value can be mapped to a state by matching it against
- separate OK, WARN and CRIT regular expressions, tried in that order with the
- first full match winning and a configurable state (default {OK}) when none
- matches. Otherwise the value is shown in the service summary, and a metric is
- added when it is numeric.
+ service {UNKNOWN}.
+
+ A field may instead aggregate a whole collection into one number: with the path
+ pointing at an array or object (or at a {[*]} wildcard over the values), the
+ service monitors the number of elements, or their sum, average, minimum or
+ maximum. The result is a number, to which the unit, levels, transform and
+ metric all apply; a path that holds neither an array nor an object makes the
+ service {UNKNOWN}, as does an average, minimum or maximum over no elements at
+ all (a sum over none is 0). A {[*]} wildcard or an aggregation may additionally
+ be restricted with a filter, so that only the elements whose sub-field matches
+ a condition (equals, does not equal, matches or does not match a regular
+ expression) become services or are aggregated.
+
+ String matching offers two modes: a value can be required to fully match a
+ regular expression, with a configurable state (default {CRIT}) when it does
+ not; or the value can be mapped to a state by matching it against separate OK,
+ WARN and CRIT regular expressions, tried in that order with the first full
+ match winning and a configurable state (default {OK}) when none matches.
+ Otherwise the value is shown in the service summary, and a metric is added when
+ it is numeric.
 
  The service goes {UNKNOWN} if the configured path is not present in the
  response, or if its endpoint could not be reached or did not return JSON. By

@@ -91,7 +91,7 @@ def test_extract_count_on_scalar_is_not_found(agent):
     specs = [{"path": "status", "service": "Bad", "count": True}]
     (result,) = agent._extract(DOC, specs, "http://test/h")
     assert result["found"] is False
-    assert "cannot count" in result["error"]
+    assert "cannot aggregate" in result["error"]
 
 
 def test_extract_wildcard_index_label(agent):
@@ -821,3 +821,171 @@ def test_count_with_filter_object_map(agent):
     ]
     (result,) = agent._extract(doc, specs, "http://t")
     assert result["value"] == 1
+
+
+# --- Aggregation ---------------------------------------------------------------
+
+AGG_DOC = {
+    "queues": [{"name": "a", "depth": 3}, {"name": "b", "depth": 5}, {"name": "c", "depth": 4}],
+    "values": [2, 4, 6],
+    "sizes": {"x": 10, "y": 30},
+    "nodes": [
+        {"name": "n1", "status": "ok", "load": 1.5},
+        {"name": "n2", "status": "down", "load": 2.5},
+    ],
+    "status": "UP",
+}
+
+
+@pytest.mark.parametrize(
+    "mode, expected",
+    [("count", 3), ("sum", 12.0), ("avg", 4.0), ("min", 2.0), ("max", 6.0)],
+)
+def test_aggregate_container_of_numbers(agent, mode, expected):
+    specs = [{"path": "values", "service": "Values", "aggregate": mode}]
+    (result,) = agent._extract(AGG_DOC, specs, "http://test/h")
+    assert result["found"] is True
+    assert result["value"] == expected
+
+
+def test_aggregate_object_map_values(agent):
+    specs = [{"path": "sizes", "service": "Sizes", "aggregate": "sum"}]
+    (result,) = agent._extract(AGG_DOC, specs, "http://test/h")
+    assert result["value"] == 40.0
+
+
+@pytest.mark.parametrize(
+    "mode, expected",
+    [("count", 3), ("sum", 12.0), ("avg", 4.0), ("min", 3.0), ("max", 5.0)],
+)
+def test_aggregate_collapses_a_wildcard(agent, mode, expected):
+    # 'queues[*].depth' would fan out into one service per queue; aggregating
+    # collapses it into a single service over the same values.
+    specs = [{"path": "queues[*].depth", "service": "Depth", "aggregate": mode}]
+    (result,) = agent._extract(AGG_DOC, specs, "http://test/h")
+    assert result["found"] is True
+    assert result["value"] == expected
+
+
+def test_aggregate_wildcard_honours_the_filter(agent):
+    specs = [
+        {
+            "path": "nodes[*].load",
+            "service": "Load",
+            "aggregate": "sum",
+            "filter": {"path": "status", "op": "not_equals", "value": "ok"},
+        }
+    ]
+    (result,) = agent._extract(AGG_DOC, specs, "http://test/h")
+    assert result["value"] == 2.5  # only the node that is not 'ok'
+
+
+def test_aggregate_container_honours_the_filter(agent):
+    specs = [
+        {
+            "path": "queues",
+            "service": "Deep queues",
+            "aggregate": "count",
+            "filter": {"path": "depth", "op": "regex", "value": "[45]"},
+        }
+    ]
+    (result,) = agent._extract(AGG_DOC, specs, "http://test/h")
+    assert result["value"] == 2
+
+
+def test_aggregate_sum_of_nothing_is_zero(agent):
+    specs = [
+        {
+            "path": "nodes[*].load",
+            "service": "Load",
+            "aggregate": "sum",
+            "filter": {"path": "status", "op": "equals", "value": "nonexistent"},
+        }
+    ]
+    (result,) = agent._extract(AGG_DOC, specs, "http://test/h")
+    assert result["found"] is True
+    assert result["value"] == 0
+
+
+def test_aggregate_average_of_nothing_is_not_found(agent):
+    # An average, minimum or maximum over no elements is undefined - unlike a sum.
+    specs = [
+        {
+            "path": "nodes[*].load",
+            "service": "Load",
+            "aggregate": "avg",
+            "filter": {"path": "status", "op": "equals", "value": "nonexistent"},
+        }
+    ]
+    (result,) = agent._extract(AGG_DOC, specs, "http://test/h")
+    assert result["found"] is False
+    assert result["error"] == "no elements to aggregate"
+
+
+def test_aggregate_non_numeric_element_is_not_found(agent):
+    specs = [{"path": "queues", "service": "Queues", "aggregate": "sum"}]
+    (result,) = agent._extract(AGG_DOC, specs, "http://test/h")
+    assert result["found"] is False
+    assert "not numeric" in result["error"]
+
+
+def test_aggregate_wildcard_missing_container_is_not_found(agent):
+    specs = [{"path": "missing[*].depth", "service": "Depth", "aggregate": "sum"}]
+    (result,) = agent._extract(AGG_DOC, specs, "http://test/h")
+    assert result["found"] is False
+    assert "array or object not found" in result["error"]
+
+
+def test_aggregate_wildcard_missing_leaf_path_is_not_found(agent):
+    specs = [{"path": "queues[*].nope", "service": "Nope", "aggregate": "sum"}]
+    (result,) = agent._extract(AGG_DOC, specs, "http://test/h")
+    assert result["found"] is False
+    assert result["error"] == "path not found in any element"
+
+
+def test_aggregate_skips_elements_without_the_value_path(agent):
+    doc = {"pods": [{"restarts": 2}, {"name": "no-restarts-field"}, {"restarts": 3}]}
+    specs = [{"path": "pods[*].restarts", "service": "Restarts", "aggregate": "sum"}]
+    (result,) = agent._extract(doc, specs, "http://test/h")
+    assert result["value"] == 5.0
+
+
+def test_aggregate_numeric_strings(agent):
+    doc = {"vals": ["1.5", "2.5"]}
+    specs = [{"path": "vals", "service": "Vals", "aggregate": "sum"}]
+    (result,) = agent._extract(doc, specs, "http://test/h")
+    assert result["value"] == 4.0
+
+
+def test_aggregate_mode_reads_the_legacy_count_flag(agent):
+    # A rule saved before the aggregate dropdown (or a hand-written blob).
+    assert agent._aggregate_mode({"count": True}) == "count"
+    assert agent._aggregate_mode({"count": False}) is None
+    assert agent._aggregate_mode({}) is None
+    # An explicit aggregation wins over the legacy flag.
+    assert agent._aggregate_mode({"count": True, "aggregate": "avg"}) == "avg"
+
+
+def test_result_carries_the_aggregation_to_the_check(agent):
+    specs = [{"path": "values", "service": "Values", "aggregate": "sum"}]
+    (result,) = agent._extract(AGG_DOC, specs, "http://test/h")
+    assert result["aggregate"] == "sum"
+
+
+def test_aggregate_trims_an_integral_result(agent):
+    # Every value is aggregated as a float; an integral outcome comes back as an
+    # int so the service summary reads '15', not '15.0'.
+    doc = {"vals": [4, 5, 6]}
+    values = {
+        mode: agent._extract(doc, [{"path": "vals", "service": "V", "aggregate": mode}], "u")[0][
+            "value"
+        ]
+        for mode in ("sum", "avg", "min", "max")
+    }
+    assert values == {"sum": 15, "avg": 5, "min": 4, "max": 6}
+    assert all(isinstance(v, int) for v in values.values())
+    # A genuinely fractional result keeps its decimals.
+    (result,) = agent._extract(
+        {"vals": [1, 2]}, [{"path": "vals", "service": "V", "aggregate": "avg"}], "u"
+    )
+    assert result["value"] == 1.5

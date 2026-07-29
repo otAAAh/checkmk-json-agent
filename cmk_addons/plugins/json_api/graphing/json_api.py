@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # Copyright (C) 2026 Benjamin Knapp
 # SPDX-License-Identifier: GPL-2.0-only
-"""Metric definitions for the generic JSON API check.
+"""Metric definitions for the generic JSON API checks.
 
 Each service owns its item, so a metric is effectively per-service. A field may
 declare a unit in the rule; the check then emits a distinctly named, correctly

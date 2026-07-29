@@ -74,6 +74,23 @@ function stateChoiceKind(value: unknown): StateKind | null {
   return null
 }
 
+/** How many elements an aggregation would reduce, for the preview note. A
+ * wildcard path resolves to one match per element; a wildcard-free path to the
+ * array/object holding them. */
+function elementCount(matches: { value: Json }[], path: string): number | null {
+  if (path.includes('[*]')) {
+    return matches.length
+  }
+  const value = matches[0]?.value
+  if (Array.isArray(value)) {
+    return value.length
+  }
+  if (value !== null && typeof value === 'object') {
+    return Object.keys(value).length
+  }
+  return null
+}
+
 /** Infer the match mode from the cfg keys (the mode string is a hashed ident, so
  * we key off the non-hashed sub-fields instead). */
 function matchMode(cfg: Record<string, unknown>): 'must_match' | 'state_map' | null {
@@ -293,8 +310,9 @@ function definedSummary(x: ExtractionValue): string[] {
   if (unit) {
     parts.push(_t('unit %{u}', { u: unit }))
   }
-  if (x.count === true) {
-    parts.push(_t('count elements'))
+  const aggregate = titleOf(x.aggregate)
+  if (aggregate) {
+    parts.push(_t('aggregate: %{a}', { a: aggregate }))
   }
   if (typeof x.calc === 'string' && x.calc) {
     parts.push(_t('calc %{c}', { c: x.calc }))
@@ -358,6 +376,9 @@ interface Row {
   service: string
   path: string
   value: Json | undefined
+  // Shown instead of the value when the monitored number is only computed on the
+  // site (an aggregation, a rate, an age) and so cannot be previewed here.
+  note?: string
   defined: string[]
   state: StateKind
   labels: string[]
@@ -432,34 +453,40 @@ const reviews = computed<EndpointReview[]>(() =>
         // Optional arithmetic transform applied to a NUMERIC value before
         // levels/display, e.g. `value / 1024 / 1024`.
         const calc = typeof x.calc === 'string' && x.calc ? x.calc : null
-        // When set, the monitored value is the NUMBER OF ELEMENTS of an
-        // array/object rather than the value itself; levels then apply to that
-        // count. Counting a scalar is a misconfiguration (UNKNOWN in the real
-        // check) — preview it as unresolved rather than crashing.
-        const doCount = x.count === true
+        // An aggregation collapses the whole collection into ONE service. Which
+        // function was picked is a hashed ident here, so the aggregated number is
+        // deliberately NOT recomputed in the preview — the row states what the
+        // site will do instead of showing a value that might differ.
+        const aggregate = titleOf(x.aggregate)
         const matches = sample !== null ? resolvePath(sample, path) : []
         if (!matches.length) {
           return [
             { service: name, path, value: undefined, defined, state: 'none' as StateKind, labels },
           ]
         }
+        if (aggregate) {
+          const elements = elementCount(matches, path)
+          return [
+            {
+              service: name,
+              path,
+              value: undefined,
+              note:
+                elements === null
+                  ? _t('not an array or object — the service will be UNKNOWN')
+                  : _t('%{n} element(s), aggregated on the site', { n: String(elements) }),
+              defined,
+              state: 'none' as StateKind,
+              labels,
+            },
+          ]
+        }
         return matches.map((m): Row => {
           const service = matches.length > 1 && m.label ? `${name} ${m.label}` : name
-          // 1) Count elements first, so a following `calc` transforms the count.
           let value: Json = m.value
-          if (doCount) {
-            if (Array.isArray(m.value)) {
-              value = m.value.length
-            } else if (typeof m.value === 'object' && m.value !== null) {
-              value = Object.keys(m.value).length
-            } else {
-              // Not a list/object: cannot count — show the raw value, unresolved.
-              return { service, path, value: m.value, defined, state: 'none' as StateKind, labels }
-            }
-          }
-          // 2) Transform the (possibly counted) value when `calc` is set and it
-          // is numeric. On a bad expression evalCalc returns null: leave the
-          // value shown and mark the preview unresolved rather than crashing.
+          // Transform the value when `calc` is set and it is numeric. On a bad
+          // expression evalCalc returns null: leave the value shown and mark the
+          // preview unresolved rather than crashing.
           if (calc !== null && typeof value === 'number') {
             const transformed = evalCalc(calc, value)
             if (transformed === null) {
@@ -512,7 +539,7 @@ const reviews = computed<EndpointReview[]>(() =>
                   <div class="je-step-review__line">
                     <span class="je-step-review__name">{{ row.service }}</span>
                     <code class="je-step-review__path">{{ row.path }}</code>
-                    <span class="je-step-review__value">= {{ fmtValue(row.value) }}</span>
+                    <span class="je-step-review__value">{{ row.note ? row.note : `= ${fmtValue(row.value)}` }}</span>
                   </div>
                   <div v-if="row.defined.length" class="je-step-review__defined">
                     {{ row.defined.join(' · ') }}

@@ -566,3 +566,9 @@ def test_check_details_reflect_effective_match_override(check):
     params = {"match": ("must_match", {"pattern": "DOWN"})}
     details = _details(check.check_json_api("Mode", params, section))
     assert "Expected pattern: DOWN" in details
+
+
+def test_details_name_the_aggregation(check):
+    section = _section(check, [_entry("Load", value=3, aggregate="avg", path="nodes[*].load")])
+    details = _details(check.check_json_api("Load", {}, section))
+    assert "Aggregation: average of the elements" in details

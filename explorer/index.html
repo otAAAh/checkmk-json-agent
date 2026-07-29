@@ -472,7 +472,7 @@ function addExtraction(path) {
     service: defaultService(path),
     path,
     label_path: path.includes("[*]") ? guessLabel(path) : "",
-    count: false,
+    aggregate: "",
     flPath: "", flOp: "not_equals", flValue: "",
     unit: "", calc: "", lu_w: "", lu_c: "", ll_w: "", ll_c: "",
     matchMode: "", mmPattern: "", mmState: "2",
@@ -501,8 +501,12 @@ function renderFields() {
       `<div class="muted">path: <code>${esc(e.path)}</code></div>` +
       `<div class="row"><label>Service</label><input type="text" data-f="service" data-i="${i}" value="${escAttr(e.service)}"></div>` +
       (wild ? `<div class="row"><label>Name suffix</label><input type="text" data-f="label_path" data-i="${i}" value="${escAttr(e.label_path)}" placeholder="field in each element, appended to the name, e.g. name"></div>` : "") +
-      `<div class="row"><label>Count</label><label class="cb"><input type="checkbox" data-fb="count" data-i="${i}"${e.count ? " checked" : ""}> Count elements (monitor array/object length)</label></div>` +
-      `<div class="row"><label>Filter</label><span class="lvls"><input type="text" data-f="flPath" data-i="${i}" value="${escAttr(e.flPath)}" placeholder="field in each element (for [*]/count)"><select data-f="flOp" data-i="${i}">` +
+      `<div class="row"><label>Aggregate</label><select data-f="aggregate" data-i="${i}">` +
+        [["", "no aggregation"], ["count", "number of elements"], ["sum", "sum of the values"],
+         ["avg", "average of the values"], ["min", "smallest value"], ["max", "largest value"]].map(([v, lbl]) =>
+          `<option value="${v}"${e.aggregate === v ? " selected" : ""}>${lbl}</option>`).join("") +
+      `</select></div>` +
+      `<div class="row"><label>Filter</label><span class="lvls"><input type="text" data-f="flPath" data-i="${i}" value="${escAttr(e.flPath)}" placeholder="field in each element (for [*]/aggregate)"><select data-f="flOp" data-i="${i}">` +
         [["equals", "equals"], ["not_equals", "does not equal"], ["regex", "matches regex"], ["not_regex", "does not match regex"]].map(([v, lbl]) =>
           `<option value="${v}"${e.flOp === v ? " selected" : ""}>${lbl}</option>`).join("") +
       `</select><input type="text" data-f="flValue" data-i="${i}" value="${escAttr(e.flValue)}" placeholder="value / regex"></span></div>` +
@@ -563,7 +567,7 @@ function extractionObjs(e) {
   return e.extractions.map(x => {
     const o = { service: x.service, path: x.path };
     if (x.label_path) o.label_path = x.label_path;
-    o.count = !!x.count;  // required field - always emitted
+    if (x.aggregate) o.aggregate = x.aggregate;
     if (x.flPath && x.flPath.trim())
       o.filter = { path: x.flPath.trim(), op: x.flOp || "equals", value: x.flValue || "" };
     if (x.unit) o.unit = x.unit;
@@ -591,7 +595,7 @@ function extractionObjs(e) {
 function pyExtraction(o) {
   const p = [`'service': ${pyStr(o.service)}`, `'path': ${pyStr(o.path)}`];
   if (o.label_path) p.push(`'label_path': ${pyStr(o.label_path)}`);
-  p.push("'count': " + (o.count ? "True" : "False"));  // required field
+  if (o.aggregate) p.push(`'aggregate': ${pyStr(o.aggregate)}`);
   if (o.filter) p.push(`'filter': {'path': ${pyStr(o.filter.path)}, 'op': ${pyStr(o.filter.op)}, 'value': ${pyStr(o.filter.value)}}`);
   if (o.unit) p.push(`'unit': ${pyStr(o.unit)}`);
   if (o.calc) p.push(`'calc': ${pyStr(o.calc)}`);
