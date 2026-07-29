@@ -3,6 +3,20 @@
 All notable changes to this project, one section per released version.
 Generated from the git history by `scripts/gen_changelog.py`.
 
+## [0.11.0] - 2026-07-29
+
+### Features
+
+- Counter rate / timestamp age + per-endpoint status service (land #105 and #106 on main) ([#107](https://github.com/otAAAh/checkmk-json-agent/pull/107)) ([`8f2c137`](https://github.com/otAAAh/checkmk-json-agent/commit/8f2c137))
+- Aggregate a collection into one value (sum/avg/min/max, not just count) ([#104](https://github.com/otAAAh/checkmk-json-agent/pull/104)) ([`a67f78b`](https://github.com/otAAAh/checkmk-json-agent/commit/a67f78b))
+
+### Other
+
+- Bump postcss from 8.5.16 to 8.5.23 in /frontend ([#103](https://github.com/otAAAh/checkmk-json-agent/pull/103)) ([`6801db0`](https://github.com/otAAAh/checkmk-json-agent/commit/6801db0))
+- Bump the actions group with 4 updates ([`cca693d`](https://github.com/otAAAh/checkmk-json-agent/commit/cca693d))
+- Deps: Bump ruff from 0.15.22 to 0.16.0 ([`75426ae`](https://github.com/otAAAh/checkmk-json-agent/commit/75426ae))
+- Bump fast-uri from 3.1.3 to 3.1.4 in /frontend ([`1be05f0`](https://github.com/otAAAh/checkmk-json-agent/commit/1be05f0))
+
 ## [0.10.0] - 2026-07-21
 
 ### Features
