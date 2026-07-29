@@ -69,6 +69,7 @@ def test_basic_command_line(ssc):
             "aggregate": None,
             # Superseded by 'aggregate', still passed on for unmigrated rules.
             "count": False,
+            "value_as": None,
         }
     ]
 
@@ -546,7 +547,7 @@ def test_filter_defaults_null(ssc):
     assert endpoint["extractions"][0]["filter"] is None
 
 
-def test_aggregate_reaches_the_agent(ssc):
+def test_aggregate_and_value_as_reach_the_agent(ssc):
     args = _command_args(
         ssc,
         {
@@ -558,6 +559,7 @@ def test_aggregate_reaches_the_agent(ssc):
                             "path": "nodes[*].load",
                             "service": "Load",
                             "aggregate": "avg",
+                            "value_as": ("timestamp", {"format": "iso"}),
                         }
                     ],
                 }
@@ -567,6 +569,8 @@ def test_aggregate_reaches_the_agent(ssc):
     (endpoint,) = _endpoints(ssc, args)
     (extraction,) = endpoint["extractions"]
     assert extraction["aggregate"] == "avg"
+    # The CascadingSingleChoice tuple survives the JSON round-trip as a list.
+    assert extraction["value_as"] == ["timestamp", {"format": "iso"}]
 
 
 def test_unmigrated_count_flag_still_reaches_the_agent(ssc):

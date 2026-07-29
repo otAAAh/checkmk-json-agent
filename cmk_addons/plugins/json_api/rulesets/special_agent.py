@@ -20,6 +20,7 @@ from cmk.rulesets.v1.form_specs import (
     DefaultValue,
     DictElement,
     Dictionary,
+    FixedValue,
     Float,
     InputHint,
     Integer,
@@ -369,6 +370,96 @@ def _extraction() -> Dictionary:
                             ),
                         ),
                     },
+                ),
+            ),
+            "value_as": DictElement(
+                required=False,
+                parameter_form=CascadingSingleChoice(
+                    title=Title("Interpret the value as"),
+                    help_text=Help(
+                        "By default the extracted value is monitored as it stands. "
+                        "Two common API values are worth deriving something else "
+                        "from: a counter that only ever grows (its rate of change "
+                        "is what matters, not the total), and a timestamp (its age "
+                        "is what matters, not the date). The derived number is what "
+                        "the transform, the levels, the metric and the summary then "
+                        "use."
+                    ),
+                    prefill=DefaultValue("counter"),
+                    elements=[
+                        CascadingSingleChoiceElement(
+                            name="counter",
+                            title=Title("A counter - monitor its per-second rate"),
+                            parameter_form=FixedValue(
+                                value=None,
+                                title=Title("Per-second rate"),
+                                label=Label(
+                                    "The difference to the previous check is divided "
+                                    "by the elapsed time"
+                                ),
+                                help_text=Help(
+                                    "For monotonically growing counters such as "
+                                    "'requests_total' or 'bytes_sent': the check "
+                                    "monitors the change per second instead of the "
+                                    "absolute total. The first check after a "
+                                    "restart of the counter cannot compute a rate "
+                                    "yet and keeps the service's previous state."
+                                ),
+                            ),
+                        ),
+                        CascadingSingleChoiceElement(
+                            name="timestamp",
+                            title=Title("A timestamp - monitor its age"),
+                            parameter_form=Dictionary(
+                                help_text=Help(
+                                    "For values such as 'last_backup' or "
+                                    "'updated_at': the check monitors the number of "
+                                    "seconds since that point in time, so upper "
+                                    "levels alert on stale data. A timestamp in the "
+                                    "future yields a negative age. The age graphs "
+                                    "and reads as a duration on its own; choose a "
+                                    "unit below only to override that (e.g. after a "
+                                    "transform into hours)."
+                                ),
+                                elements={
+                                    "format": DictElement(
+                                        required=True,
+                                        parameter_form=SingleChoice(
+                                            title=Title("Timestamp format"),
+                                            help_text=Help(
+                                                "'Detect automatically' reads a "
+                                                "number as Unix epoch seconds "
+                                                "(milliseconds when it is far too "
+                                                "large for seconds) and anything "
+                                                "else as ISO 8601. A timestamp "
+                                                "without a time zone is read as UTC."
+                                            ),
+                                            elements=[
+                                                SingleChoiceElement(
+                                                    "auto", Title("Detect automatically")
+                                                ),
+                                                SingleChoiceElement(
+                                                    "epoch", Title("Unix epoch seconds")
+                                                ),
+                                                SingleChoiceElement(
+                                                    "epoch_ms",
+                                                    Title("Unix epoch milliseconds"),
+                                                ),
+                                                SingleChoiceElement(
+                                                    "iso",
+                                                    Title(
+                                                        "ISO 8601 / RFC 3339, "
+                                                        "e.g. '2026-07-28T02:00:00Z'"
+                                                    ),
+                                                ),
+                                            ],
+                                            prefill=DefaultValue("auto"),
+                                        ),
+                                    ),
+                                },
+                            ),
+                        ),
+                    ],
                 ),
             ),
             "unit": DictElement(

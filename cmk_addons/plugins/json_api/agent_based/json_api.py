@@ -4,23 +4,29 @@
 """Check for the generic JSON API special agent.
 
 One service per configured extraction (keyed by its service name). Numeric
-values get levels + a metric; string values get an optional regex match.
+values get levels + a metric; string values get an optional regex match. A value
+may also be read as a counter (monitor its per-second rate) or as a timestamp
+(monitor its age).
 """
 
 import ast
 import json
 import math
 import re
+import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 
 from cmk.agent_based.v2 import (
     AgentSection,
     CheckPlugin,
     CheckResult,
     DiscoveryResult,
+    GetRateError,
     HostLabel,
     HostLabelGenerator,
+    IgnoreResults,
     Metric,
     Result,
     Service,
@@ -28,6 +34,8 @@ from cmk.agent_based.v2 import (
     State,
     StringTable,
     check_levels,
+    get_rate,
+    get_value_store,
     render,
 )
 
@@ -46,6 +54,13 @@ _Levels = tuple[str, tuple[float, float] | None] | None
 #   ("state_map",  {"ok"/"warn"/"crit": <regex>, "state_no_match": <0-3>})
 _Match = tuple[str, object] | None
 
+# How to read the extracted value, from the 'Interpret the value as'
+# CascadingSingleChoice (JSON-encoded by the agent). After _coerce_value_as:
+#   ("counter", None)                    -> monitor the per-second rate
+#   ("timestamp", {"format": "auto"})    -> monitor the age in seconds
+# ``None`` monitors the value as it stands.
+_ValueAs = tuple[str, object] | None
+
 
 # Maps the unit chosen in the rule to the metric defined in graphing/json_api.py.
 # ``None`` (no unit chosen, incl. rules from before units existed) keeps the
@@ -58,9 +73,28 @@ _UNIT_METRIC = {
     "percent": "json_api_percent",
 }
 
+# A per-second rate is a different quantity from the counter it came from, so it
+# gets its own metric per unit (bytes -> B/s, ...) rather than polluting the
+# absolute value's history with a rate.
+_UNIT_RATE_METRIC = {
+    None: "json_api_rate",
+    "count": "json_api_count_rate",
+    "bytes": "json_api_bytes_rate",
+    "seconds": "json_api_seconds_rate",
+    "percent": "json_api_percent_rate",
+}
+
+# The age of a timestamp is a duration in seconds; it gets a metric of its own so
+# it graphs as a duration without the rule having to choose a unit.
+_AGE_METRIC = "json_api_age"
+
 
 def _metric_name(unit: object) -> str:
     return _UNIT_METRIC.get(unit if isinstance(unit, str) else None, "json_api_value")
+
+
+def _rate_metric_name(unit: object) -> str:
+    return _UNIT_RATE_METRIC.get(unit if isinstance(unit, str) else None, "json_api_rate")
 
 
 # The unit chosen in the rule also decides how the value is *rendered* in the
@@ -78,6 +112,33 @@ def _render_func(unit: object) -> Callable[[float], str] | None:
     return _UNIT_RENDER.get(unit) if isinstance(unit, str) else None
 
 
+def _rate_render_func(unit: object) -> Callable[[float], str]:
+    """Render a per-second rate: the unit's own rendering plus '/s'.
+
+    A rate is almost never a round number (it is a difference divided by an
+    elapsed time), so the unit-less fallback rounds to a few significant digits
+    instead of printing the full float repr - '20/s' rather than
+    '19.999451493365736/s' - while staying accurate for tiny rates.
+    """
+    base = _render_func(unit) or _fmt_rate
+    return lambda number: f"{base(number)}/s"
+
+
+def _fmt_rate(number: float) -> str:
+    return _fmt_number(number) if float(number).is_integer() else f"{number:.6g}"
+
+
+def _render_age(seconds: float) -> str:
+    """Render an age as a duration, including a negative one.
+
+    ``render.timespan`` refuses negative values, but a timestamp in the future is
+    a perfectly ordinary thing for an API to report (a certificate expiry, a
+    scheduled run), so it is rendered as a duration with a leading '-' instead of
+    crashing the service.
+    """
+    return render.timespan(seconds) if seconds >= 0 else f"-{render.timespan(-seconds)}"
+
+
 @dataclass(frozen=True)
 class Item:
     found: bool
@@ -87,10 +148,13 @@ class Item:
     levels_lower: _Levels
     match: _Match
     calc: str | None
+    unit: object
     metric_name: str
     render_func: Callable[[float], str] | None
     path: str
     url: str
+    # How to read the value: as it stands, as a counter, or as a timestamp.
+    value_as: _ValueAs = None
     # The aggregation the agent already applied ('count'/'sum'/...), for Details.
     aggregate: str | None = None
     # Service labels (key, value) the agent resolved for this service, sans the
@@ -171,6 +235,24 @@ def _coerce_calc(raw: object) -> str | None:
     return None
 
 
+def _coerce_value_as(raw: object) -> _ValueAs:
+    """Normalize the 'Interpret the value as' config (list from JSON -> tuple).
+
+    Anything unrecognized falls back to ``None`` ("monitor the value as it
+    stands"), so an unknown future choice degrades to the plain behaviour instead
+    of failing the service.
+    """
+    match raw:
+        case ["counter", _] | ("counter", _) | "counter":
+            return ("counter", None)
+        case ["timestamp", dict() as cfg] | ("timestamp", dict() as cfg):
+            fmt = cfg.get("format")
+            return ("timestamp", {"format": fmt if isinstance(fmt, str) and fmt else "auto"})
+        case ["timestamp", _] | ("timestamp", _) | "timestamp":
+            return ("timestamp", {"format": "auto"})
+    return None
+
+
 def _coerce_aggregate(raw: object) -> str | None:
     return raw if isinstance(raw, str) and raw else None
 
@@ -220,10 +302,12 @@ def parse_json_api(string_table: StringTable) -> Section | None:
             levels_lower=_coerce_levels(result.get("levels_lower")),
             match=_coerce_match(result.get("match"), result.get("expected")),
             calc=_coerce_calc(result.get("calc")),
+            unit=result.get("unit"),
             metric_name=_metric_name(result.get("unit")),
             render_func=_render_func(result.get("unit")),
             path=result.get("path", ""),
             url=result.get("url", ""),
+            value_as=_coerce_value_as(result.get("value_as")),
             aggregate=_coerce_aggregate(result.get("aggregate")),
             service_labels=_service_labels(result.get("labels")),
         )
@@ -302,6 +386,11 @@ _AGGREGATE_LABEL = {
     "max": "largest element",
 }
 
+_VALUE_AS_LABEL = {
+    "counter": "counter (per-second rate)",
+    "timestamp": "timestamp (age)",
+}
+
 
 def _context(entry: Item, match: _Match) -> CheckResult:
     """Details-only lines describing where the value came from.
@@ -319,6 +408,8 @@ def _context(entry: Item, match: _Match) -> CheckResult:
         lines.append(f"Source: {entry.url}")
     if entry.aggregate:
         lines.append(f"Aggregation: {_AGGREGATE_LABEL.get(entry.aggregate, entry.aggregate)}")
+    if entry.value_as is not None:
+        lines.append(f"Read as: {_VALUE_AS_LABEL.get(entry.value_as[0], entry.value_as[0])}")
     if match is not None:
         kind, cfg = match
         if kind == "must_match" and isinstance(cfg, dict) and isinstance(cfg.get("pattern"), str):
@@ -409,13 +500,150 @@ def _fmt_number(number: float) -> str:
     return str(int(number)) if number.is_integer() else str(number)
 
 
+# Above this, an epoch value can only be milliseconds: 1e11 seconds is the year
+# 5138, while 1e11 milliseconds is 1973 - so any plausible timestamp beyond it is
+# a millisecond value. Used only by the 'auto' format.
+_EPOCH_MS_THRESHOLD = 1e11
+
+# Fractional seconds with more than microsecond precision (Go/Java emit
+# nanoseconds) are not accepted by datetime.fromisoformat; trim the extra digits.
+_ISO_SUBSECOND = re.compile(r"(\.\d{6})\d+")
+
+
+def _parse_iso_timestamp(text: str) -> float | None:
+    """An ISO 8601 / RFC 3339 timestamp as a Unix epoch float, or None.
+
+    A trailing 'Z' is normalized for older ``fromisoformat`` implementations, and
+    sub-microsecond precision is trimmed. A timestamp without a time zone is read
+    as UTC - the alternative, the monitoring server's local zone, would make the
+    same JSON mean different things on different servers.
+    """
+    cleaned = _ISO_SUBSECOND.sub(r"\1", text.strip())
+    if cleaned.endswith(("Z", "z")):
+        cleaned = f"{cleaned[:-1]}+00:00"
+    try:
+        parsed = datetime.fromisoformat(cleaned)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=UTC)
+    return parsed.timestamp()
+
+
+def _parse_timestamp(value: object, fmt: str) -> float | None:
+    """The value as a Unix epoch float, per the configured format, or None."""
+    number = _as_number(value)
+    match fmt:
+        case "epoch":
+            return number
+        case "epoch_ms":
+            return number / 1000.0 if number is not None else None
+        case "iso":
+            return _parse_iso_timestamp(value) if isinstance(value, str) else None
+    # "auto" (and anything unknown): a number is an epoch, in milliseconds when
+    # it is far too large to be seconds; everything else is tried as ISO 8601.
+    if number is not None:
+        return number / 1000.0 if abs(number) > _EPOCH_MS_THRESHOLD else number
+    return _parse_iso_timestamp(value) if isinstance(value, str) else None
+
+
+def _derive(entry: Item) -> tuple[float | None, str, Callable[[float], str] | None, CheckResult]:
+    """Turn a counter / timestamp value into the number that is monitored.
+
+    Returns ``(number, metric_name, render_func, extra_results)``: the derived
+    number (``None`` when it could not be derived, in which case
+    ``extra_results`` explains why and the caller stops), the metric and
+    rendering that fit the derived quantity, and results to emit either way (the
+    raw counter reading / timestamp as a Details line - it is no longer visible
+    in the summary once derived).
+
+    A per-second rate is a different quantity from its counter and an age is a
+    duration, so both get their own metric rather than writing into the absolute
+    value's history.
+    """
+    number = _as_number(entry.value)
+    if entry.value_as is None:
+        return number, entry.metric_name, entry.render_func, []
+
+    kind, cfg = entry.value_as
+    if kind == "counter":
+        if number is None:
+            return (
+                None,
+                entry.metric_name,
+                entry.render_func,
+                [
+                    Result(
+                        state=State.UNKNOWN,
+                        summary=f"Counter is not numeric: {_render_value(entry.value)}",
+                    )
+                ],
+            )
+        reading = Result(state=State.OK, notice=f"Counter reading: {_fmt_number(number)}")
+        try:
+            rate = get_rate(get_value_store(), "counter", time.time(), number, raise_overflow=True)
+        except GetRateError as exc:
+            # No previous reading yet (or the counter went backwards, e.g. the
+            # monitored service restarted): keep the service's previous state
+            # rather than inventing a rate.
+            return None, entry.metric_name, entry.render_func, [reading, IgnoreResults(str(exc))]
+        return (
+            rate,
+            _rate_metric_name(entry.unit),
+            _rate_render_func(entry.unit),
+            [reading],
+        )
+
+    fmt = cfg.get("format") if isinstance(cfg, dict) else None
+    stamp = _parse_timestamp(entry.value, fmt if isinstance(fmt, str) else "auto")
+    if stamp is None:
+        return (
+            None,
+            entry.metric_name,
+            entry.render_func,
+            [
+                Result(
+                    state=State.UNKNOWN,
+                    summary=f"Not a valid timestamp: {_render_value(entry.value)}",
+                )
+            ],
+        )
+    reading = Result(state=State.OK, notice=f"Timestamp: {_render_value(entry.value)}")
+    # An age is a duration in seconds, so it graphs and renders as one unless the
+    # rule explicitly chose a unit (e.g. after a transform into hours).
+    if isinstance(entry.unit, str):
+        return time.time() - stamp, entry.metric_name, entry.render_func, [reading]
+    return time.time() - stamp, _AGE_METRIC, _render_age, [reading]
+
+
+# What the derived number is called in the summary and the levels line.
+_VALUE_LABEL = {"counter": "Rate", "timestamp": "Age"}
+
+
+def _value_label(value_as: _ValueAs) -> str:
+    return _VALUE_LABEL.get(value_as[0], "Value") if value_as is not None else "Value"
+
+
 def _value_results(
     entry: Item,
     levels_upper: _Levels,
     levels_lower: _Levels,
     match: _Match,
 ) -> CheckResult:
-    number = _as_number(entry.value)
+    number, metric_name, render_func, extra = _derive(entry)
+    yield from extra
+    if entry.value_as is not None and number is None:
+        return  # _derive already explained why (UNKNOWN / no rate yet)
+    label = _value_label(entry.value_as)
+    # Once derived, the summary shows the derived number, not the raw JSON value.
+    derived = entry.value_as is not None
+    if derived and match is not None:
+        # A regex over a rate or an age is never what was meant; say so instead of
+        # matching against a computed number.
+        yield Result(
+            state=State.OK,
+            notice=f"String matching does not apply to a derived {label.lower()}",
+        )
 
     # A numeric value may be transformed by a small arithmetic expression before
     # levels and the metric see it (e.g. bytes -> MiB). A broken calculation
@@ -441,9 +669,9 @@ def _value_results(
             number,
             levels_upper=levels_upper,
             levels_lower=levels_lower,
-            metric_name=entry.metric_name,
-            label="Value",
-            render_func=entry.render_func,
+            metric_name=metric_name,
+            label=label,
+            render_func=render_func,
         )
         return
 
@@ -453,7 +681,7 @@ def _value_results(
     misconfigured_levels = has_levels and number is None
     misconfig_note = " (levels configured but value is not numeric)"
 
-    if match is not None:
+    if match is not None and not derived:
         text = _render_value(entry.value)
         try:
             state, description = _evaluate_match(match, text)
@@ -480,14 +708,15 @@ def _value_results(
 
     # No levels, no match: surface the value, add a metric if numeric. A unit's
     # render func formats it like the graph (bytes -> "1.50 MiB"); otherwise show
-    # the transformed number when a calculation ran, else the raw JSON value.
+    # the transformed / derived number when one was computed, else the raw JSON
+    # value.
     if number is not None:
-        if entry.render_func is not None:
-            shown = entry.render_func(number)
+        if render_func is not None:
+            shown = render_func(number)
         else:
-            shown = _fmt_number(number) if entry.calc else _render_value(entry.value)
-        yield Result(state=State.OK, summary=f"Value: {shown}")
-        yield Metric(entry.metric_name, number)
+            shown = _fmt_number(number) if (entry.calc or derived) else _render_value(entry.value)
+        yield Result(state=State.OK, summary=f"{label}: {shown}")
+        yield Metric(metric_name, number)
     else:
         yield Result(state=State.OK, summary=f"Value: {_render_value(entry.value)}")
 

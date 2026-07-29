@@ -3,8 +3,9 @@
 """Tests for the check: parse, discovery, and check states/metrics."""
 
 import json
+from types import SimpleNamespace
 
-from cmk.agent_based.v2 import Metric, Result, State
+from cmk.agent_based.v2 import IgnoreResults, Metric, Result, State
 
 
 def _section(check, results, host_labels=None):
@@ -568,7 +569,294 @@ def test_check_details_reflect_effective_match_override(check):
     assert "Expected pattern: DOWN" in details
 
 
-def test_details_name_the_aggregation(check):
-    section = _section(check, [_entry("Load", value=3, aggregate="avg", path="nodes[*].load")])
+# --- Counter -> per-second rate ------------------------------------------------
+
+
+def _fixed_clock(check, monkeypatch, now):
+    """Pin the check's notion of 'now' (module-local, so the stdlib is untouched)."""
+    monkeypatch.setattr(check, "time", SimpleNamespace(time=lambda: now))
+
+
+def _counter_store(check, monkeypatch, store):
+    """Give the check a plain dict as its value store (as a site would)."""
+    monkeypatch.setattr(check, "get_value_store", lambda: store)
+
+
+def test_coerce_value_as(check):
+    assert check._coerce_value_as(["counter", None]) == ("counter", None)
+    assert check._coerce_value_as(["timestamp", {"format": "iso"}]) == (
+        "timestamp",
+        {"format": "iso"},
+    )
+    # A timestamp without a format falls back to auto-detection.
+    assert check._coerce_value_as(["timestamp", {}]) == ("timestamp", {"format": "auto"})
+    # Absent / unknown: monitor the value as it stands.
+    assert check._coerce_value_as(None) is None
+    assert check._coerce_value_as(["something_new", {}]) is None
+
+
+def test_counter_first_run_cannot_compute_a_rate(check, monkeypatch):
+    _counter_store(check, monkeypatch, {})
+    _fixed_clock(check, monkeypatch, 1000.0)
+    section = _section(check, [_entry("Reqs", value=100, value_as=["counter", None])])
+    results = list(check.check_json_api("Reqs", {}, section))
+    # No previous reading: the service keeps its state instead of inventing a rate.
+    assert any(isinstance(r, IgnoreResults) for r in results)
+    assert not [r for r in results if isinstance(r, Metric)]
+    assert "Counter reading: 100" in _details(results)
+
+
+def test_counter_second_run_yields_the_rate(check, monkeypatch):
+    store = {}
+    _counter_store(check, monkeypatch, store)
+    _fixed_clock(check, monkeypatch, 1000.0)
+    section = _section(check, [_entry("Reqs", value=100, value_as=["counter", None])])
+    list(check.check_json_api("Reqs", {}, section))
+
+    # 60 more requests, 30 seconds later -> 2/s.
+    _fixed_clock(check, monkeypatch, 1030.0)
+    section = _section(check, [_entry("Reqs", value=160, value_as=["counter", None])])
+    results = list(check.check_json_api("Reqs", {}, section))
+    (metric,) = [r for r in results if isinstance(r, Metric)]
+    assert metric.name == "json_api_rate"
+    assert metric.value == 2.0
+    assert any(isinstance(r, Result) and r.summary == "Rate: 2/s" for r in results)
+
+
+def test_counter_rate_uses_the_unit_rate_metric_and_levels(check, monkeypatch):
+    store = {}
+    _counter_store(check, monkeypatch, store)
+    _fixed_clock(check, monkeypatch, 1000.0)
+    entry = _entry(
+        "Egress",
+        value=0,
+        unit="bytes",
+        value_as=["counter", None],
+        levels_upper=["fixed", [1.0, 2.0]],
+    )
+    list(check.check_json_api("Egress", {}, _section(check, [entry])))
+
+    _fixed_clock(check, monkeypatch, 1001.0)
+    entry = _entry(
+        "Egress",
+        value=1024,
+        unit="bytes",
+        value_as=["counter", None],
+        levels_upper=["fixed", [1.0, 2.0]],
+    )
+    results = list(check.check_json_api("Egress", {}, _section(check, [entry])))
+    (metric,) = [r for r in results if isinstance(r, Metric)]
+    assert metric.name == "json_api_bytes_rate"
+    assert metric.value == 1024.0
+    # The levels are checked against the rate, and it renders as a bandwidth.
+    (result,) = [r for r in results if isinstance(r, Result) and r.summary.startswith("Rate:")]
+    assert result.state == State.CRIT
+    assert "1.00 KiB/s" in result.summary
+
+
+def test_counter_rate_applies_the_transform_after_the_rate(check, monkeypatch):
+    store = {}
+    _counter_store(check, monkeypatch, store)
+    _fixed_clock(check, monkeypatch, 1000.0)
+    entry = _entry("Bytes", value=0, value_as=["counter", None], calc="value / 1024")
+    list(check.check_json_api("Bytes", {}, _section(check, [entry])))
+
+    _fixed_clock(check, monkeypatch, 1002.0)
+    entry = _entry("Bytes", value=4096, value_as=["counter", None], calc="value / 1024")
+    results = list(check.check_json_api("Bytes", {}, _section(check, [entry])))
+    # 4096 B over 2 s = 2048 B/s, transformed to 2 KiB/s.
+    (metric,) = [r for r in results if isinstance(r, Metric)]
+    assert metric.value == 2.0
+
+
+def test_counter_on_a_non_numeric_value_is_unknown(check, monkeypatch):
+    _counter_store(check, monkeypatch, {})
+    _fixed_clock(check, monkeypatch, 1000.0)
+    section = _section(check, [_entry("Reqs", value="lots", value_as=["counter", None])])
+    result = next(
+        r for r in check.check_json_api("Reqs", {}, section) if isinstance(r, Result) and r.summary
+    )
+    assert result.state == State.UNKNOWN
+    assert "not numeric" in result.summary
+
+
+def test_counter_going_backwards_does_not_produce_a_negative_rate(check, monkeypatch):
+    store = {}
+    _counter_store(check, monkeypatch, store)
+    _fixed_clock(check, monkeypatch, 1000.0)
+    list(
+        check.check_json_api(
+            "Reqs", {}, _section(check, [_entry("Reqs", value=500, value_as=["counter", None])])
+        )
+    )
+    # The monitored service restarted and its counter is back to 0.
+    _fixed_clock(check, monkeypatch, 1010.0)
+    results = list(
+        check.check_json_api(
+            "Reqs", {}, _section(check, [_entry("Reqs", value=0, value_as=["counter", None])])
+        )
+    )
+    assert any(isinstance(r, IgnoreResults) for r in results)
+    assert not [r for r in results if isinstance(r, Metric)]
+
+
+# --- Timestamp -> age ---------------------------------------------------------
+
+
+def test_parse_timestamp_formats(check):
+    assert check._parse_timestamp(1700000000, "epoch") == 1700000000.0
+    assert check._parse_timestamp(1700000000000, "epoch_ms") == 1700000000.0
+    assert check._parse_timestamp("1700000000", "epoch") == 1700000000.0
+    # ISO 8601 with an explicit zone, with 'Z', and with nanosecond precision.
+    assert check._parse_timestamp("2023-11-14T22:13:20+00:00", "iso") == 1700000000.0
+    assert check._parse_timestamp("2023-11-14T22:13:20Z", "iso") == 1700000000.0
+    assert check._parse_timestamp("2023-11-14T22:13:20.123456789Z", "iso") == 1700000000.123456
+    # No zone at all: read as UTC, not as the monitoring server's local time.
+    assert check._parse_timestamp("2023-11-14T22:13:20", "iso") == 1700000000.0
+    # Auto-detection: seconds, milliseconds, ISO.
+    assert check._parse_timestamp(1700000000, "auto") == 1700000000.0
+    assert check._parse_timestamp(1700000000000, "auto") == 1700000000.0
+    assert check._parse_timestamp("2023-11-14T22:13:20Z", "auto") == 1700000000.0
+    # Unparseable / wrong type.
+    assert check._parse_timestamp("yesterday", "auto") is None
+    assert check._parse_timestamp("2023-11-14T22:13:20Z", "epoch") is None
+    assert check._parse_timestamp(None, "auto") is None
+
+
+def test_timestamp_age_metric_and_summary(check, monkeypatch):
+    _fixed_clock(check, monkeypatch, 1700003600.0)
+    section = _section(
+        check,
+        [_entry("Backup", value=1700000000, value_as=["timestamp", {"format": "epoch"}])],
+    )
+    results = list(check.check_json_api("Backup", {}, section))
+    (metric,) = [r for r in results if isinstance(r, Metric)]
+    assert metric.name == "json_api_age"
+    assert metric.value == 3600.0
+    # The age reads as a duration, and the raw timestamp stays in the Details.
+    assert any(isinstance(r, Result) and r.summary == "Age: 1 hour 0 minutes" for r in results)
+    assert "Timestamp: 1700000000" in _details(results)
+
+
+def test_timestamp_age_checks_upper_levels(check, monkeypatch):
+    _fixed_clock(check, monkeypatch, 1700100000.0)
+    section = _section(
+        check,
+        [
+            _entry(
+                "Backup",
+                value="2023-11-14T22:13:20Z",
+                value_as=["timestamp", {"format": "iso"}],
+                levels_upper=["fixed", [3600.0, 7200.0]],
+            )
+        ],
+    )
+    (result,) = [
+        r
+        for r in check.check_json_api("Backup", {}, section)
+        if isinstance(r, Result) and r.summary.startswith("Age:")
+    ]
+    assert result.state == State.CRIT
+
+
+def test_timestamp_in_the_future_is_a_negative_age(check, monkeypatch):
+    _fixed_clock(check, monkeypatch, 1700000000.0)
+    section = _section(
+        check, [_entry("Cert", value=1700000600, value_as=["timestamp", {"format": "epoch"}])]
+    )
+    results = list(check.check_json_api("Cert", {}, section))
+    (metric,) = [r for r in results if isinstance(r, Metric)]
+    assert metric.value == -600.0
+    # render.timespan refuses negative durations; the age renders with a '-'
+    # instead of failing the service.
+    assert any(isinstance(r, Result) and r.summary == "Age: -10 minutes 0 seconds" for r in results)
+
+
+def test_timestamp_explicit_unit_wins_over_the_age_metric(check, monkeypatch):
+    # A rule that transforms the age into hours picks its own unit; that must not
+    # be overridden by the age metric's duration rendering.
+    _fixed_clock(check, monkeypatch, 1700007200.0)
+    section = _section(
+        check,
+        [
+            _entry(
+                "Backup",
+                value=1700000000,
+                unit="count",
+                calc="value / 3600",
+                value_as=["timestamp", {"format": "epoch"}],
+            )
+        ],
+    )
+    (metric,) = [r for r in check.check_json_api("Backup", {}, section) if isinstance(r, Metric)]
+    assert metric.name == "json_api_count"
+    assert metric.value == 2.0
+
+
+def test_unparseable_timestamp_is_unknown(check, monkeypatch):
+    _fixed_clock(check, monkeypatch, 1700000000.0)
+    section = _section(
+        check, [_entry("Backup", value="never", value_as=["timestamp", {"format": "auto"}])]
+    )
+    result = next(
+        r
+        for r in check.check_json_api("Backup", {}, section)
+        if isinstance(r, Result) and r.summary
+    )
+    assert result.state == State.UNKNOWN
+    assert "Not a valid timestamp" in result.summary
+
+
+def test_string_matching_does_not_apply_to_a_derived_value(check, monkeypatch):
+    # A regex over an age is a misconfiguration: it is noted, and the age is
+    # monitored as a number instead of being matched.
+    _fixed_clock(check, monkeypatch, 1700000000.0)
+    section = _section(
+        check,
+        [
+            _entry(
+                "Backup",
+                value=1700000000,
+                value_as=["timestamp", {"format": "epoch"}],
+                match=["must_match", {"pattern": "1700000000"}],
+            )
+        ],
+    )
+    results = list(check.check_json_api("Backup", {}, section))
+    assert "String matching does not apply to a derived age" in _details(results)
+    assert [r.state for r in results if isinstance(r, Result) and r.summary] == [State.OK]
+
+
+def test_details_name_the_aggregation_and_the_derivation(check, monkeypatch):
+    _fixed_clock(check, monkeypatch, 1700000000.0)
+    section = _section(
+        check,
+        [_entry("Load", value=3, aggregate="avg", path="nodes[*].load")],
+    )
     details = _details(check.check_json_api("Load", {}, section))
     assert "Aggregation: average of the elements" in details
+
+
+def test_rate_summary_is_not_a_full_float_repr(check, monkeypatch):
+    # A rate is a difference over an elapsed time, so it is almost never round;
+    # the summary must stay readable instead of printing every digit.
+    store = {}
+    _counter_store(check, monkeypatch, store)
+    _fixed_clock(check, monkeypatch, 1000.0)
+    list(
+        check.check_json_api(
+            "Reqs", {}, _section(check, [_entry("Reqs", value=0, value_as=["counter", None])])
+        )
+    )
+    _fixed_clock(check, monkeypatch, 1030.0)
+    results = list(
+        check.check_json_api(
+            "Reqs", {}, _section(check, [_entry("Reqs", value=600, value_as=["counter", None])])
+        )
+    )
+    (result,) = [r for r in results if isinstance(r, Result) and r.summary.startswith("Rate:")]
+    assert result.summary == "Rate: 20/s"
+    # A rate that is not round is cut to a few significant digits (the raw float
+    # would read '19.999451493365736'), and a tiny rate keeps enough of them.
+    assert check._fmt_rate(19.999451493365736) == "19.9995"
+    assert check._fmt_rate(0.000123456789) == "0.000123457"

@@ -74,6 +74,22 @@ function stateChoiceKind(value: unknown): StateKind | null {
   return null
 }
 
+/** Infer the 'Interpret the value as' choice from the serialized value.
+ *
+ * `['<ident>', null]` is the counter (its parameter form is a FixedValue),
+ * `['<ident>', {format}]` the timestamp — the mode ident is hashed, so the shape
+ * of the sub-value is what tells them apart. */
+function valueAsKind(value: unknown): 'counter' | 'timestamp' | null {
+  if (!Array.isArray(value) || typeof value[0] !== 'string') {
+    return null
+  }
+  const cfg = value[1]
+  if (cfg !== null && typeof cfg === 'object' && !Array.isArray(cfg) && 'format' in cfg) {
+    return 'timestamp'
+  }
+  return cfg === null ? 'counter' : null
+}
+
 /** How many elements an aggregation would reduce, for the preview note. A
  * wildcard path resolves to one match per element; a wildcard-free path to the
  * array/object holding them. */
@@ -314,6 +330,12 @@ function definedSummary(x: ExtractionValue): string[] {
   if (aggregate) {
     parts.push(_t('aggregate: %{a}', { a: aggregate }))
   }
+  const readAs = valueAsKind(x.value_as)
+  if (readAs === 'counter') {
+    parts.push(_t('per-second rate'))
+  } else if (readAs === 'timestamp') {
+    parts.push(_t('age of the timestamp'))
+  }
   if (typeof x.calc === 'string' && x.calc) {
     parts.push(_t('calc %{c}', { c: x.calc }))
   }
@@ -453,11 +475,13 @@ const reviews = computed<EndpointReview[]>(() =>
         // Optional arithmetic transform applied to a NUMERIC value before
         // levels/display, e.g. `value / 1024 / 1024`.
         const calc = typeof x.calc === 'string' && x.calc ? x.calc : null
-        // An aggregation collapses the whole collection into ONE service. Which
-        // function was picked is a hashed ident here, so the aggregated number is
-        // deliberately NOT recomputed in the preview — the row states what the
-        // site will do instead of showing a value that might differ.
+        // An aggregation collapses the whole collection into ONE service, and a
+        // counter / timestamp is monitored as a rate / an age. Which function was
+        // picked is a hashed ident here and the rate needs two checks, so those
+        // numbers are deliberately NOT recomputed in the preview — the row states
+        // what the site will do instead of showing a value that might differ.
         const aggregate = titleOf(x.aggregate)
+        const readAs = valueAsKind(x.value_as)
         const matches = sample !== null ? resolvePath(sample, path) : []
         if (!matches.length) {
           return [
@@ -482,6 +506,21 @@ const reviews = computed<EndpointReview[]>(() =>
           ]
         }
         return matches.map((m): Row => {
+          if (readAs !== null) {
+            const service = matches.length > 1 && m.label ? `${name} ${m.label}` : name
+            return {
+              service,
+              path,
+              value: m.value,
+              note:
+                readAs === 'counter'
+                  ? _t('%{v} → the rate is computed on the site', { v: fmtValue(m.value) })
+                  : _t('%{v} → the age is computed on the site', { v: fmtValue(m.value) }),
+              defined,
+              state: 'none' as StateKind,
+              labels,
+            }
+          }
           const service = matches.length > 1 && m.label ? `${name} ${m.label}` : name
           let value: Json = m.value
           // Transform the value when `calc` is set and it is numeric. On a bad

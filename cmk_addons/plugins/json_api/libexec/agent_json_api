@@ -554,6 +554,9 @@ def _result(
         "match": spec.get("match"),
         "calc": spec.get("calc"),
         "unit": spec.get("unit"),
+        # Passed through for the check: it derives the per-second rate / the age
+        # (it owns the value store and knows "now").
+        "value_as": spec.get("value_as"),
         # Already applied here; carried along only so the check can say so in the
         # service's Details.
         "aggregate": _aggregate_mode(spec),
