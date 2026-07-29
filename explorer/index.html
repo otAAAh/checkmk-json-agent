@@ -159,7 +159,7 @@ const SAMPLE = {
 // ---- state ----------------------------------------------------------------
 function makeEndpoint(withSample) {
   return {
-    url: "", method: "GET", body: "",
+    name: "", url: "", method: "GET", body: "",
     headers: [],                 // [{name, value}]
     auth: { type: "none", username: "", pwid: "" },  // none | login | token
     verify_cert: true, follow_redirects: true, timeout: "", accept_status: "",
@@ -254,7 +254,9 @@ function renderTabs() {
   state.endpoints.forEach((e, i) => {
     const t = document.createElement("div");
     t.className = "tab" + (i === state.active ? " active" : "");
-    const label = e.url ? e.url.replace(/^https?:\/\//, "") : `endpoint ${i + 1}`;
+    const label = (e.name && e.name.trim())
+      ? e.name.trim()
+      : e.url ? e.url.replace(/^https?:\/\//, "") : `endpoint ${i + 1}`;
     t.innerHTML = `<span>${esc(label.length > 26 ? label.slice(0, 25) + "…" : label)}</span>`;
     t.onclick = () => { state.active = i; renderAll(); };
     if (state.endpoints.length > 1) {
@@ -299,6 +301,7 @@ function renderConn() {
 
   box.innerHTML =
     `<div class="grid2">
+       <label>Name</label><input type="text" id="c-name" value="${escAttr(e.name)}" placeholder="(optional) names the 'JSON API &lt;name&gt;' service, e.g. frontend">
        <label>URL</label><input type="text" id="c-url" value="${escAttr(e.url)}" placeholder="https://app.example.com/actuator/health">
        <label>Method</label><select id="c-method">
          <option${e.method === "GET" ? " selected" : ""}>GET</option>
@@ -339,6 +342,7 @@ function renderConn() {
 
   // text/select bindings (no re-render → keep focus)
   const bind = (id, fn) => { const el = $(id); if (el) el.oninput = fn; };
+  bind("c-name", () => { e.name = $("c-name").value; renderTabs(); renderOutputs(); });
   bind("c-url", () => { e.url = $("c-url").value; renderTabs(); renderOutputs(); });
   bind("c-timeout", () => { e.timeout = $("c-timeout").value; renderOutputs(); });
   bind("c-accept", () => { e.accept_status = $("c-accept").value; renderOutputs(); });
@@ -473,6 +477,7 @@ function addExtraction(path) {
     path,
     label_path: path.includes("[*]") ? guessLabel(path) : "",
     aggregate: "",
+    valueAs: "", tsFormat: "auto",
     flPath: "", flOp: "not_equals", flValue: "",
     unit: "", calc: "", lu_w: "", lu_c: "", ll_w: "", ll_c: "",
     matchMode: "", mmPattern: "", mmState: "2",
@@ -510,6 +515,17 @@ function renderFields() {
         [["equals", "equals"], ["not_equals", "does not equal"], ["regex", "matches regex"], ["not_regex", "does not match regex"]].map(([v, lbl]) =>
           `<option value="${v}"${e.flOp === v ? " selected" : ""}>${lbl}</option>`).join("") +
       `</select><input type="text" data-f="flValue" data-i="${i}" value="${escAttr(e.flValue)}" placeholder="value / regex"></span></div>` +
+      `<div class="row"><label>Read as</label><select data-f="valueAs" data-rerender="1" data-i="${i}">` +
+        [["", "the value itself"], ["counter", "a counter (per-second rate)"], ["timestamp", "a timestamp (age)"]].map(([v, lbl]) =>
+          `<option value="${v}"${e.valueAs === v ? " selected" : ""}>${lbl}</option>`).join("") +
+      `</select></div>` +
+      (e.valueAs === "timestamp"
+        ? `<div class="row"><label>Timestamp format</label><select data-f="tsFormat" data-i="${i}">` +
+            [["auto", "detect automatically"], ["epoch", "Unix epoch seconds"],
+             ["epoch_ms", "Unix epoch milliseconds"], ["iso", "ISO 8601 / RFC 3339"]].map(([v, lbl]) =>
+              `<option value="${v}"${e.tsFormat === v ? " selected" : ""}>${lbl}</option>`).join("") +
+          `</select></div>`
+        : "") +
       `<div class="row"><label>Unit</label><select data-f="unit" data-i="${i}">` +
         ["", "count", "bytes", "seconds", "percent"].map(u =>
           `<option value="${u}"${e.unit === u ? " selected" : ""}>${u || "no unit"}</option>`).join("") +
@@ -568,6 +584,8 @@ function extractionObjs(e) {
     const o = { service: x.service, path: x.path };
     if (x.label_path) o.label_path = x.label_path;
     if (x.aggregate) o.aggregate = x.aggregate;
+    if (x.valueAs === "counter") o.value_as = ["counter", null];
+    else if (x.valueAs === "timestamp") o.value_as = ["timestamp", { format: x.tsFormat || "auto" }];
     if (x.flPath && x.flPath.trim())
       o.filter = { path: x.flPath.trim(), op: x.flOp || "equals", value: x.flValue || "" };
     if (x.unit) o.unit = x.unit;
@@ -596,6 +614,10 @@ function pyExtraction(o) {
   const p = [`'service': ${pyStr(o.service)}`, `'path': ${pyStr(o.path)}`];
   if (o.label_path) p.push(`'label_path': ${pyStr(o.label_path)}`);
   if (o.aggregate) p.push(`'aggregate': ${pyStr(o.aggregate)}`);
+  if (o.value_as) {
+    const [mode, cfg] = o.value_as;
+    p.push(`'value_as': (${pyStr(mode)}, ${cfg === null ? "None" : `{'format': ${pyStr(cfg.format)}}`})`);
+  }
   if (o.filter) p.push(`'filter': {'path': ${pyStr(o.filter.path)}, 'op': ${pyStr(o.filter.op)}, 'value': ${pyStr(o.filter.value)}}`);
   if (o.unit) p.push(`'unit': ${pyStr(o.unit)}`);
   if (o.calc) p.push(`'calc': ${pyStr(o.calc)}`);
@@ -670,6 +692,7 @@ function pyEndpoint(e, indent) {
   const i = " ".repeat(indent);
   const ei = " ".repeat(indent + 4);
   const lines = [];
+  if (e.name && e.name.trim()) lines.push(`${i}'name': ${pyStr(e.name.trim())},`);
   lines.push(`${i}'url': ${pyStr(e.url || "https://app.example.com/health")},`);
   lines.push(`${i}'method': ${pyStr(e.method || "GET")},`);
   if (e.body && e.body.trim()) lines.push(`${i}'body': ${pyStr(e.body)},`);
@@ -707,6 +730,7 @@ function valuePy() {
 function endpointCliObj(e) {
   const o = {
     url: e.url || "https://app.example.com/health",
+    name: (e.name && e.name.trim()) ? e.name.trim() : null,
     method: e.method || "GET",
     body: (e.body && e.body.trim()) ? e.body : null,
     headers: e.headers.filter(h => h.name).map(h => [h.name, h.value]),

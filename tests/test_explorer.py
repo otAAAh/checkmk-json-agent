@@ -112,24 +112,41 @@ def test_explorer_cli_object_covers_required_endpoint_keys(explorer_output: dict
     assert not missing, f"Explorer CLI object omits required keys: {missing}"
 
 
-def test_explorer_emits_the_aggregation(rule_value: dict, explorer_output: dict):
-    # The 'count' boolean is gone; the aggregate choice replaces it and must be
-    # emitted in the ruleset's own shape (a bare choice name).
-    by_service = {x["service"]: x for x in rule_value["endpoints"][0]["extractions"]}
+def test_explorer_emits_the_endpoint_name(rule_value: dict, explorer_output: dict):
+    # The name becomes the item of the endpoint's own service, so it must reach
+    # both the rule value and the agent command line.
+    assert rule_value["endpoints"][0]["name"] == "frontend"
+    assert explorer_output["cli"][0]["name"] == "frontend"
+
+
+def test_explorer_emits_aggregate_and_value_as(rule_value: dict, explorer_output: dict):
+    # The 'count' boolean is gone; aggregate / value_as replace it and must be
+    # emitted in the ruleset's own shapes (a bare string / a cascading tuple).
+    extractions = rule_value["endpoints"][0]["extractions"]
+    by_service = {x["service"]: x for x in extractions}
     assert "count" not in by_service["Health"]
     assert by_service["Node"]["aggregate"] == "avg"
-    # A field without an aggregation must not carry the key at all (it is optional).
+    assert by_service["Backup"]["value_as"] == ("timestamp", {"format": "iso"})
+    assert by_service["Requests"]["value_as"] == ("counter", None)
+    # A field with neither must carry neither (they are optional).
     assert "aggregate" not in by_service["Health"]
+    assert "value_as" not in by_service["Health"]
 
     cli = {x["service"]: x for x in explorer_output["cli"][0]["extractions"]}
     assert cli["Node"]["aggregate"] == "avg"
+    assert cli["Backup"]["value_as"] == ["timestamp", {"format": "iso"}]
+    assert cli["Requests"]["value_as"] == ["counter", None]
 
 
 def test_explorer_choices_match_the_ruleset(explorer_output: dict):
-    # Every aggregation the Explorer offers must exist in the ruleset, or it
-    # generates a rule Checkmk rejects.
+    # Every aggregate / value_as / timestamp-format choice the Explorer offers
+    # must exist in the ruleset, or it generates a rule Checkmk rejects.
     source = (_ROOT / "explorer" / "index.html").read_text()
     ruleset = _RULESET.read_text()
     for choice in ("count", "sum", "avg", "min", "max"):
         assert f'SingleChoiceElement("{choice}"' in ruleset
+    for choice in ("counter", "timestamp"):
+        assert f'name="{choice}"' in ruleset
         assert f'"{choice}"' in source
+    for fmt in ("auto", "epoch", "epoch_ms", "iso"):
+        assert f'"{fmt}"' in ruleset

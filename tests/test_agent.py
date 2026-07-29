@@ -295,7 +295,7 @@ def test_resolve_host_labels_wildcard_value_field(agent):
 def test_process_endpoint_emits_host_labels(agent, monkeypatch):
     # _process_endpoint returns (results, host_labels); stub the fetch (no HTTP).
     doc = {"version": "9.9", "nodes": [{"health": "ok"}]}
-    monkeypatch.setattr(agent, "_fetch", lambda endpoint, secret, debug=False: (doc, None))
+    monkeypatch.setattr(agent, "_fetch", lambda endpoint, secret, debug=False: (doc, None, {}))
     import argparse
 
     endpoint = {
@@ -303,7 +303,7 @@ def test_process_endpoint_emits_host_labels(agent, monkeypatch):
         "extractions": [{"path": "nodes[*].health", "service": "Node"}],
         "host_labels": [{"path": "version"}],
     }
-    results, host_labels = agent._process_endpoint(argparse.Namespace(), 0, endpoint)
+    results, host_labels, _record = agent._process_endpoint(argparse.Namespace(), 0, endpoint)
     assert host_labels == {"version": "9.9"}
     assert results and results[0]["service"].startswith("Node")
 
@@ -346,6 +346,8 @@ class _FakeResponse:
         self._body = body
         self.status_code = status_code
         self.headers = headers or {}
+        # requests exposes the final URL after redirects; _fetch records it.
+        self.url = "http://x"
 
     def __enter__(self):
         return self
@@ -375,7 +377,7 @@ def _capture_request(agent, monkeypatch, response=None):
 
 def test_fetch_disables_redirects_when_configured(agent, monkeypatch):
     captured = _capture_request(agent, monkeypatch)
-    doc, error = agent._fetch({"url": "http://x", "follow_redirects": False}, None)
+    doc, error, _meta = agent._fetch({"url": "http://x", "follow_redirects": False}, None)
     assert error is None and doc == {"ok": 1}
     assert captured["allow_redirects"] is False
 
@@ -401,7 +403,7 @@ def test_fetch_post_sends_the_body(agent, monkeypatch):
 def test_fetch_rejects_oversized_response(agent, monkeypatch):
     monkeypatch.setattr(agent, "_MAX_RESPONSE_BYTES", 8)
     _capture_request(agent, monkeypatch, response=_FakeResponse(body=b"0123456789" * 2))
-    doc, error = agent._fetch({"url": "http://x"}, None)
+    doc, error, _meta = agent._fetch({"url": "http://x"}, None)
     assert doc is None
     assert "exceeds" in error
 
@@ -409,14 +411,14 @@ def test_fetch_rejects_oversized_response(agent, monkeypatch):
 def test_fetch_reports_unexpected_redirect_when_disabled(agent, monkeypatch):
     response = _FakeResponse(body=b"", status_code=302, headers={"Location": "http://internal"})
     _capture_request(agent, monkeypatch, response=response)
-    doc, error = agent._fetch({"url": "http://x", "follow_redirects": False}, None)
+    doc, error, _meta = agent._fetch({"url": "http://x", "follow_redirects": False}, None)
     assert doc is None
     assert "Unexpected 302 redirect to http://internal" in error
 
 
 def test_fetch_non_json_response_is_reported(agent, monkeypatch):
     _capture_request(agent, monkeypatch, response=_FakeResponse(body=b"<html>nope</html>"))
-    doc, error = agent._fetch({"url": "http://x"}, None)
+    doc, error, _meta = agent._fetch({"url": "http://x"}, None)
     assert doc is None
     assert error.startswith("Response is not valid JSON")
 
@@ -431,7 +433,7 @@ def test_process_endpoint_isolates_secret_failure(agent, monkeypatch):
         "auth": "auth_token",
         "extractions": [{"path": "s", "service": "S"}],
     }
-    results, _labels = agent._process_endpoint(
+    results, _labels, _record = agent._process_endpoint(
         agent.parse_arguments(["--endpoint", "{}"]), 0, endpoint
     )
     (result,) = results
@@ -444,9 +446,9 @@ def test_process_endpoint_isolates_extraction_failure(agent, monkeypatch):
         raise RuntimeError("bad path")
 
     monkeypatch.setattr(agent, "_extract", boom)
-    monkeypatch.setattr(agent, "_fetch", lambda *_a: ({"ok": 1}, None))
+    monkeypatch.setattr(agent, "_fetch", lambda *_a: ({"ok": 1}, None, {}))
     endpoint = {"url": "http://x", "extractions": [{"path": "s", "service": "S"}]}
-    results, _labels = agent._process_endpoint(
+    results, _labels, _record = agent._process_endpoint(
         agent.parse_arguments(["--endpoint", "{}"]), 0, endpoint
     )
     (result,) = results
@@ -457,7 +459,7 @@ def test_process_endpoint_isolates_extraction_failure(agent, monkeypatch):
 def test_process_endpoint_isolates_malformed_blob(agent):
     # An endpoint blob missing 'url' must not take down the whole data source.
     endpoint = {"extractions": [{"path": "s", "service": "S"}]}
-    results, _labels = agent._process_endpoint(
+    results, _labels, _record = agent._process_endpoint(
         agent.parse_arguments(["--endpoint", "{}"]), 0, endpoint
     )
     (result,) = results
@@ -467,9 +469,9 @@ def test_process_endpoint_isolates_malformed_blob(agent):
 
 def test_process_endpoint_failure_is_visible_without_extractions(agent, monkeypatch):
     # Even with no extractions to hang it on, a failure must surface as a result.
-    monkeypatch.setattr(agent, "_fetch", lambda *_a: (None, "boom"))
+    monkeypatch.setattr(agent, "_fetch", lambda *_a: (None, "boom", {}))
     endpoint = {"url": "http://x"}
-    results, _labels = agent._process_endpoint(
+    results, _labels, _record = agent._process_endpoint(
         agent.parse_arguments(["--endpoint", "{}"]), 0, endpoint
     )
     (result,) = results
@@ -517,7 +519,7 @@ def test_secret_resolution_v1_direct(agent):
 def test_main_merges_multiple_endpoints(agent, monkeypatch, capsys):
     docs = {"http://a": {"s": "UP"}, "http://b": {"s": "DOWN"}}
     monkeypatch.setattr(
-        agent, "_fetch", lambda endpoint, secret, debug=False: (docs[endpoint["url"]], None)
+        agent, "_fetch", lambda endpoint, secret, debug=False: (docs[endpoint["url"]], None, {})
     )
     endpoints = [
         {"url": "http://a", "extractions": [{"path": "s", "service": "A"}]},
@@ -537,8 +539,8 @@ def test_main_merges_multiple_endpoints(agent, monkeypatch, capsys):
 def test_main_isolates_endpoint_failure(agent, monkeypatch, capsys):
     def fake_fetch(endpoint, secret, debug=False):
         if endpoint["url"] == "http://down":
-            return None, "Request failed: boom"
-        return {"s": "UP"}, None
+            return None, "Request failed: boom", {}
+        return {"s": "UP"}, None, {}
 
     monkeypatch.setattr(agent, "_fetch", fake_fetch)
     argv = [
@@ -563,7 +565,9 @@ def test_main_flushes_stdout(agent, monkeypatch):
     import io
     import sys
 
-    monkeypatch.setattr(agent, "_fetch", lambda endpoint, secret, debug=False: ({"s": "UP"}, None))
+    monkeypatch.setattr(
+        agent, "_fetch", lambda endpoint, secret, debug=False: ({"s": "UP"}, None, {})
+    )
 
     flushed = []
 
@@ -619,7 +623,9 @@ def test_debug_writes_to_stderr_not_stdout(agent):
 
 def test_fetch_debug_redacts_bearer_and_reports_status(agent, monkeypatch, capsys):
     _capture_request(agent, monkeypatch, response=_FakeResponse(body=b'{"ok": 1}'))
-    doc, error = agent._fetch({"url": "http://x", "auth": "auth_token"}, "topsecret", debug=True)
+    doc, error, _meta = agent._fetch(
+        {"url": "http://x", "auth": "auth_token"}, "topsecret", debug=True
+    )
     assert error is None and doc == {"ok": 1}
     captured = capsys.readouterr()
     assert captured.out == ""  # nothing leaks onto stdout (the section channel)
@@ -638,7 +644,9 @@ def test_fetch_without_debug_is_silent(agent, monkeypatch, capsys):
 
 def test_main_debug_keeps_stdout_clean(agent, monkeypatch, capsys):
     # With --debug, diagnostics go to stderr; stdout still carries ONLY the section.
-    monkeypatch.setattr(agent, "_fetch", lambda endpoint, secret, debug=False: ({"s": "UP"}, None))
+    monkeypatch.setattr(
+        agent, "_fetch", lambda endpoint, secret, debug=False: ({"s": "UP"}, None, {})
+    )
     argv = [
         "--endpoint",
         json.dumps({"url": "http://x", "extractions": [{"path": "s", "service": "S"}]}),
@@ -664,7 +672,7 @@ def test_fetch_rejects_non_2xx_by_default(agent, monkeypatch):
     _capture_request(
         agent, monkeypatch, response=_FakeResponse(body=b'{"status": "DOWN"}', status_code=503)
     )
-    doc, error = agent._fetch({"url": "http://x"}, None)
+    doc, error, _meta = agent._fetch({"url": "http://x"}, None)
     assert doc is None
     assert error == "HTTP 503"
 
@@ -675,7 +683,7 @@ def test_fetch_reads_body_of_accepted_status(agent, monkeypatch):
     _capture_request(
         agent, monkeypatch, response=_FakeResponse(body=b'{"status": "DOWN"}', status_code=503)
     )
-    doc, error = agent._fetch({"url": "http://x", "accept_status": [503]}, None)
+    doc, error, _meta = agent._fetch({"url": "http://x", "accept_status": [503]}, None)
     assert error is None
     assert doc == {"status": "DOWN"}
 
@@ -683,7 +691,7 @@ def test_fetch_reads_body_of_accepted_status(agent, monkeypatch):
 def test_fetch_non_accepted_status_still_fails(agent, monkeypatch):
     # Opting 503 in does not widen acceptance to other error codes.
     _capture_request(agent, monkeypatch, response=_FakeResponse(body=b"{}", status_code=500))
-    doc, error = agent._fetch({"url": "http://x", "accept_status": [503]}, None)
+    doc, error, _meta = agent._fetch({"url": "http://x", "accept_status": [503]}, None)
     assert doc is None
     assert error == "HTTP 500"
 
@@ -966,10 +974,112 @@ def test_aggregate_mode_reads_the_legacy_count_flag(agent):
     assert agent._aggregate_mode({"count": True, "aggregate": "avg"}) == "avg"
 
 
-def test_result_carries_the_aggregation_to_the_check(agent):
-    specs = [{"path": "values", "service": "Values", "aggregate": "sum"}]
+def test_result_carries_aggregate_and_value_as_to_the_check(agent):
+    specs = [
+        {
+            "path": "values",
+            "service": "Values",
+            "aggregate": "sum",
+            "value_as": ["counter", None],
+        }
+    ]
     (result,) = agent._extract(AGG_DOC, specs, "http://test/h")
     assert result["aggregate"] == "sum"
+    assert result["value_as"] == ["counter", None]
+
+
+# --- The endpoint's own record -------------------------------------------------
+
+
+def test_fetch_records_status_size_and_final_url(agent, monkeypatch):
+    _capture_request(agent, monkeypatch)
+    _doc, error, meta = agent._fetch({"url": "http://x"}, None)
+    assert error is None
+    assert meta["status"] == 200
+    assert meta["size"] == len(b'{"ok": 1}')
+    assert meta["final_url"] == "http://x"
+    assert meta["elapsed"] is not None and meta["elapsed"] >= 0
+
+
+def test_fetch_records_the_duration_of_a_failed_request(agent, monkeypatch):
+    def boom(_self, _method, _url, **_kwargs):
+        raise agent.requests.exceptions.ConnectTimeout("nope")
+
+    monkeypatch.setattr(agent.requests.Session, "request", boom)
+    _doc, error, meta = agent._fetch({"url": "http://x"}, None)
+    assert error.startswith("Request failed")
+    # A request that failed still took time, and has no status/size to report.
+    assert meta["elapsed"] is not None
+    assert meta["status"] is None and meta["size"] is None
+
+
+def test_process_endpoint_returns_a_record(agent, monkeypatch):
+    monkeypatch.setattr(
+        agent,
+        "_fetch",
+        lambda endpoint, secret, debug=False: ({"s": "UP"}, None, {"status": 200, "elapsed": 0.1}),
+    )
+    endpoint = {"url": "http://x", "name": "frontend", "extractions": []}
+    _results, _labels, record = agent._process_endpoint(
+        agent.parse_arguments(["--endpoint", "{}"]), 0, endpoint
+    )
+    assert record == {
+        "name": "frontend",
+        "url": "http://x",
+        "ok": True,
+        "error": None,
+        "status": 200,
+        "elapsed": 0.1,
+        "size": None,
+        "final_url": None,
+    }
+
+
+def test_endpoint_record_falls_back_to_the_url_as_name(agent):
+    assert agent._endpoint_name({}, "http://x") == "http://x"
+    assert agent._endpoint_name({"name": "  "}, "http://x") == "http://x"
+    assert agent._endpoint_name({"name": "api"}, "http://x") == "api"
+
+
+def test_main_emits_one_endpoint_record_per_endpoint(agent, monkeypatch, capsys):
+    def fake_fetch(endpoint, secret, debug=False):
+        if endpoint["url"] == "http://down":
+            return None, "Request failed: boom", {"status": None, "elapsed": 0.5}
+        return {"s": "UP"}, None, {"status": 200, "elapsed": 0.2, "size": 11}
+
+    monkeypatch.setattr(agent, "_fetch", fake_fetch)
+    argv = [
+        "--endpoint",
+        json.dumps({"url": "http://down", "name": "down", "extractions": []}),
+        "--endpoint",
+        json.dumps({"url": "http://up", "extractions": [{"path": "s", "service": "Up"}]}),
+    ]
+    assert agent.main(argv) == 0
+    payload = json.loads(capsys.readouterr().out.splitlines()[1])
+    by_name = {r["name"]: r for r in payload["endpoints"]}
+    assert by_name["down"]["ok"] is False
+    assert by_name["down"]["error"] == "Request failed: boom"
+    assert by_name["down"]["elapsed"] == 0.5
+    # No name configured: the record is keyed by the URL.
+    assert by_name["http://up"]["ok"] is True
+    assert by_name["http://up"]["status"] == 200
+    assert by_name["http://up"]["size"] == 11
+
+
+def test_main_records_an_endpoint_whose_secret_is_gone(agent, monkeypatch, capsys):
+    def boom(_args, _name):
+        raise RuntimeError("password store entry gone")
+
+    monkeypatch.setattr(agent, "_reveal_secret", boom)
+    argv = [
+        "--endpoint",
+        json.dumps({"url": "http://x", "auth": "auth_token", "extractions": []}),
+    ]
+    assert agent.main(argv) == 0
+    payload = json.loads(capsys.readouterr().out.splitlines()[1])
+    (record,) = payload["endpoints"]
+    assert record["ok"] is False
+    assert record["error"].startswith("Secret resolution failed")
 
 
 def test_aggregate_trims_an_integral_result(agent):

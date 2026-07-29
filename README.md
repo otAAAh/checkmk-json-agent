@@ -46,6 +46,17 @@ Targets **Checkmk 2.4+** and the current stable plugin APIs
   aggregation) to the elements whose sub-field matches — e.g. one service per
   node whose `status` is *not* `ok`, or count only the pods that aren't
   `Running` (operators: equals / not-equals / regex / not-regex)
+- **Counters → per-second rate**: mark a field as a counter and the check
+  monitors its change per second instead of the ever-growing total
+  (`requests_total`, `bytes_sent`), with a rate metric of its own
+- **Timestamps → age**: mark a field as a timestamp (Unix epoch seconds or
+  milliseconds, or ISO 8601 — auto-detected by default) and the check monitors
+  the seconds since, so upper levels alert on stale data (`last_backup`,
+  `updated_at`)
+- **One service per endpoint, for free**: every endpoint also gets a
+  `JSON API <name>` service reporting the request itself — HTTP status,
+  **response time** (with optional levels) and response size — no field
+  configuration needed
 - **Transform the numeric value**: an optional arithmetic expression (using the
   variable `value`) applied to a numeric value before levels and the metric —
   e.g. `value / 1024 / 1024` for bytes→MiB or `(value - 32) * 5 / 9` for °F→°C;
@@ -98,6 +109,7 @@ Each endpoint has:
 
 | Field | Purpose |
 |---|---|
+| **Endpoint name** | Optional short name (e.g. `frontend`). Names the endpoint's own `JSON API <name>` service; without it the URL is used. Macros are resolved here too. It does not change the field service names |
 | **URL** | Full endpoint URL incl. scheme, e.g. `https://app.example.com/actuator/health`. Checkmk macros (`$HOSTNAME$`, `$HOSTADDRESS$`, custom host macros, ...) are resolved against the monitored host, so one rule can be shared across many hosts. |
 | **HTTP method** | `GET` or `POST` |
 | **Request body** | Optional body for `POST` (defaults `Content-Type: application/json` unless you set one). Macros are resolved here too. |
@@ -125,12 +137,37 @@ Each **field to monitor** has:
 | **Service labels** | Optional: attach Checkmk service labels to *this* service from response fields, each key prefixed with `json_api/`. For a `[*]` path the value is resolved within each element (e.g. `name`), so each per-element service gets its own label; otherwise from the response root. Host-wide facts go in the endpoint's **Host labels** instead. Set at discovery, so pick stable, low-cardinality fields |
 | **Aggregate a collection into one value** | Optional: `count` (number of elements) / `sum` / `avg` / `min` / `max` over the array or object at the path — or over the values a `[*]` wildcard expands to, which then yields *one* service instead of one per element. The result is a number, so unit, levels, transform and metric all apply. A path that is neither an array nor an object becomes UNKNOWN, as does `avg`/`min`/`max` over no elements (`sum` over none is `0`) |
 | **Only elements matching a condition** | Optional: for a `[*]` wildcard or an aggregation, keep only elements whose sub-field matches (path + operator equals/not-equals/regex/not-regex + value). Resolved within each element; an element missing the field is dropped. No effect without a wildcard or an aggregation |
+| **Interpret the value as** | Optional: *a counter* — monitor the change **per second** rather than the total (the first check, and any check after the counter went backwards, keeps the previous state because no rate can be computed yet); or *a timestamp* — monitor its **age in seconds** (format `auto` / epoch seconds / epoch milliseconds / ISO 8601; no time zone means UTC). The derived number is what the transform, levels and metric use; string matching does not apply to it |
 | **Unit** | Optional: `count` / `bytes` / `seconds` / `percent` — renders the value in the summary/details *and* the metric and graph with that unit (numeric values only) |
 | **Transform the numeric value** | Optional arithmetic expression on the variable `value` (e.g. `value / 1024 / 1024`), applied to a numeric value before levels and the metric; only numbers, parentheses and `+ - * /` are allowed |
 | **Upper / lower levels** | WARN/CRIT for numeric values |
 | **String matching** | Either *must match a regex* (choose the state when it does **not** match, default CRIT) or *map the value to a state* (separate OK / WARN / CRIT regexes, first full match wins; choose the state when nothing matches, default OK) |
 
 Each **endpoint** also has an optional **Host labels** list: fields resolved from the response root and attached to the monitored *host* (e.g. `version`, `cluster.region`) as `json_api/<key>` — host-wide, needing no service. A path may contain a `[*]` wildcard (e.g. `components[*]`) to emit **one label per element**, keyed `json_api/<key>/<element>` (unique keys), with the value taken from an optional per-element **value field** (default `true`, i.e. set-membership tags). In the wizard, the JSON picker's **`+ host label`** button adds these.
+
+### The endpoint's own service
+
+Besides the field services, each endpoint gets one service of its own —
+**`JSON API <name>`**, named by the endpoint's optional **Name** (its URL when
+it has none). It reports the *request* rather than the data in it: the HTTP
+status code, the response time (measured until the whole body has been read)
+and the response size, with the URL — and the redirect target, when a redirect
+moved the request — in the Details. It needs no field configuration and appears
+for every rule.
+
+If the request fails outright (connection refused, TLS error, timeout, an HTTP
+status the rule does not accept, or a response that is not JSON) the service is
+CRIT and reports the error, while the field services of that endpoint go UNKNOWN
+as before.
+
+Response-time levels and the state for an unreachable endpoint are configured
+in a check-parameters rule of its own:
+
+> **Setup → Service monitoring rules → Applications → Generic JSON API endpoint**
+> (ruleset `checkgroup_parameters:json_api_endpoint`)
+
+Without levels the response time is only recorded as a metric. To get rid of
+these services, use a **Disabled services** rule.
 
 ### Overriding thresholds per folder / host / service
 
@@ -169,11 +206,19 @@ you leave untouched keep the agent-rule defaults.
 - **Aggregation on a non-array/object path** → UNKNOWN; likewise `avg`/`min`/`max`
   when no element is left to aggregate, and any aggregation over a non-numeric
   element
+- **Read as a counter** → the per-second rate is what the levels check, the
+  metric records and the summary shows ("Rate: …"); the counter reading itself
+  moves to the Details. Until a rate can be computed (first check, or the counter
+  went backwards) the service keeps its previous state
+- **Read as a timestamp** → the age in seconds is checked, recorded and shown as
+  a duration ("Age: …"), the raw timestamp moves to the Details; an unparseable
+  value is UNKNOWN, a future timestamp gives a negative age
 - **Plain value** → shown in the summary (numeric values still get a metric)
 - **Levels set on a non-numeric value** → WARN (so the misconfig is visible)
 - **Path not found** → UNKNOWN
 - **Endpoint request failed / not JSON** → that endpoint's services go UNKNOWN
-  with the error; the other endpoints in the rule keep reporting normally
+  with the error, and its own `JSON API <name>` service goes CRIT (configurable);
+  the other endpoints in the rule keep reporting normally
 
 Values are rendered as they appear in JSON, so a regex matches
 `true` / `false` / `null` — not Python's `True` / `False` / `None`.
@@ -183,10 +228,10 @@ automatically to must-match with the CRIT no-match default, so their behaviour
 is unchanged.
 
 The service **Details** view additionally shows where the value came from — the
-JSON path, the source endpoint URL, the aggregation (when set), and the match
-pattern — which makes a misconfigured extraction (wrong path or wrong endpoint)
-easy to spot. This is details-only and never changes the summary line or the
-service state.
+JSON path, the source endpoint URL, the aggregation and value interpretation
+(when set), and the match pattern — which makes a misconfigured extraction
+(wrong path or wrong endpoint) easy to spot. This is details-only and never
+changes the summary line or the service state.
 
 ## Examples
 
@@ -269,6 +314,33 @@ depth` reports `15` and `JSON Deepest queue` reports `12` — where `jobs[*]` or
 works on an object too (e.g. `components` → number of components). Add a
 **condition** to aggregate only part of the collection, e.g. *count only the
 nodes whose `status` does not equal `ok`*.
+
+### Monitoring a counter's rate
+
+Many APIs only expose ever-growing totals, where the interesting number is the
+change per second. Given `GET /metrics` → `{"requests_total": 184203219}`:
+
+| Service name | JSON path | Interpret as | Check |
+|---|---|---|---|
+| `Requests` | `requests_total` | a counter | upper levels `500 / 1000` |
+
+`JSON Requests` then reports e.g. `Rate: 212/s` and alerts on the request rate,
+not on the (meaningless) total; the total itself stays visible in the Details.
+The very first check has no previous reading to compare against, so it keeps the
+service's state and says so.
+
+### Monitoring how stale a timestamp is
+
+Given `GET /status` → `{"last_backup": "2026-07-28T02:00:00Z"}`:
+
+| Service name | JSON path | Interpret as | Check |
+|---|---|---|---|
+| `Backup age` | `last_backup` | a timestamp (format `auto`) | upper levels `93600 / 172800` |
+
+`JSON Backup age` reports the age as a duration (e.g. `Age: 1 day 2 hours`) and
+goes WARN once the last backup is older than 26 hours, CRIT after two days.
+Epoch seconds and milliseconds work the same way; a timestamp without a time
+zone is read as UTC.
 
 ### Multiple endpoints
 
@@ -427,9 +499,12 @@ cmk_addons/plugins/json_api/
   fall back to the unit-less `json_api_value` metric
 - `label_path` uniqueness is enforced by index-suffixing at runtime, not
   validated at config time (the JSON isn't known then)
-- The in-site wizard's review step does not preview an aggregated value: which
-  aggregation was picked is a hashed ident on the form's wire, so it says what
-  the site will compute instead of showing a number that might differ
+- A per-second rate needs two checks before it can be computed, so a counter
+  field is uninformative on its first check (and after the counter resets)
+- The in-site wizard's review step does not preview an aggregated value, a rate
+  or an age: which aggregation was picked is a hashed ident on the form's wire
+  and a rate needs two checks, so it says what the site will compute instead of
+  showing a number that might differ
 
 ## License
 
