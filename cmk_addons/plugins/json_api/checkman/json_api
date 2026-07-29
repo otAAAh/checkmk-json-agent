@@ -58,6 +58,9 @@ description:
  API} (Setup > Service monitoring rules > Applications) without touching the
  agent's connection settings.
 
+ Every endpoint additionally gets a service of its own, {JSON API <name>}, which
+ reports the request itself rather than the data in it - see its own man page.
+
 item:
  The service name configured for the extracted field.
 

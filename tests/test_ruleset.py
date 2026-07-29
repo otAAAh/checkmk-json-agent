@@ -185,3 +185,8 @@ def test_timestamp_formats_match_the_parser(ruleset, check):
     assert check._parse_timestamp(1700000000000, "epoch_ms")
     assert check._parse_timestamp("2023-11-14T22:13:20Z", "iso")
     assert check._parse_timestamp("2023-11-14T22:13:20Z", "auto")
+
+
+def test_endpoint_form_has_an_optional_name(ruleset):
+    name = ruleset._endpoint().elements["name"]
+    assert name.required is False

@@ -21,3 +21,27 @@ def test_ruleset_name_matches_check_plugin(check_ruleset, check):
         check_ruleset.rule_spec_json_api_check.name
         == check.check_plugin_json_api.check_ruleset_name
     )
+
+
+def test_endpoint_parameter_form_builds(check_ruleset):
+    assert check_ruleset._endpoint_parameter_form() is not None
+
+
+def test_endpoint_parameter_form_has_expected_keys(check_ruleset):
+    form = check_ruleset._endpoint_parameter_form()
+    assert set(form.elements) == {"response_time_levels", "state_unreachable"}
+
+
+def test_endpoint_ruleset_name_matches_its_check_plugin(check_ruleset, check):
+    assert check_ruleset.rule_spec_json_api_endpoint_check.name == "json_api_endpoint"
+    assert (
+        check_ruleset.rule_spec_json_api_endpoint_check.name
+        == check.check_plugin_json_api_endpoint.check_ruleset_name
+    )
+
+
+def test_endpoint_plugin_reads_the_field_services_section(check):
+    # The second plugin has no section of its own; it must declare the shared one,
+    # or it would never be executed.
+    assert check.check_plugin_json_api_endpoint.sections == ["json_api"]
+    assert check.agent_section_json_api.name == "json_api"

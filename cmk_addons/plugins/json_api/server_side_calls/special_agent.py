@@ -103,6 +103,9 @@ class ClientCert(BaseModel, frozen=True):
 
 class Endpoint(BaseModel, frozen=True):
     url: str
+    # Optional short name; names the endpoint's own status service (item),
+    # defaulting to the URL.
+    name: str | None = None
     method: Literal["GET", "POST"] = "GET"
     body: str | None = None
     headers: Sequence[Header] = ()
@@ -157,6 +160,9 @@ def _endpoint_json(endpoint: Endpoint, macros: Mapping[str, str]) -> str:
     """
     spec: dict[str, object] = {
         "url": replace_macros(endpoint.url, macros),
+        # The name becomes a service item, so resolve macros here too - that way
+        # one shared rule can still name the endpoint per host.
+        "name": replace_macros(endpoint.name, macros) if endpoint.name is not None else None,
         "method": endpoint.method,
         "body": replace_macros(endpoint.body, macros) if endpoint.body is not None else None,
         "headers": [[h.name, replace_macros(h.value, macros)] for h in endpoint.headers],

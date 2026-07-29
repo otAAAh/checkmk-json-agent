@@ -554,6 +554,7 @@ def test_aggregate_and_value_as_reach_the_agent(ssc):
             "endpoints": [
                 {
                     "url": "https://example.com/health",
+                    "name": "frontend",
                     "extractions": [
                         {
                             "path": "nodes[*].load",
@@ -567,10 +568,29 @@ def test_aggregate_and_value_as_reach_the_agent(ssc):
         },
     )
     (endpoint,) = _endpoints(ssc, args)
+    assert endpoint["name"] == "frontend"
     (extraction,) = endpoint["extractions"]
     assert extraction["aggregate"] == "avg"
     # The CascadingSingleChoice tuple survives the JSON round-trip as a list.
     assert extraction["value_as"] == ["timestamp", {"format": "iso"}]
+
+
+def test_endpoint_name_is_absent_when_unset(ssc):
+    args = _command_args(
+        ssc, {"endpoints": [{"url": "https://example.com/health", "extractions": []}]}
+    )
+    (endpoint,) = _endpoints(ssc, args)
+    assert endpoint["name"] is None
+
+
+def test_endpoint_name_resolves_macros(ssc):
+    args = _command_args(
+        ssc,
+        {"endpoints": [{"url": "https://x/health", "name": "$HOSTNAME$ API", "extractions": []}]},
+        host=_host({"$HOSTNAME$": "web01"}),
+    )
+    (endpoint,) = _endpoints(ssc, args)
+    assert endpoint["name"] == "web01 API"
 
 
 def test_unmigrated_count_flag_still_reaches_the_agent(ssc):

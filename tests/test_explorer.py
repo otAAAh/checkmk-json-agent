@@ -112,6 +112,13 @@ def test_explorer_cli_object_covers_required_endpoint_keys(explorer_output: dict
     assert not missing, f"Explorer CLI object omits required keys: {missing}"
 
 
+def test_explorer_emits_the_endpoint_name(rule_value: dict, explorer_output: dict):
+    # The name becomes the item of the endpoint's own service, so it must reach
+    # both the rule value and the agent command line.
+    assert rule_value["endpoints"][0]["name"] == "frontend"
+    assert explorer_output["cli"][0]["name"] == "frontend"
+
+
 def test_explorer_emits_aggregate_and_value_as(rule_value: dict, explorer_output: dict):
     # The 'count' boolean is gone; aggregate / value_as replace it and must be
     # emitted in the ruleset's own shapes (a bare string / a cascading tuple).

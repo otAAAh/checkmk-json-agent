@@ -1,12 +1,16 @@
 #!/usr/bin/env python3
 # Copyright (C) 2026 Benjamin Knapp
 # SPDX-License-Identifier: GPL-2.0-only
-"""Check for the generic JSON API special agent.
+"""Checks for the generic JSON API special agent.
 
-One service per configured extraction (keyed by its service name). Numeric
-values get levels + a metric; string values get an optional regex match. A value
-may also be read as a counter (monitor its per-second rate) or as a timestamp
-(monitor its age).
+Two plugins read the one ``json_api`` section:
+
+* ``json_api`` - one service per configured extraction (keyed by its service
+  name). Numeric values get levels + a metric; string values get an optional
+  regex match. A value may also be read as a counter (monitor its per-second
+  rate) or as a timestamp (monitor its age).
+* ``json_api_endpoint`` - one service per configured endpoint, reporting the
+  outcome of the request itself: HTTP status, response time and body size.
 """
 
 import ast
@@ -163,12 +167,29 @@ class Item:
 
 
 @dataclass(frozen=True)
+class EndpointStatus:
+    """The outcome of one endpoint's request, for the endpoint's own service."""
+
+    name: str
+    url: str
+    ok: bool
+    error: str | None
+    status: int | None
+    elapsed: float | None
+    size: int | None
+    final_url: str | None
+
+
+@dataclass(frozen=True)
 class Section:
     error: str | None
     items: Mapping[str, Item]
     # Host labels (key -> value) aggregated across all results on this host,
     # last value wins per key. Emitted by the section's host_label_function.
     host_labels: Mapping[str, str] = field(default_factory=dict)
+    # One entry per configured endpoint, keyed by its name (the service item).
+    # Empty for a section written by an agent from before endpoint records.
+    endpoints: Mapping[str, EndpointStatus] = field(default_factory=dict)
 
 
 def _coerce_levels(raw: object) -> _Levels:
@@ -280,6 +301,52 @@ def _coerce_host_labels(raw: object) -> dict[str, str]:
     return {k: v for k, v in raw.items() if isinstance(k, str) and k and isinstance(v, str)}
 
 
+def _optional_number(raw: object) -> float | None:
+    if isinstance(raw, bool) or not isinstance(raw, (int, float)):
+        return None
+    return float(raw) if math.isfinite(raw) else None
+
+
+def _optional_int(raw: object) -> int | None:
+    number = _optional_number(raw)
+    return int(number) if number is not None else None
+
+
+def _optional_str(raw: object) -> str | None:
+    return raw if isinstance(raw, str) and raw else None
+
+
+def _endpoint_statuses(raw: object) -> dict[str, EndpointStatus]:
+    """The agent's ``endpoints`` list, keyed by name (the service item).
+
+    A duplicated name (two endpoints configured with the same one) is
+    disambiguated the same way a duplicated service name is, so no endpoint can
+    silently disappear from the service list.
+    """
+    statuses: dict[str, EndpointStatus] = {}
+    for record in raw if isinstance(raw, list) else []:
+        if not isinstance(record, dict):
+            continue
+        url = _optional_str(record.get("url")) or "?"
+        name = _optional_str(record.get("name")) or url
+        if name in statuses:
+            suffix = 2
+            while f"{name} ({suffix})" in statuses:
+                suffix += 1
+            name = f"{name} ({suffix})"
+        statuses[name] = EndpointStatus(
+            name=name,
+            url=url,
+            ok=bool(record.get("ok")),
+            error=_optional_str(record.get("error")),
+            status=_optional_int(record.get("status")),
+            elapsed=_optional_number(record.get("elapsed")),
+            size=_optional_int(record.get("size")),
+            final_url=_optional_str(record.get("final_url")),
+        )
+    return statuses
+
+
 def parse_json_api(string_table: StringTable) -> Section | None:
     if not string_table:
         return None
@@ -315,6 +382,7 @@ def parse_json_api(string_table: StringTable) -> Section | None:
         error=payload.get("error"),
         items=items,
         host_labels=_coerce_host_labels(payload.get("host_labels")),
+        endpoints=_endpoint_statuses(payload.get("endpoints")),
     )
 
 
@@ -750,6 +818,58 @@ def check_json_api(item: str, params: Mapping[str, object], section: Section) ->
     yield from _context(entry, match)
 
 
+def discover_json_api_endpoint(section: Section) -> DiscoveryResult:
+    """One service per configured endpoint - no field configuration needed.
+
+    These come for free with any rule: whether the API answered at all, with
+    which status, and how long it took. Unwanted ones are removed the standard
+    way, with a "Disabled services" rule.
+    """
+    for name in section.endpoints:
+        yield Service(item=name)
+
+
+def check_json_api_endpoint(
+    item: str, params: Mapping[str, object], section: Section
+) -> CheckResult:
+    endpoint = section.endpoints.get(item)
+    if endpoint is None:
+        return
+
+    details = [f"URL: {endpoint.url}"]
+    # Only worth showing when a redirect actually moved the request elsewhere -
+    # that is exactly the case where the URL in the rule misleads.
+    if endpoint.final_url and endpoint.final_url != endpoint.url:
+        details.append(f"Final URL: {endpoint.final_url}")
+
+    if not endpoint.ok:
+        # The request itself failed (unreachable, TLS, timeout, unexpected status,
+        # not JSON). CRIT by default; a rule can soften it to WARN for an endpoint
+        # that is allowed to be down.
+        state = State(_coerce_state(params.get("state_unreachable"), 2))
+        yield Result(
+            state=state,
+            summary=endpoint.error or "Request failed",
+            details="\n".join([endpoint.error or "Request failed", *details]),
+        )
+        return
+
+    status = f"HTTP {endpoint.status}" if endpoint.status is not None else "Request succeeded"
+    yield Result(state=State.OK, summary=status, details="\n".join([status, *details]))
+
+    if endpoint.elapsed is not None:
+        yield from check_levels(
+            endpoint.elapsed,
+            levels_upper=_coerce_levels(params.get("response_time_levels")),
+            metric_name="json_api_response_time",
+            label="Response time",
+            render_func=render.timespan,
+        )
+    if endpoint.size is not None:
+        yield Result(state=State.OK, notice=f"Response size: {render.bytes(endpoint.size)}")
+        yield Metric("json_api_response_size", endpoint.size)
+
+
 agent_section_json_api = AgentSection(
     name="json_api",
     parse_function=parse_json_api,
@@ -762,5 +882,18 @@ check_plugin_json_api = CheckPlugin(
     discovery_function=discover_json_api,
     check_function=check_json_api,
     check_ruleset_name="json_api",
+    check_default_parameters={},
+)
+
+# A second plugin on the same section: the endpoint's own status service, whose
+# item is the endpoint name (or its URL). Kept apart from the field services so
+# its parameters (response time, state when unreachable) are their own ruleset.
+check_plugin_json_api_endpoint = CheckPlugin(
+    name="json_api_endpoint",
+    sections=["json_api"],
+    service_name="JSON API %s",
+    discovery_function=discover_json_api_endpoint,
+    check_function=check_json_api_endpoint,
+    check_ruleset_name="json_api_endpoint",
     check_default_parameters={},
 )
