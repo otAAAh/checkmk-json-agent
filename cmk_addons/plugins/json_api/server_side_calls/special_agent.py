@@ -89,6 +89,10 @@ class Extraction(BaseModel, frozen=True):
     # ruleset migrates it only when the rule is next opened in Setup), so it is
     # passed on and the agent reads it as aggregate="count".
     count: bool = False
+    # ("counter", None) or ("timestamp", {"format": ...}) from the
+    # CascadingSingleChoice: derive a per-second rate / an age from the value.
+    # Opaque here; the check interprets it.
+    value_as: object = None
 
 
 class ClientCert(BaseModel, frozen=True):

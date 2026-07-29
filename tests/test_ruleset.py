@@ -126,7 +126,8 @@ def test_migrate_extraction_keeps_an_explicit_aggregate(ruleset):
 
 
 def test_extraction_form_has_the_expected_keys(ruleset):
-    # The 'count' boolean was replaced by the 'aggregate' choice.
+    # The 'count' boolean was replaced by the 'aggregate' choice; 'value_as'
+    # carries the counter / timestamp interpretation.
     assert set(ruleset._extraction().elements) == {
         "service",
         "path",
@@ -134,6 +135,7 @@ def test_extraction_form_has_the_expected_keys(ruleset):
         "labels",
         "aggregate",
         "filter",
+        "value_as",
         "unit",
         "levels_upper",
         "levels_lower",
@@ -154,3 +156,32 @@ def test_aggregate_offers_every_function_the_agent_implements(ruleset, agent):
         found, value, error = agent._aggregate_numbers(mode, [1, 2])
         assert found, f"{mode}: {error}"
         assert value is not None
+
+
+def test_value_as_offers_counter_and_timestamp(ruleset, check):
+    choices = {
+        element.name
+        for element in ruleset._extraction().elements["value_as"].parameter_form.elements
+    }
+    assert choices == {"counter", "timestamp"}
+    # Each choice must be one the check knows how to derive.
+    for name in choices:
+        assert check._coerce_value_as([name, {}]) is not None
+
+
+def test_timestamp_formats_match_the_parser(ruleset, check):
+    timestamp = next(
+        element
+        for element in ruleset._extraction().elements["value_as"].parameter_form.elements
+        if element.name == "timestamp"
+    )
+    formats = {
+        element.name
+        for element in timestamp.parameter_form.elements["format"].parameter_form.elements
+    }
+    assert formats == {"auto", "epoch", "epoch_ms", "iso"}
+    # Each offered format parses its canonical example.
+    assert check._parse_timestamp(1700000000, "epoch")
+    assert check._parse_timestamp(1700000000000, "epoch_ms")
+    assert check._parse_timestamp("2023-11-14T22:13:20Z", "iso")
+    assert check._parse_timestamp("2023-11-14T22:13:20Z", "auto")

@@ -966,10 +966,18 @@ def test_aggregate_mode_reads_the_legacy_count_flag(agent):
     assert agent._aggregate_mode({"count": True, "aggregate": "avg"}) == "avg"
 
 
-def test_result_carries_the_aggregation_to_the_check(agent):
-    specs = [{"path": "values", "service": "Values", "aggregate": "sum"}]
+def test_result_carries_aggregate_and_value_as_to_the_check(agent):
+    specs = [
+        {
+            "path": "values",
+            "service": "Values",
+            "aggregate": "sum",
+            "value_as": ["counter", None],
+        }
+    ]
     (result,) = agent._extract(AGG_DOC, specs, "http://test/h")
     assert result["aggregate"] == "sum"
+    assert result["value_as"] == ["counter", None]
 
 
 def test_aggregate_trims_an_integral_result(agent):
