@@ -53,6 +53,10 @@ Targets **Checkmk 2.4+** and the current stable plugin APIs
   milliseconds, or ISO 8601 — auto-detected by default) and the check monitors
   the seconds since, so upper levels alert on stale data (`last_backup`,
   `updated_at`)
+- **One service per endpoint, for free**: every endpoint also gets a
+  `JSON API <name>` service reporting the request itself — HTTP status,
+  **response time** (with optional levels) and response size — no field
+  configuration needed
 - **Transform the numeric value**: an optional arithmetic expression (using the
   variable `value`) applied to a numeric value before levels and the metric —
   e.g. `value / 1024 / 1024` for bytes→MiB or `(value - 32) * 5 / 9` for °F→°C;
@@ -105,6 +109,7 @@ Each endpoint has:
 
 | Field | Purpose |
 |---|---|
+| **Endpoint name** | Optional short name (e.g. `frontend`). Names the endpoint's own `JSON API <name>` service; without it the URL is used. Macros are resolved here too. It does not change the field service names |
 | **URL** | Full endpoint URL incl. scheme, e.g. `https://app.example.com/actuator/health`. Checkmk macros (`$HOSTNAME$`, `$HOSTADDRESS$`, custom host macros, ...) are resolved against the monitored host, so one rule can be shared across many hosts. |
 | **HTTP method** | `GET` or `POST` |
 | **Request body** | Optional body for `POST` (defaults `Content-Type: application/json` unless you set one). Macros are resolved here too. |
@@ -139,6 +144,30 @@ Each **field to monitor** has:
 | **String matching** | Either *must match a regex* (choose the state when it does **not** match, default CRIT) or *map the value to a state* (separate OK / WARN / CRIT regexes, first full match wins; choose the state when nothing matches, default OK) |
 
 Each **endpoint** also has an optional **Host labels** list: fields resolved from the response root and attached to the monitored *host* (e.g. `version`, `cluster.region`) as `json_api/<key>` — host-wide, needing no service. A path may contain a `[*]` wildcard (e.g. `components[*]`) to emit **one label per element**, keyed `json_api/<key>/<element>` (unique keys), with the value taken from an optional per-element **value field** (default `true`, i.e. set-membership tags). In the wizard, the JSON picker's **`+ host label`** button adds these.
+
+### The endpoint's own service
+
+Besides the field services, each endpoint gets one service of its own —
+**`JSON API <name>`**, named by the endpoint's optional **Name** (its URL when
+it has none). It reports the *request* rather than the data in it: the HTTP
+status code, the response time (measured until the whole body has been read)
+and the response size, with the URL — and the redirect target, when a redirect
+moved the request — in the Details. It needs no field configuration and appears
+for every rule.
+
+If the request fails outright (connection refused, TLS error, timeout, an HTTP
+status the rule does not accept, or a response that is not JSON) the service is
+CRIT and reports the error, while the field services of that endpoint go UNKNOWN
+as before.
+
+Response-time levels and the state for an unreachable endpoint are configured
+in a check-parameters rule of its own:
+
+> **Setup → Service monitoring rules → Applications → Generic JSON API endpoint**
+> (ruleset `checkgroup_parameters:json_api_endpoint`)
+
+Without levels the response time is only recorded as a metric. To get rid of
+these services, use a **Disabled services** rule.
 
 ### Overriding thresholds per folder / host / service
 
@@ -188,7 +217,8 @@ you leave untouched keep the agent-rule defaults.
 - **Levels set on a non-numeric value** → WARN (so the misconfig is visible)
 - **Path not found** → UNKNOWN
 - **Endpoint request failed / not JSON** → that endpoint's services go UNKNOWN
-  with the error; the other endpoints in the rule keep reporting normally
+  with the error, and its own `JSON API <name>` service goes CRIT (configurable);
+  the other endpoints in the rule keep reporting normally
 
 Values are rendered as they appear in JSON, so a regex matches
 `true` / `false` / `null` — not Python's `True` / `False` / `None`.

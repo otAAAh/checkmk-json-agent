@@ -159,7 +159,7 @@ const SAMPLE = {
 // ---- state ----------------------------------------------------------------
 function makeEndpoint(withSample) {
   return {
-    url: "", method: "GET", body: "",
+    name: "", url: "", method: "GET", body: "",
     headers: [],                 // [{name, value}]
     auth: { type: "none", username: "", pwid: "" },  // none | login | token
     verify_cert: true, follow_redirects: true, timeout: "", accept_status: "",
@@ -254,7 +254,9 @@ function renderTabs() {
   state.endpoints.forEach((e, i) => {
     const t = document.createElement("div");
     t.className = "tab" + (i === state.active ? " active" : "");
-    const label = e.url ? e.url.replace(/^https?:\/\//, "") : `endpoint ${i + 1}`;
+    const label = (e.name && e.name.trim())
+      ? e.name.trim()
+      : e.url ? e.url.replace(/^https?:\/\//, "") : `endpoint ${i + 1}`;
     t.innerHTML = `<span>${esc(label.length > 26 ? label.slice(0, 25) + "…" : label)}</span>`;
     t.onclick = () => { state.active = i; renderAll(); };
     if (state.endpoints.length > 1) {
@@ -299,6 +301,7 @@ function renderConn() {
 
   box.innerHTML =
     `<div class="grid2">
+       <label>Name</label><input type="text" id="c-name" value="${escAttr(e.name)}" placeholder="(optional) names the 'JSON API &lt;name&gt;' service, e.g. frontend">
        <label>URL</label><input type="text" id="c-url" value="${escAttr(e.url)}" placeholder="https://app.example.com/actuator/health">
        <label>Method</label><select id="c-method">
          <option${e.method === "GET" ? " selected" : ""}>GET</option>
@@ -339,6 +342,7 @@ function renderConn() {
 
   // text/select bindings (no re-render → keep focus)
   const bind = (id, fn) => { const el = $(id); if (el) el.oninput = fn; };
+  bind("c-name", () => { e.name = $("c-name").value; renderTabs(); renderOutputs(); });
   bind("c-url", () => { e.url = $("c-url").value; renderTabs(); renderOutputs(); });
   bind("c-timeout", () => { e.timeout = $("c-timeout").value; renderOutputs(); });
   bind("c-accept", () => { e.accept_status = $("c-accept").value; renderOutputs(); });
@@ -688,6 +692,7 @@ function pyEndpoint(e, indent) {
   const i = " ".repeat(indent);
   const ei = " ".repeat(indent + 4);
   const lines = [];
+  if (e.name && e.name.trim()) lines.push(`${i}'name': ${pyStr(e.name.trim())},`);
   lines.push(`${i}'url': ${pyStr(e.url || "https://app.example.com/health")},`);
   lines.push(`${i}'method': ${pyStr(e.method || "GET")},`);
   if (e.body && e.body.trim()) lines.push(`${i}'body': ${pyStr(e.body)},`);
@@ -725,6 +730,7 @@ function valuePy() {
 function endpointCliObj(e) {
   const o = {
     url: e.url || "https://app.example.com/health",
+    name: (e.name && e.name.trim()) ? e.name.trim() : null,
     method: e.method || "GET",
     body: (e.body && e.body.trim()) ? e.body : null,
     headers: e.headers.filter(h => h.name).map(h => [h.name, h.value]),

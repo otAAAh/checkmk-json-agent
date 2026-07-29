@@ -8,8 +8,14 @@ from types import SimpleNamespace
 from cmk.agent_based.v2 import IgnoreResults, Metric, Result, State
 
 
-def _section(check, results, host_labels=None):
-    payload = {"url": "u", "error": None, "results": results, "host_labels": host_labels or {}}
+def _section(check, results, host_labels=None, endpoints=None):
+    payload = {
+        "url": "u",
+        "error": None,
+        "results": results,
+        "host_labels": host_labels or {},
+        "endpoints": endpoints or [],
+    }
     return check.parse_json_api([[json.dumps(payload)]])
 
 
@@ -835,6 +841,107 @@ def test_details_name_the_aggregation_and_the_derivation(check, monkeypatch):
     )
     details = _details(check.check_json_api("Load", {}, section))
     assert "Aggregation: average of the elements" in details
+
+
+# --- The endpoint's own service ------------------------------------------------
+
+
+def _endpoint(name="api", **kw):
+    base = {
+        "name": name,
+        "url": "https://app/health",
+        "ok": True,
+        "error": None,
+        "status": 200,
+        "elapsed": 0.25,
+        "size": 412,
+        "final_url": "https://app/health",
+    }
+    base.update(kw)
+    return base
+
+
+def test_endpoint_discovery_lists_every_endpoint(check):
+    section = _section(
+        check, [], endpoints=[_endpoint("frontend"), _endpoint("backend", url="https://b/h")]
+    )
+    assert sorted(s.item for s in check.discover_json_api_endpoint(section)) == [
+        "backend",
+        "frontend",
+    ]
+
+
+def test_endpoint_without_a_name_is_keyed_by_url(check):
+    section = _section(check, [], endpoints=[_endpoint(name=None)])
+    assert [s.item for s in check.discover_json_api_endpoint(section)] == ["https://app/health"]
+
+
+def test_endpoint_duplicate_names_are_disambiguated(check):
+    section = _section(
+        check, [], endpoints=[_endpoint("api"), _endpoint("api", url="https://other/h")]
+    )
+    assert sorted(s.item for s in check.discover_json_api_endpoint(section)) == ["api", "api (2)"]
+
+
+def test_endpoint_ok_reports_status_time_and_size(check):
+    section = _section(check, [], endpoints=[_endpoint()])
+    results = list(check.check_json_api_endpoint("api", {}, section))
+    summaries = [r.summary for r in results if isinstance(r, Result) and r.summary]
+    assert "HTTP 200" in summaries
+    metrics = {r.name: r.value for r in results if isinstance(r, Metric)}
+    assert metrics == {"json_api_response_time": 0.25, "json_api_response_size": 412.0}
+    assert all(r.state == State.OK for r in results if isinstance(r, Result))
+    assert "URL: https://app/health" in _details(results)
+
+
+def test_endpoint_response_time_levels(check):
+    section = _section(check, [], endpoints=[_endpoint(elapsed=3.0)])
+    params = {"response_time_levels": ("fixed", (1.0, 2.0))}
+    (result,) = [
+        r
+        for r in check.check_json_api_endpoint("api", params, section)
+        if isinstance(r, Result) and r.summary.startswith("Response time")
+    ]
+    assert result.state == State.CRIT
+
+
+def test_endpoint_failure_is_crit_with_the_error(check):
+    section = _section(
+        check, [], endpoints=[_endpoint(ok=False, error="Request failed: timeout", status=None)]
+    )
+    results = list(check.check_json_api_endpoint("api", {}, section))
+    (result,) = [r for r in results if isinstance(r, Result)]
+    assert result.state == State.CRIT
+    assert result.summary == "Request failed: timeout"
+    # A failed request has no response time to record.
+    assert not [r for r in results if isinstance(r, Metric)]
+
+
+def test_endpoint_failure_state_is_configurable(check):
+    section = _section(check, [], endpoints=[_endpoint(ok=False, error="boom")])
+    params = {"state_unreachable": 1}
+    (result,) = [
+        r for r in check.check_json_api_endpoint("api", params, section) if isinstance(r, Result)
+    ]
+    assert result.state == State.WARN
+
+
+def test_endpoint_redirect_target_is_in_the_details(check):
+    section = _section(check, [], endpoints=[_endpoint(final_url="https://app/health/v2")])
+    details = _details(check.check_json_api_endpoint("api", {}, section))
+    assert "Final URL: https://app/health/v2" in details
+
+
+def test_endpoint_unknown_item_yields_nothing(check):
+    section = _section(check, [], endpoints=[_endpoint()])
+    assert not list(check.check_json_api_endpoint("gone", {}, section))
+
+
+def test_section_without_endpoints_has_no_endpoint_services(check):
+    # A section written by an agent from before endpoint records must not crash.
+    payload = {"results": [], "host_labels": {}}
+    section = check.parse_json_api([[json.dumps(payload)]])
+    assert not list(check.discover_json_api_endpoint(section))
 
 
 def test_rate_summary_is_not_a_full_float_repr(check, monkeypatch):

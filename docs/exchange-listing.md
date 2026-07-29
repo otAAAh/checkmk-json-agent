@@ -26,6 +26,9 @@ included. One rule. Any API. Done.
   monitor its per-second **rate** instead of an ever-growing total
   (`requests_total`); mark it as a **timestamp** and monitor its **age**, so
   upper levels alert on stale data (`last_backup` older than 26 h → WARN).
+- 🩺 **Every endpoint monitors itself** — each endpoint also gets a
+  `JSON API <name>` service with the **HTTP status, response time** (thresholds
+  optional) and response size. Zero configuration; it comes with the rule.
 - 🔗 **Many endpoints, one rule** — poll several APIs together, each with its own
   method, auth, and fields; an unreachable one only affects its own services.
 - 📈 **Thresholds & graphs in Checkmk** — WARN/CRIT and metrics live in *your*

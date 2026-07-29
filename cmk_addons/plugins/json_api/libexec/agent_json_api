@@ -18,7 +18,15 @@ The section payload looks like:
     {"results": [{"service": "...", "path": "...", "url": "...",
                   "found": true, "value": "UP", "error": null,
                   "levels_upper": ["fixed", [80, 90]], "levels_lower": null,
-                  "match": ["must_match", "UP|ok"]}, ...]}
+                  "match": ["must_match", "UP|ok"]}, ...],
+     "endpoints": [{"name": "...", "url": "...", "ok": true, "error": null,
+                    "status": 200, "elapsed": 0.031, "size": 412,
+                    "final_url": "..."}, ...]}
+
+The 'endpoints' list carries one record per configured endpoint - the outcome of
+the request itself (HTTP status, how long it took, how much came back) - which
+becomes the endpoint's own 'JSON API <name>' service, independently of the fields
+extracted from the body.
 """
 
 import argparse
@@ -26,6 +34,7 @@ import json
 import math
 import re
 import sys
+import time
 from collections.abc import Sequence
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -277,7 +286,22 @@ def _client_cert(endpoint: dict) -> str | tuple[str, str] | None:
 
 def _fetch(
     endpoint: dict, secret: str | None, debug: bool = False
-) -> tuple[object | None, str | None]:
+) -> tuple[object | None, str | None, dict]:
+    """Fetch one endpoint: ``(document, error, meta)``.
+
+    ``meta`` describes the request itself - HTTP status, wall-clock duration,
+    body size and the final URL after any redirects - and is filled in on every
+    exit path (a failed request still took time). It feeds the endpoint's own
+    service, so 'the API answered, but slowly' is visible without configuring a
+    field for it.
+    """
+    meta: dict[str, object] = {"status": None, "elapsed": None, "size": None, "final_url": None}
+    started = time.monotonic()
+
+    def _timed() -> dict:
+        meta["elapsed"] = time.monotonic() - started
+        return meta
+
     session, headers = _build_session(endpoint, secret)
     timeout = endpoint.get("timeout")
     method = endpoint.get("method", "GET")
@@ -306,29 +330,34 @@ def _fetch(
         )
         with response:
             status = response.status_code
+            meta["status"] = status
+            meta["final_url"] = response.url
             # With redirects disabled a 3xx is not an error to requests, but it
             # is not the JSON we asked for - report it clearly (this is the SSRF
             # hardening path, where a silent "not valid JSON" would mislead).
             if not allow_redirects and 300 <= status < 400:
                 location = response.headers.get("Location", "?")
                 _debug(debug, f"  HTTP {response.status_code} redirect to {location} (blocked)")
-                return None, (
-                    f"Unexpected {status} redirect to {location} (redirects disabled)"
+                return (
+                    None,
+                    f"Unexpected {status} redirect to {location} (redirects disabled)",
+                    _timed(),
                 )
             # 2xx is always fine; extra codes can be opted in per endpoint so an
             # API that signals via the status code (e.g. 503 + a JSON health
             # body) can still be read. Anything else fails, carrying the code.
             if not (200 <= status < 300 or status in accepted):
                 reason = getattr(response, "reason", "") or ""
-                return None, f"HTTP {status}{f' {reason}' if reason else ''}"
+                return None, f"HTTP {status}{f' {reason}' if reason else ''}", _timed()
             raw = _read_capped(response, _MAX_RESPONSE_BYTES)
     except _ResponseTooLarge as exc:
         _debug(debug, f"  {exc}")
-        return None, str(exc)
+        return None, str(exc), _timed()
     except requests.exceptions.RequestException as exc:
         _debug(debug, f"  request failed: {exc}")
-        return None, f"Request failed: {exc}"
+        return None, f"Request failed: {exc}", _timed()
 
+    meta["size"] = len(raw)
     if debug:
         preview = raw[:_DEBUG_BODY_PREVIEW].decode("utf-8", "replace")
         suffix = " ...(truncated)" if len(raw) > _DEBUG_BODY_PREVIEW else ""
@@ -336,9 +365,9 @@ def _fetch(
         _debug(debug, f"  body: {preview}{suffix}")
 
     try:
-        return json.loads(raw), None
+        return json.loads(raw), None, _timed()
     except ValueError as exc:
-        return None, f"Response is not valid JSON: {exc}"
+        return None, f"Response is not valid JSON: {exc}", _timed()
 
 
 _WILDCARD = "[*]"
@@ -796,22 +825,46 @@ def _element_labels(pairs: list[tuple[str, object]], label_path: str | None) -> 
     ]
 
 
+def _endpoint_name(endpoint: dict, url: str) -> str:
+    """The endpoint's service item: its configured name, else the URL."""
+    name = endpoint.get("name")
+    return name if isinstance(name, str) and name.strip() else url
+
+
+def _endpoint_record(
+    endpoint: dict, url: str, ok: bool, error: str | None, meta: dict | None = None
+) -> dict:
+    """One 'endpoints' entry: the outcome of the request itself."""
+    meta = meta or {}
+    return {
+        "name": _endpoint_name(endpoint, url),
+        "url": url,
+        "ok": ok,
+        "error": error,
+        "status": meta.get("status"),
+        "elapsed": meta.get("elapsed"),
+        "size": meta.get("size"),
+        "final_url": meta.get("final_url"),
+    }
+
+
 def _process_endpoint(
     args: argparse.Namespace, index: int, endpoint: dict
-) -> tuple[list[dict], dict]:
-    """Fetch one endpoint and return its (extraction results, host labels).
+) -> tuple[list[dict], dict, dict]:
+    """Fetch one endpoint: its (extraction results, host labels, own record).
 
     Any failure is confined to this endpoint: secret resolution, the fetch, and
     the extraction (including a malformed endpoint blob, e.g. one missing 'url')
     all fall back to a 'not found' result carrying the error, so the endpoint's
     own services go bad while the rest of the section stays intact. A failed
-    endpoint contributes no host labels.
+    endpoint contributes no host labels, and its record carries the error for its
+    own service.
     """
     url = endpoint.get("url", "?")
     debug = getattr(args, "debug", False)
     _debug(debug, f"endpoint {index}: {url}")
 
-    def _fail(error: str) -> tuple[list[dict], dict]:
+    def _fail(error: str, meta: dict | None = None) -> tuple[list[dict], dict, dict]:
         results = [
             _result(
                 {"path": spec.get("path", "?")}, spec.get("service", "?"), False, None, error, url
@@ -821,7 +874,11 @@ def _process_endpoint(
         ]
         # Guarantee the failure is visible even when the blob carries no usable
         # extractions to hang it on (otherwise it would silently vanish).
-        return (results or [_result({"path": "?"}, url, False, None, error, url)], {})
+        return (
+            results or [_result({"path": "?"}, url, False, None, error, url)],
+            {},
+            _endpoint_record(endpoint, url, False, error, meta),
+        )
 
     try:
         secret = _reveal_secret(args, f"secret_{index}") if endpoint.get("auth") else None
@@ -829,9 +886,9 @@ def _process_endpoint(
         return _fail(f"Secret resolution failed: {exc}")
 
     try:
-        document, error = _fetch(endpoint, secret, debug)
+        document, error, meta = _fetch(endpoint, secret, debug)
         if error is not None:
-            return _fail(error)
+            return _fail(error, meta)
         results = _extract(document, endpoint.get("extractions", []), url)
         host_labels = _resolve_host_labels(endpoint.get("host_labels", []), document)
         if debug:
@@ -844,7 +901,7 @@ def _process_endpoint(
                 _debug(debug, f"  service {result['service']!r} <- {result['path']} -> {outcome}")
             for key, value in host_labels.items():
                 _debug(debug, f"  host label json_api/{key} = {value}")
-        return (results, host_labels)
+        return (results, host_labels, _endpoint_record(endpoint, url, True, None, meta))
     except Exception as exc:  # malformed endpoint blob, unexpected extraction error, ...
         return _fail(f"Endpoint processing failed: {exc}")
 
@@ -855,6 +912,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     endpoints = [json.loads(raw) for raw in args.endpoint]
     results: list[dict] = []
     host_labels: dict[str, str] = {}
+    endpoint_records: list[dict] = []
     if endpoints:
         # Fetch endpoints concurrently so total runtime is the slowest endpoint,
         # not the sum. pool.map preserves input order, keeping the merged section
@@ -864,11 +922,12 @@ def main(argv: Sequence[str] | None = None) -> int:
                 lambda item: _process_endpoint(args, item[0], item[1]),
                 enumerate(endpoints),
             )
-            for endpoint_results, endpoint_host_labels in per_endpoint:
+            for endpoint_results, endpoint_host_labels, record in per_endpoint:
                 results.extend(endpoint_results)
                 host_labels.update(endpoint_host_labels)  # later endpoints win per key
+                endpoint_records.append(record)
 
-    payload = {"results": results, "host_labels": host_labels}
+    payload = {"results": results, "host_labels": host_labels, "endpoints": endpoint_records}
     sys.stdout.write("<<<json_api:sep(0)>>>\n")
     sys.stdout.write(json.dumps(payload) + "\n")
     # Flush explicitly so the section is delivered no matter how stdout is

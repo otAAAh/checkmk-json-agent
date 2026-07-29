@@ -515,6 +515,20 @@ def _endpoint() -> Dictionary:
     return Dictionary(
         title=Title("Endpoint"),
         elements={
+            "name": DictElement(
+                required=False,
+                parameter_form=String(
+                    title=Title("Endpoint name"),
+                    help_text=Help(
+                        "Optional short name for this endpoint, e.g. 'frontend'. It "
+                        "names the endpoint's own service - 'JSON API <name>', which "
+                        "reports the HTTP status and the response time of the "
+                        "request. Without a name the URL is used. It does not change "
+                        "the field service names."
+                    ),
+                    custom_validate=(validators.LengthInRange(min_value=1),),
+                ),
+            ),
             "url": DictElement(
                 required=True,
                 parameter_form=String(

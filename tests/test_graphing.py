@@ -23,6 +23,9 @@ def test_expected_metrics_are_defined(graphing):
         "json_api_percent_rate",
         # The age of a timestamp field.
         "json_api_age",
+        # The endpoint's own service.
+        "json_api_response_time",
+        "json_api_response_size",
     }
 
 
@@ -32,10 +35,11 @@ def test_every_unit_metric_has_a_definition(check, graphing):
 
 
 def test_every_rate_metric_has_a_definition(check, graphing):
-    # Same for the rate metrics and for the age metric the check emits by name.
+    # Same for the rate metrics, and for the age / endpoint metrics the check
+    # emits by name.
     names = _metric_names(graphing)
     assert set(check._UNIT_RATE_METRIC.values()) <= names
-    assert check._AGE_METRIC in names
+    assert {check._AGE_METRIC, "json_api_response_time", "json_api_response_size"} <= names
 
 
 def test_unit_and_rate_metrics_cover_the_same_units(check):

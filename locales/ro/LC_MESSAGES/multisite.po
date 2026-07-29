@@ -6,7 +6,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: checkmk-json-agent\n"
 "Report-Msgid-Bugs-To: https://github.com/otAAAh/checkmk-json-agent/issues\n"
-"POT-Creation-Date: 2026-07-29 11:58+0200\n"
+"POT-Creation-Date: 2026-07-29 11:59+0200\n"
 "PO-Revision-Date: 2026-07-06 12:00+0000\n"
 "Last-Translator: checkmk-json-agent contributors\n"
 "Language-Team: Romanian\n"
@@ -153,7 +153,7 @@ msgid "Field to monitor"
 msgstr "Câmp de monitorizat"
 
 #: cmk_addons/plugins/json_api/rulesets/special_agent.py:210
-#: cmk_addons/plugins/json_api/rulesets/check_parameters.py:51
+#: cmk_addons/plugins/json_api/rulesets/check_parameters.py:99
 msgid "Service name"
 msgstr "Nume serviciu"
 
@@ -163,7 +163,7 @@ msgstr "Devine descrierea serviciului Checkmk pentru acest câmp."
 
 #: cmk_addons/plugins/json_api/rulesets/special_agent.py:218
 #: cmk_addons/plugins/json_api/rulesets/special_agent.py:274
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:712
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:726
 msgid "JSON path"
 msgstr "Cale JSON"
 
@@ -246,7 +246,7 @@ msgstr ""
 "răspunsului pentru o cale fără metacaractere."
 
 #: cmk_addons/plugins/json_api/rulesets/special_agent.py:286
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:724
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:738
 msgid "Label key (optional)"
 msgstr "Cheia etichetei (opțional)"
 
@@ -506,14 +506,31 @@ msgstr ""
 "Celsius)."
 
 #: cmk_addons/plugins/json_api/rulesets/special_agent.py:516
+#: cmk_addons/plugins/json_api/rulesets/check_parameters.py:107
 msgid "Endpoint"
 msgstr "Endpoint"
 
 #: cmk_addons/plugins/json_api/rulesets/special_agent.py:521
+msgid "Endpoint name"
+msgstr "Numele endpointului"
+
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:523
+msgid ""
+"Optional short name for this endpoint, e.g. 'frontend'. It names the "
+"endpoint's own service - 'JSON API <name>', which reports the HTTP status "
+"and the response time of the request. Without a name the URL is used. It "
+"does not change the field service names."
+msgstr ""
+"Nume scurt opțional pentru acest endpoint, de ex. 'frontend'. Denumește "
+"serviciul propriu al endpointului – 'JSON API <nume>', care raportează "
+"starea HTTP și timpul de răspuns al cererii. Fără nume se folosește URL-ul. "
+"Nu schimbă numele serviciilor câmpurilor."
+
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:535
 msgid "URL"
 msgstr "URL"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:523
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:537
 msgid ""
 "Full URL of the JSON endpoint, including scheme, e.g. 'https://app.example."
 "com/actuator/health'."
@@ -521,47 +538,47 @@ msgstr ""
 "URL complet al endpoint-ului JSON, inclusiv schema, de ex. 'https://app."
 "example.com/actuator/health'."
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:532
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:546
 msgid "HTTP method"
 msgstr "Metodă HTTP"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:534
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:548
 msgid "GET"
 msgstr "GET"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:535
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:549
 msgid "POST"
 msgstr "POST"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:543
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:557
 msgid "Request body (for POST)"
 msgstr "Corpul cererii (pentru POST)"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:549
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:563
 msgid "Additional request headers"
 msgstr "Anteturi de cerere suplimentare"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:554
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:568
 msgid "Header name"
 msgstr "Nume antet"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:558
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:572
 msgid "Header value"
 msgstr "Valoare antet"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:571
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:585
 msgid "Verify the TLS certificate"
 msgstr "Verifică certificatul TLS"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:572
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:586
 msgid "Disabling certificate verification is insecure."
 msgstr "Dezactivarea verificării certificatului nu este sigură."
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:579
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:593
 msgid "Custom CA bundle file"
 msgstr "Fișier bundle CA personalizat"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:581
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:595
 msgid ""
 "Path on the Checkmk server to a PEM file holding the CA certificate(s) to "
 "verify the server's certificate against. Use this to trust an internal or "
@@ -573,11 +590,11 @@ msgstr ""
 "avea încredere într-o CA internă sau privată fără a dezactiva verificarea. "
 "Ignorat când verificarea TLS este dezactivată."
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:592
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:606
 msgid "Client certificate (mutual TLS)"
 msgstr "Certificat de client (TLS reciproc)"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:594
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:608
 msgid ""
 "Present a client certificate to the server (mutual TLS). The files must "
 "exist on the Checkmk server. The private key must be unencrypted."
@@ -586,11 +603,11 @@ msgstr ""
 "trebuie să existe pe serverul Checkmk. Cheia privată trebuie să fie "
 "necriptată."
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:602
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:616
 msgid "Client certificate file"
 msgstr "Fișier certificat de client"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:604
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:618
 msgid ""
 "Path to the client certificate (PEM). If the file also contains the private "
 "key, leave the key field empty."
@@ -598,11 +615,11 @@ msgstr ""
 "Calea către certificatul de client (PEM). Dacă fișierul conține și cheia "
 "privată, lăsați câmpul cheii gol."
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:614
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:628
 msgid "Private key file"
 msgstr "Fișier cheie privată"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:616
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:630
 msgid ""
 "Path to the client private key (PEM), if it is not bundled with the "
 "certificate."
@@ -610,11 +627,11 @@ msgstr ""
 "Calea către cheia privată a clientului (PEM), dacă nu este inclusă în "
 "certificat."
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:628
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:642
 msgid "Follow HTTP redirects"
 msgstr "Urmărește redirecționările HTTP"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:630
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:644
 msgid ""
 "On by default. Disable in locked-down environments to harden against SSRF: a "
 "target that redirects (e.g. 3xx to an internal address) will then fail "
@@ -624,19 +641,19 @@ msgstr ""
 "SSRF: o țintă care redirecționează (de ex. 3xx către o adresă internă) va "
 "eșua atunci în loc să fie urmărită până la locația de redirecționare."
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:641
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:655
 msgid "Request timeout (seconds)"
 msgstr "Timp de expirare a cererii (secunde)"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:642
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:656
 msgid "Per-request timeout. Defaults to 30 seconds."
 msgstr "Timp de expirare per cerere. Implicit 30 de secunde."
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:650
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:664
 msgid "Additional accepted HTTP status codes"
 msgstr "Coduri de stare HTTP suplimentare acceptate"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:652
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:666
 msgid ""
 "By default only 2xx responses are read; any other status makes the "
 "endpoint's services UNKNOWN. Add extra status codes to accept here - for "
@@ -651,15 +668,15 @@ msgstr ""
 "răspuns acceptat este analizat și extras ca de obicei. 2xx este întotdeauna "
 "acceptat."
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:660
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:674
 msgid "Status code"
 msgstr "Cod de stare"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:668
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:682
 msgid "HTTP proxy"
 msgstr "Proxy HTTP"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:670
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:684
 msgid ""
 "Route this endpoint's request through an HTTP proxy - useful when the "
 "Checkmk server reaches the API only via a corporate egress proxy. Choose the "
@@ -673,11 +690,11 @@ msgstr ""
 "proxy explicit sau 'fără proxy' pentru a ocoli orice proxy setat în mediu. "
 "Fără această setare, sunt respectate variabilele de proxy ale mediului."
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:684
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:698
 msgid "Fields to monitor"
 msgstr "Câmpuri de monitorizat"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:686
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:700
 msgid ""
 "Each entry becomes one Checkmk service, built from the value found at the "
 "given JSON path."
@@ -685,11 +702,11 @@ msgstr ""
 "Fiecare intrare devine un serviciu Checkmk, construit din valoarea găsită la "
 "calea JSON dată."
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:695
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:709
 msgid "Host labels"
 msgstr "Etichete de gazdă"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:697
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:711
 msgid ""
 "Attach Checkmk host labels to the monitored host, built from fields in this "
 "endpoint's response. Each key is prefixed with 'json_api/' and the value is "
@@ -709,7 +726,7 @@ msgstr ""
 "Setate în timpul descoperirii, deci alegeți câmpuri stabile și cu "
 "cardinalitate redusă."
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:714
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:728
 msgid ""
 "From the response root, e.g. 'version', 'cluster.region', or a '[*]' "
 "wildcard like 'components[*]' for one label per element."
@@ -717,7 +734,7 @@ msgstr ""
 "Din rădăcina răspunsului, de ex. 'version', 'cluster.region' sau un "
 "metacaracter '[*]' precum 'components[*]' pentru o etichetă per element."
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:726
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:740
 msgid ""
 "Defaults to the path's last segment. For a '[*]' path the element id is "
 "appended ('<key>/<element>'). The 'json_api/' prefix is added automatically."
@@ -725,11 +742,11 @@ msgstr ""
 "Implicit, ultimul segment al căii. Pentru o cale '[*]' se adaugă id-ul "
 "elementului ('<key>/<element>'). Prefixul 'json_api/' este adăugat automat."
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:736
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:750
 msgid "Value field (for '[*]' wildcards)"
 msgstr "Câmp de valoare (pentru metacaractere '[*]')"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:738
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:752
 msgid ""
 "For a '[*]' path: a path within each element for the label value (e.g. "
 "'status'). Defaults to 'true' (a set-membership tag). Ignored without a "
@@ -739,11 +756,11 @@ msgstr ""
 "etichetei (de ex. 'status'). Implicit 'true' (o etichetă de apartenență). "
 "Ignorat fără metacaracter."
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:771
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:785
 msgid "Endpoints"
 msgstr "Endpoint-uri"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:773
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:787
 msgid ""
 "One or more HTTP/JSON endpoints. Each is fetched with its own connection "
 "settings and extractions; all results are merged into one section. An "
@@ -754,10 +771,40 @@ msgstr ""
 "singură secțiune. Un endpoint care nu poate fi accesat afectează doar "
 "propriile servicii."
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:788
-#: cmk_addons/plugins/json_api/rulesets/check_parameters.py:48
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:802
+#: cmk_addons/plugins/json_api/rulesets/check_parameters.py:96
 msgid "Generic JSON API"
 msgstr "API JSON generic"
+
+#: cmk_addons/plugins/json_api/rulesets/check_parameters.py:66
+msgid "Upper levels for the response time"
+msgstr "Niveluri superioare pentru timpul de răspuns"
+
+#: cmk_addons/plugins/json_api/rulesets/check_parameters.py:68
+msgid ""
+"How long the request to this endpoint may take, in seconds. Measured from "
+"sending the request to having read the whole response body. Without levels "
+"the response time is only recorded as a metric."
+msgstr ""
+"Cât poate dura cererea către acest endpoint, în secunde. Măsurat de la "
+"trimiterea cererii până la citirea completă a corpului răspunsului. Fără "
+"niveluri, timpul de răspuns este doar înregistrat ca metrică."
+
+#: cmk_addons/plugins/json_api/rulesets/check_parameters.py:81
+msgid "State when the endpoint cannot be read"
+msgstr "Starea când endpointul nu poate fi citit"
+
+#: cmk_addons/plugins/json_api/rulesets/check_parameters.py:83
+msgid ""
+"Applies when the request fails outright: connection refused, a TLS error, a "
+"timeout, an HTTP status that is not accepted, or a response that is not JSON."
+msgstr ""
+"Se aplică atunci când cererea eșuează complet: conexiune refuzată, o eroare "
+"TLS, un timeout, un stare HTTP neacceptată sau un răspuns care nu este JSON."
+
+#: cmk_addons/plugins/json_api/rulesets/check_parameters.py:104
+msgid "Generic JSON API endpoint"
+msgstr "Endpoint API JSON generic"
 
 #: cmk_addons/plugins/json_api/graphing/json_api.py:23
 msgid "Value"
@@ -799,6 +846,14 @@ msgstr "Procentaj pe secundă"
 #: cmk_addons/plugins/json_api/graphing/json_api.py:93
 msgid "Age"
 msgstr "Vechime"
+
+#: cmk_addons/plugins/json_api/graphing/json_api.py:100
+msgid "Response time"
+msgstr "Timp de răspuns"
+
+#: cmk_addons/plugins/json_api/graphing/json_api.py:107
+msgid "Response size"
+msgstr "Dimensiunea răspunsului"
 
 #~ msgid "Count the number of elements at this path"
 #~ msgstr "Numără elementele de la această cale"

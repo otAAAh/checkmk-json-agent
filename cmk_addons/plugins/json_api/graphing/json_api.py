@@ -10,7 +10,7 @@ so services configured before units existed keep their history.
 
 A field read as a counter records the per-second *rate* - a different quantity,
 hence its own metric per unit - and a field read as a timestamp records its
-*age*.
+*age*. The endpoint services add the response time and the response size.
 
 The metric name for each unit is shared with the check (see ``_UNIT_METRIC`` /
 ``_UNIT_RATE_METRIC`` in ``agent_based/json_api.py``); keep the two in sync.
@@ -93,4 +93,18 @@ metric_json_api_age = metrics.Metric(
     title=Title("Age"),
     unit=metrics.Unit(metrics.TimeNotation()),
     color=metrics.Color.YELLOW,
+)
+
+metric_json_api_response_time = metrics.Metric(
+    name="json_api_response_time",
+    title=Title("Response time"),
+    unit=metrics.Unit(metrics.TimeNotation()),
+    color=metrics.Color.LIGHT_BLUE,
+)
+
+metric_json_api_response_size = metrics.Metric(
+    name="json_api_response_size",
+    title=Title("Response size"),
+    unit=metrics.Unit(metrics.IECNotation("B")),
+    color=metrics.Color.LIGHT_GREEN,
 )

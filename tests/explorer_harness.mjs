@@ -35,6 +35,7 @@ src = src.slice(0, cut);
 // ones (POST body, auth, headers, timeout, a scalar extraction with an expected
 // regex, and a wildcard extraction with a label path + levels).
 const FIXTURE = {
+  name: "frontend",
   url: "https://app.example.com/health",
   method: "POST",
   body: '{"q": 1}',
