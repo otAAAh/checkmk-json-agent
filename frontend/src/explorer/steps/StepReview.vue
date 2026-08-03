@@ -109,6 +109,13 @@ function elementCount(matches: { value: Json }[], path: string): number | null {
   return null
 }
 
+/** The 'one host per element' field, or null. A plain String on the wire (not a
+ * hashed choice ident), so it can be read and shown directly. */
+function piggybackField(x: ExtractionValue): string | null {
+  const field = x.piggyback_host
+  return typeof field === 'string' && field.trim() ? field.trim() : null
+}
+
 /** Whether the extraction carries an 'Only elements matching a condition' filter.
  *
  * Only its PRESENCE is determined, never its outcome, and that is deliberate: the
@@ -344,6 +351,12 @@ function evalState(value: Json | undefined, x: ExtractionValue): StateKind {
 /** Human-readable list of the configured thresholds/unit/match rule. */
 function definedSummary(x: ExtractionValue): string[] {
   const parts: string[] = []
+  // Leads the summary: it changes WHERE the services land, which matters more
+  // than any threshold on them. `piggyback_host` is a plain String, not a hashed
+  // choice ident, so it can be shown verbatim.
+  if (typeof x.piggyback_host === 'string' && x.piggyback_host.trim()) {
+    parts.push(_t('one host per element, named by %{f}', { f: x.piggyback_host.trim() }))
+  }
   const unit = titleOf(x.unit)
   if (unit) {
     parts.push(_t('unit %{u}', { u: unit }))
@@ -536,9 +549,15 @@ const reviews = computed<EndpointReview[]>(() =>
             },
           ]
         }
+        // With a host field, every element's service keeps the PLAIN name and lands
+        // on a host of its own, so the label suffix the preview would otherwise
+        // show is not what gets created.
+        const perElementHost = piggybackField(x)
+        const serviceName = (label: string | undefined): string =>
+          perElementHost === null && matches.length > 1 && label ? `${name} ${label}` : name
         return matches.map((m): Row => {
           if (readAs !== null) {
-            const service = matches.length > 1 && m.label ? `${name} ${m.label}` : name
+            const service = serviceName(m.label)
             return {
               service,
               path,
@@ -552,7 +571,7 @@ const reviews = computed<EndpointReview[]>(() =>
               labels,
             }
           }
-          const service = matches.length > 1 && m.label ? `${name} ${m.label}` : name
+          const service = serviceName(m.label)
           let value: Json = m.value
           // Transform the value when `calc` is set and it is numeric. On a bad
           // expression evalCalc returns null: leave the value shown and mark the

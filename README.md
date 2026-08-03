@@ -447,7 +447,7 @@ There are two Explorers — a standalone browser page and an in-site wizard.
 **Standalone page** — [`explorer/index.html`](explorer/index.html) is a
 dependency-free web page (open it directly in a browser — nothing is uploaded
 anywhere). Configure one or more endpoints (URL, method, auth, request body,
-headers, timeout, TLS/redirect toggles), paste each endpoint's sample JSON
+headers, timeout, cache TTL, TLS/redirect toggles), paste each endpoint's sample JSON
 response, click the fields to monitor, set thresholds/labels, and it generates:
 the agent `--endpoint` command line for CLI testing, the rule value for
 `rules.mk`, and a REST API request body + `curl` to create the rule on a site.
