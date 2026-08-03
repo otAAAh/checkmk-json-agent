@@ -94,20 +94,33 @@ def _validate_calc(value: str) -> None:
             raise validators.ValidationError(Message("Only numeric constants are allowed."))
 
 
+def _unique_or_duplicates(value: object, key: str) -> list[str]:
+    """The non-empty values of ``key`` across the endpoints that occur twice."""
+    if not isinstance(value, (list, tuple)):
+        return []
+    values = [
+        ep[key].strip()
+        for ep in value
+        if isinstance(ep, dict) and isinstance(ep.get(key), str) and ep[key].strip()
+    ]
+    return sorted({item for item in values if values.count(item) > 1})
+
+
 def _validate_unique_endpoints(value: object) -> None:
     # No two endpoints may target the same URL — duplicates would create
     # colliding services from the same source.
-    if not isinstance(value, (list, tuple)):
-        return
-    urls = [
-        ep["url"].strip()
-        for ep in value
-        if isinstance(ep, dict) and isinstance(ep.get("url"), str) and ep["url"].strip()
-    ]
-    duplicates = sorted({url for url in urls if urls.count(url) > 1})
-    if duplicates:
+    if duplicates := _unique_or_duplicates(value, "url"):
         raise validators.ValidationError(
             Message("Each endpoint URL must be unique. Duplicated: %s") % ", ".join(duplicates)
+        )
+    # Nor may two carry the same name: it becomes the item of the endpoint's own
+    # service, and a collision there can only be resolved positionally at runtime
+    # ("<name> (2)"). Reordering the endpoints would then move the suffix to the
+    # other one, silently swapping two services' history, downtimes and
+    # acknowledgements with nothing in the UI hinting that anything changed.
+    if duplicates := _unique_or_duplicates(value, "name"):
+        raise validators.ValidationError(
+            Message("Each endpoint name must be unique. Duplicated: %s") % ", ".join(duplicates)
         )
 
 
