@@ -3,6 +3,11 @@
 All notable changes to this project, one section per released version.
 Generated from the git history by `scripts/gen_changelog.py`.
 
+Upgrading? See [UPGRADING.md](UPGRADING.md) for the operator-facing notes —
+service renames, new services appearing on the next discovery, changed check
+results. This file says what changed in the code; that one says what it means for
+a running site.
+
 ## [0.11.0] - 2026-07-29
 
 ### Features
