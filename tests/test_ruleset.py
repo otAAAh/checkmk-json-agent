@@ -190,3 +190,46 @@ def test_timestamp_formats_match_the_parser(ruleset, check):
 def test_endpoint_form_has_an_optional_name(ruleset):
     name = ruleset._endpoint().elements["name"]
     assert name.required is False
+
+
+def _endpoints(*specs):
+    return [{"url": f"https://host{i}/health", **spec} for i, spec in enumerate(specs)]
+
+
+def test_unique_endpoints_accepts_distinct_names(ruleset):
+    ruleset._validate_unique_endpoints(  # must not raise
+        _endpoints({"name": "frontend"}, {"name": "backend"})
+    )
+
+
+def test_unique_endpoints_accepts_unnamed_endpoints(ruleset):
+    # A name is optional; several endpoints without one is the normal case and
+    # each falls back to its own (already-unique) URL.
+    ruleset._validate_unique_endpoints(_endpoints({}, {}))  # must not raise
+
+
+def test_duplicate_endpoint_names_rejected(ruleset):
+    # The name becomes the item of the endpoint's own service. A collision can
+    # only be resolved positionally at runtime, so reordering the endpoints would
+    # swap two services' histories - reject it at config time instead.
+    with pytest.raises(ValidationError, match="frontend"):
+        ruleset._validate_unique_endpoints(_endpoints({"name": "frontend"}, {"name": "frontend"}))
+
+
+def test_duplicate_endpoint_names_compared_without_surrounding_whitespace(ruleset):
+    # The agent strips the name before using it as the item, so ' api ' and 'api'
+    # would collide at runtime; they must collide here too.
+    with pytest.raises(ValidationError):
+        ruleset._validate_unique_endpoints(_endpoints({"name": "api"}, {"name": " api "}))
+
+
+def test_duplicate_endpoint_urls_still_rejected(ruleset):
+    with pytest.raises(ValidationError, match="https://same/health"):
+        ruleset._validate_unique_endpoints(
+            [{"url": "https://same/health"}, {"url": "https://same/health"}]
+        )
+
+
+def test_unique_endpoints_ignores_a_non_list_value(ruleset):
+    ruleset._validate_unique_endpoints(None)  # must not raise
+    ruleset._validate_unique_endpoints("not a list")  # must not raise
