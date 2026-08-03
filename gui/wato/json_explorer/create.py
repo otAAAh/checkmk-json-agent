@@ -23,7 +23,6 @@ from __future__ import annotations
 import json
 from typing import Any
 
-
 from cmk.gui.http import request
 from cmk.gui.pages import AjaxPage, PageContext, PageEndpoint, PageResult, page_registry
 
@@ -85,9 +84,7 @@ class JsonExplorerCreatePage(AjaxPage):
             host_labels = parse_and_validate_frontend_data(
                 host_labels_spec, RawFrontendData(entry.get("host_labels", []))
             )
-            endpoints.append(
-                {**connection, "extractions": extractions, "host_labels": host_labels}
-            )
+            endpoints.append({**connection, "extractions": extractions, "host_labels": host_labels})
 
         result: dict[str, Any] = {"ok": True, "value_raw": repr({"endpoints": endpoints})}
         if placement_raw is not None:

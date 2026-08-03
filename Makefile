@@ -27,14 +27,23 @@ frontend:
 	cp -r frontend/dist/. web/htdocs/json_api/wizard/
 	@echo "Wrote web/htdocs/json_api/wizard/ (index.html + assets/)"
 
+# Keep these in lock-step with the lint-and-build job in .github/workflows/ci.yml:
+# the local targets must be a SUPERSET of what CI enforces, never a subset, or
+# `make format lint` passes and the pipeline still fails. 'gui' ships in the
+# Explorer MKP, so it is production code and is checked like the rest.
+RUFF_SOURCES = cmk_addons scripts tests gui
+# mypy skips 'tests': disallow_untyped_defs is on globally and the suite is
+# deliberately untyped, so including it would mean annotating every test.
+MYPY_SOURCES = cmk_addons scripts gui
+
 format:
-	$(RUFF) format cmk_addons scripts
+	$(RUFF) format $(RUFF_SOURCES)
 
 lint:
-	$(RUFF) check cmk_addons scripts
+	$(RUFF) check $(RUFF_SOURCES)
 
 typecheck:
-	mypy cmk_addons scripts
+	mypy $(MYPY_SOURCES)
 
 test:
 	$(PYTHON) -m pytest tests
