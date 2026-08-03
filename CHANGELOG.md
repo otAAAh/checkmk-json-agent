@@ -3,10 +3,29 @@
 All notable changes to this project, one section per released version.
 Generated from the git history by `scripts/gen_changelog.py`.
 
-Upgrading? See [UPGRADING.md](UPGRADING.md) for the operator-facing notes —
-service renames, new services appearing on the next discovery, changed check
-results. This file says what changed in the code; that one says what it means for
-a running site.
+## [0.12.0] - 2026-08-03
+
+### Features
+
+- Per-endpoint response cache (TTL) ([#132](https://github.com/otAAAh/checkmk-json-agent/pull/132)) ([`cb5091c`](https://github.com/otAAAh/checkmk-json-agent/commit/cb5091c))
+- Report the TLS certificate's remaining validity (closes #128) ([#131](https://github.com/otAAAh/checkmk-json-agent/pull/131)) ([`753bb77`](https://github.com/otAAAh/checkmk-json-agent/commit/753bb77))
+- Create one Checkmk host per '[*]' element (closes #127) ([#130](https://github.com/otAAAh/checkmk-json-agent/pull/130)) ([`e2d3ca2`](https://github.com/otAAAh/checkmk-json-agent/commit/e2d3ca2))
+- Reject two endpoints sharing a name (closes #116) ([#122](https://github.com/otAAAh/checkmk-json-agent/pull/122)) ([`22413fe`](https://github.com/otAAAh/checkmk-json-agent/commit/22413fe))
+
+### Fixes
+
+- Distinguish a null element from a missing container (closes #114) (#120) ([#126](https://github.com/otAAAh/checkmk-json-agent/pull/126)) ([`aedc00f`](https://github.com/otAAAh/checkmk-json-agent/commit/aedc00f))
+- Stop the aggregation preview claiming a pre-filter count (closes #115) ([#123](https://github.com/otAAAh/checkmk-json-agent/pull/123)) ([`5655e4e`](https://github.com/otAAAh/checkmk-json-agent/commit/5655e4e))
+- Keep the query string out of the endpoint service item (closes #111) ([#121](https://github.com/otAAAh/checkmk-json-agent/pull/121)) ([`96dff75`](https://github.com/otAAAh/checkmk-json-agent/commit/96dff75))
+- Count only the elements that have the field (closes #113) ([#119](https://github.com/otAAAh/checkmk-json-agent/pull/119)) ([`8a0c1af`](https://github.com/otAAAh/checkmk-json-agent/commit/8a0c1af))
+- Render a negative duration instead of crashing (closes #110) ([#118](https://github.com/otAAAh/checkmk-json-agent/pull/118)) ([`a20b34f`](https://github.com/otAAAh/checkmk-json-agent/commit/a20b34f))
+
+### Other
+
+- Add UPGRADING.md and put it in the release body (closes #112) ([#125](https://github.com/otAAAh/checkmk-json-agent/pull/125)) ([`e706010`](https://github.com/otAAAh/checkmk-json-agent/commit/e706010))
+- Check gui/ too, and align the make targets with CI (closes #117) ([#124](https://github.com/otAAAh/checkmk-json-agent/pull/124)) ([`55c026f`](https://github.com/otAAAh/checkmk-json-agent/commit/55c026f))
+- Bump the actions group with 2 updates ([#109](https://github.com/otAAAh/checkmk-json-agent/pull/109)) ([`f1f8034`](https://github.com/otAAAh/checkmk-json-agent/commit/f1f8034))
+- Deps: Bump ruff from 0.16.0 to 0.16.1 ([#108](https://github.com/otAAAh/checkmk-json-agent/pull/108)) ([`1f48044`](https://github.com/otAAAh/checkmk-json-agent/commit/1f48044))
 
 ## [0.11.0] - 2026-07-29
 

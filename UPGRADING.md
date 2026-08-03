@@ -12,7 +12,7 @@ this list needs none.
 `scripts/gen_changelog.py --version X.Y.Z` appends the matching section to the
 GitHub Release body, so these notes travel with the release people actually read.
 
-## [Unreleased]
+## [0.12.0]
 
 ### The response cache is opt-in, and deliberately fails loudly
 
