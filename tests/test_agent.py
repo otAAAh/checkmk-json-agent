@@ -958,6 +958,66 @@ def test_aggregate_skips_elements_without_the_value_path(agent):
     assert result["value"] == 5.0
 
 
+def test_count_over_a_wildcard_counts_only_elements_with_the_field(agent):
+    # Naming a field ('[*].load') asks about the elements that HAVE it, so every
+    # mode sees the same set: count agrees with the average over those values,
+    # instead of counting the third element that has no load at all.
+    doc = {"nodes": [{"load": 1}, {"load": 2}, {"other": 9}]}
+    values = {
+        mode: agent._extract(
+            doc, [{"path": "nodes[*].load", "service": "Load", "aggregate": mode}], "u"
+        )[0]["value"]
+        for mode in ("count", "sum", "avg")
+    }
+    assert values == {"count": 2, "sum": 3, "avg": 1.5}
+
+
+def test_count_over_a_wildcard_needs_no_numbers(agent):
+    # Counting is about elements, not values: a collection of strings has a length
+    # just as much as one of numbers does.
+    doc = {"pods": [{"name": "a"}, {"name": "b"}]}
+    specs = [{"path": "pods[*].name", "service": "Pods", "aggregate": "count"}]
+    (result,) = agent._extract(doc, specs, "http://test/h")
+    assert result["value"] == 2
+
+
+def test_count_over_a_wildcard_reports_a_mistyped_value_path(agent):
+    # Counting elements regardless of the field would silently answer 2 here,
+    # hiding the typo. No element has the field, so it is reported like the other
+    # modes report it.
+    doc = {"nodes": [{"load": 1}, {"load": 2}]}
+    specs = [{"path": "nodes[*].lod", "service": "Load", "aggregate": "count"}]
+    (result,) = agent._extract(doc, specs, "http://test/h")
+    assert result["found"] is False
+    assert result["error"] == "path not found in any element"
+
+
+def test_count_over_a_wildcard_is_zero_when_the_filter_matches_nothing(agent):
+    # The headline use case - "how many nodes are NOT ok" - must still answer 0
+    # rather than reporting the value path as missing.
+    doc = {"nodes": [{"status": "ok", "load": 1}, {"status": "ok", "load": 2}]}
+    specs = [
+        {
+            "path": "nodes[*].load",
+            "service": "Unhealthy",
+            "aggregate": "count",
+            "filter": {"path": "status", "op": "not_equals", "value": "ok"},
+        }
+    ]
+    (result,) = agent._extract(doc, specs, "http://test/h")
+    assert result["found"] is True
+    assert result["value"] == 0
+
+
+def test_count_of_a_container_still_counts_every_element(agent):
+    # A wildcard-free path names no field, so there is nothing to be missing:
+    # counting the collection itself is unchanged.
+    doc = {"nodes": [{"load": 1}, {"other": 9}]}
+    specs = [{"path": "nodes", "service": "Nodes", "aggregate": "count"}]
+    (result,) = agent._extract(doc, specs, "http://test/h")
+    assert result["value"] == 2
+
+
 def test_aggregate_numeric_strings(agent):
     doc = {"vals": ["1.5", "2.5"]}
     specs = [{"path": "vals", "service": "Vals", "aggregate": "sum"}]
