@@ -551,12 +551,20 @@ the next discovery, changed check results.
    `UPGRADING.md` under a `## [X.Y.Z]` heading. `gen_changelog.py --version`
    picks it up automatically; nothing else reads the file, so a missing note is
    silent — this step is the whole safeguard.
-4. Tag and push:
+4. Tag and push. Push **both refs in one command**: the CI changelog check
+   regenerates from the tags, so a `main` push that lands before the tag sees no
+   `X.Y.Z` section and fails.
 
    ```sh
    git tag -a vX.Y.Z -m "Release X.Y.Z"
    git push origin main vX.Y.Z
    ```
+
+5. Announce it, if the release is worth announcing: refresh
+   [`docs/exchange-listing.md`](docs/exchange-listing.md) (it enumerates features
+   and quietly falls behind) and write `docs/forum-post-X.Y.Z.md` for
+   forum.checkmk.com — see the 0.12.0 one for the shape. Lead with whatever will
+   generate support questions, not with the longest feature.
 
 The [`Release` workflow](.github/workflows/release.yml) triggers on the tag: it
 verifies the tag matches `pyproject.toml`, builds the MKP, generates that
