@@ -44,6 +44,7 @@ const FIXTURE = {
   verify_cert: true,
   follow_redirects: false,
   timeout: "30",
+  cache_ttl: "300",
   json: "",
   parsedRoot: null,
   parseErr: "",

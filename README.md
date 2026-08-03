@@ -85,6 +85,10 @@ Targets **Checkmk 2.4+** and the current stable plugin APIs
   endpoint that reports its problems with a 503 and a JSON body
 - **HTTP proxy** support per endpoint (environment variables, an explicit proxy
   URL, or bypass) — for APIs reachable only through a corporate egress proxy
+- **Per-endpoint response cache**: an optional TTL reuses the last response
+  instead of asking again — for APIs with a request quota, expensive endpoints,
+  or one rule shared across many hosts, where the request *rate* is the problem
+  rather than the freshness. Off by default
 - Unreachable endpoints and non-JSON responses surface as UNKNOWN on the
   affected services, not a crash
 
@@ -128,6 +132,7 @@ Each endpoint has:
 | **Custom CA bundle file** | Optional; path on the Checkmk server to a PEM file with the CA(s) to verify the server against — trust a private CA without disabling verification. Ignored when verification is off |
 | **Client certificate (mutual TLS)** | Optional; paths on the Checkmk server to the client certificate (PEM) and, if separate, the private key. The key must be unencrypted |
 | **Follow HTTP redirects** | On by default; turn off to harden against redirect-based SSRF |
+| **Re-read at most every (seconds)** | Optional cache TTL. Reuses the last response for this endpoint while it is younger than this, instead of requesting it again — see [Caching responses](#caching-responses). Unset (the default) always fetches fresh |
 | **Request timeout (seconds)** | Optional; defaults to 30 |
 | **Additional accepted HTTP status codes** | Optional; by default only 2xx responses are read (any other status → UNKNOWN). List extra codes (e.g. `503`) to parse and extract their body too. 2xx is always accepted |
 | **HTTP proxy** | Optional; route via the environment's `HTTP_PROXY`/`HTTPS_PROXY`, an explicit proxy URL, or bypass. Unset = honour the environment |
@@ -188,6 +193,39 @@ endpoints with **certificate verification enabled**. Otherwise nothing about the
 certificate is reported (which is *absent*, not *expired*, and never alerts): a
 plain-HTTP endpoint has no certificate, `verify_cert` off yields none, and a
 connection reused from the pool may not expose one either.
+
+### Caching responses
+
+Every check interval, on every host using the rule, the agent requests every
+configured endpoint. For a cheap `/health` that is exactly right. For a
+rate-limited API, an endpoint that takes seconds to compute, or one rule shared
+across fifty hosts, it is how monitoring becomes the outage it was meant to
+detect.
+
+Set **Re-read at most every (seconds)** on such an endpoint and the agent reuses
+the last response while it is younger than that, without touching the network.
+
+Checkmk's own fetcher cache does not cover this: it is host-wide, all-or-nothing,
+and sized by a site-global setting during checking — so it cannot say "cache this
+one rate-limited endpoint for 15 minutes while the cheap one next to it stays
+live".
+
+What the cache deliberately does *not* do:
+
+- **It never hides a failure.** A failing request is not answered from an expired
+  cache. Serving stale data through an outage would defeat the point of
+  monitoring, so the endpoint goes CRIT as it normally would.
+- **It never caches an error.** Only a response that parsed as JSON is stored;
+  otherwise a bad response would be replayed for the whole TTL instead of retried.
+- **It never reports a response time it did not measure.** While a cached body is
+  served, the `JSON API <name>` service says `from cache (N old)` and records no
+  response-time metric — replaying the original measurement would chart a request
+  that never happened.
+
+The cache lives in the site's `tmp` (so it is cleared with the site), one
+owner-only file per endpoint identity — URL, method, body, headers and TLS
+settings — and **never** the credential, which does not reach the agent's endpoint
+blob at all. Stale files from edited rules are pruned automatically.
 
 ### Overriding thresholds per folder / host / service
 

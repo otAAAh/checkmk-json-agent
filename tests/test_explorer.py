@@ -164,3 +164,10 @@ def test_explorer_emits_the_piggyback_host_field(rule_value: dict, explorer_outp
     cli = {x["service"]: x for x in explorer_output["cli"][0]["extractions"]}
     assert cli["Node"]["piggyback_host"] == "name"
     assert "piggyback_host" not in cli["Health"]
+
+
+def test_explorer_emits_the_cache_ttl(rule_value: dict, explorer_output: dict):
+    # The agent owns the cache, so the TTL has to survive into both the rule value
+    # and the '--endpoint' blob or caching is silently off.
+    assert rule_value["endpoints"][0]["cache_ttl"] == 300.0
+    assert explorer_output["cli"][0]["cache_ttl"] == 300.0

@@ -27,6 +27,12 @@ description:
  the service is {CRIT} and reports the error. That state is configurable, so an
  endpoint that is allowed to be unavailable can be a mere {WARN}.
 
+ When the endpoint has a cache TTL configured and its last response is still
+ young enough, the agent serves that instead of making a request. The service
+ then reports {from cache} with the body's age and records no response time,
+ because no request was made; a failing request is never answered from an
+ expired cache, so a real outage still shows up.
+
  Configure the levels for the response time, the levels for the certificate's
  remaining validity, and the state for an unreachable endpoint with the check
  parameters rule {Generic JSON API endpoint} (Setup >

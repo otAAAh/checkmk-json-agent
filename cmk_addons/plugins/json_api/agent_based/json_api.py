@@ -194,6 +194,10 @@ class EndpointStatus:
     # it (HTTPS, verification on, socket still exposed). None means "no
     # certificate info", never "expired".
     cert_expiry: float | None = None
+    # Served from the agent's per-endpoint cache instead of a live request, and
+    # how old that cached body was. A cached serve has no response time.
+    from_cache: bool = False
+    cache_age: float | None = None
 
 
 @dataclass(frozen=True)
@@ -360,6 +364,8 @@ def _endpoint_statuses(raw: object) -> dict[str, EndpointStatus]:
             size=_optional_int(record.get("size")),
             final_url=_optional_str(record.get("final_url")),
             cert_expiry=_optional_number(record.get("cert_expiry")),
+            from_cache=bool(record.get("from_cache")),
+            cache_age=_optional_number(record.get("cache_age")),
         )
     return statuses
 
@@ -872,6 +878,11 @@ def check_json_api_endpoint(
         return
 
     status = f"HTTP {endpoint.status}" if endpoint.status is not None else "Request succeeded"
+    if endpoint.from_cache:
+        # Say so in the SUMMARY, not just the details: "HTTP 200" on its own would
+        # claim the API answered just now, when nothing was asked.
+        age = f" ({_render_seconds(endpoint.cache_age)} old)" if endpoint.cache_age else ""
+        status = f"{status}, from cache{age}"
     yield Result(state=State.OK, summary=status, details="\n".join([status, *details]))
 
     if endpoint.elapsed is not None:
