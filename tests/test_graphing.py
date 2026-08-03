@@ -26,6 +26,8 @@ def test_expected_metrics_are_defined(graphing):
         # The endpoint's own service.
         "json_api_response_time",
         "json_api_response_size",
+        # Remaining validity of the endpoint's TLS certificate, in days.
+        "json_api_cert_expiry",
     }
 
 

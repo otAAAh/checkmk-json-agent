@@ -21,7 +21,7 @@ The section payload looks like:
                   "match": ["must_match", "UP|ok"]}, ...],
      "endpoints": [{"name": "...", "url": "...", "ok": true, "error": null,
                     "status": 200, "elapsed": 0.031, "size": 412,
-                    "final_url": "..."}, ...]}
+                    "final_url": "...", "cert_expiry": 1800000000.0}, ...]}
 
 The 'endpoints' list carries one record per configured endpoint - the outcome of
 the request itself (HTTP status, how long it took, how much came back) - which
@@ -33,6 +33,7 @@ import argparse
 import json
 import math
 import re
+import ssl
 import sys
 import time
 from collections.abc import Sequence
@@ -285,6 +286,37 @@ def _client_cert(endpoint: dict) -> str | tuple[str, str] | None:
     return (cert["cert"], key) if key else cert["cert"]
 
 
+def _peer_cert_expiry(response: requests.Response) -> float | None:
+    """The peer certificate's ``notAfter`` as a Unix epoch, or ``None``.
+
+    Read off the still-open socket: the request is made with ``stream=True`` (so
+    ``_read_capped`` can bound the body), which means the connection is live at
+    this point and no second handshake is needed.
+
+    It does reach through ``requests`` into urllib3's pooled connection, which is
+    not a public API, and there are ordinary reasons for it to come up empty - a
+    reused connection from the pool may not expose the socket, ``verify=False``
+    yields an empty cert dict, and plain HTTP has no certificate at all. So every
+    failure degrades to ``None`` and the endpoint service simply reports no
+    certificate, rather than the agent breaking over a best-effort extra.
+    """
+    try:
+        connection = getattr(response.raw, "connection", None)
+        sock = getattr(connection, "sock", None)
+        cert = sock.getpeercert() if sock is not None else None
+    except Exception:  # noqa: BLE001 - a best-effort extra must never fail a fetch
+        return None
+    if not isinstance(cert, dict):
+        return None
+    not_after = cert.get("notAfter")
+    if not isinstance(not_after, str):
+        return None
+    try:
+        return float(ssl.cert_time_to_seconds(not_after))
+    except ValueError:
+        return None
+
+
 def _fetch(
     endpoint: dict, secret: str | None, debug: bool = False
 ) -> tuple[object | None, str | None, dict]:
@@ -296,7 +328,13 @@ def _fetch(
     service, so 'the API answered, but slowly' is visible without configuring a
     field for it.
     """
-    meta: dict[str, object] = {"status": None, "elapsed": None, "size": None, "final_url": None}
+    meta: dict[str, object] = {
+        "status": None,
+        "elapsed": None,
+        "size": None,
+        "final_url": None,
+        "cert_expiry": None,
+    }
     started = time.monotonic()
 
     def _timed() -> dict:
@@ -333,6 +371,11 @@ def _fetch(
             status = response.status_code
             meta["status"] = status
             meta["final_url"] = response.url
+            # While the socket is still open and before the body is read. Done
+            # here rather than after the status checks so a certificate is still
+            # reported for an endpoint answering 503 - the cert is a property of
+            # the connection, not of the response code.
+            meta["cert_expiry"] = _peer_cert_expiry(response)
             # With redirects disabled a 3xx is not an error to requests, but it
             # is not the JSON we asked for - report it clearly (this is the SSRF
             # hardening path, where a silent "not valid JSON" would mislead).
@@ -924,6 +967,7 @@ def _endpoint_record(
         "elapsed": meta.get("elapsed"),
         "size": meta.get("size"),
         "final_url": meta.get("final_url"),
+        "cert_expiry": meta.get("cert_expiry"),
     }
 
 

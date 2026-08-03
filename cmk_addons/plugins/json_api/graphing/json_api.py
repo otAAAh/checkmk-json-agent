@@ -108,3 +108,12 @@ metric_json_api_response_size = metrics.Metric(
     unit=metrics.Unit(metrics.IECNotation("B")),
     color=metrics.Color.LIGHT_GREEN,
 )
+
+metric_json_api_cert_expiry = metrics.Metric(
+    name="json_api_cert_expiry",
+    title=Title("Certificate expires in"),
+    # Days, not seconds: a certificate policy is written in days ("renew 30 days
+    # out"), so that is the unit the levels and the graph speak.
+    unit=metrics.Unit(metrics.DecimalNotation("days")),
+    color=metrics.Color.LIGHT_ORANGE,
+)

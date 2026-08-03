@@ -1130,6 +1130,7 @@ def test_process_endpoint_returns_a_record(agent, monkeypatch):
         "elapsed": 0.1,
         "size": None,
         "final_url": None,
+        "cert_expiry": None,
     }
 
 
@@ -1360,3 +1361,64 @@ def test_main_emits_no_piggyback_markers_without_piggyback_hosts(agent, monkeypa
     assert agent.main(["--endpoint", json.dumps(endpoint)]) == 0
     out = capsys.readouterr().out
     assert "<<<<" not in out
+
+
+# --- TLS certificate expiry ---------------------------------------------------
+
+
+class _CertSock:
+    def __init__(self, cert):
+        self._cert = cert
+
+    def getpeercert(self):
+        if isinstance(self._cert, Exception):
+            raise self._cert
+        return self._cert
+
+
+class _CertRaw:
+    def __init__(self, sock):
+        self.connection = type("C", (), {"sock": sock})()
+
+
+class _CertResponse:
+    def __init__(self, cert=None, *, raw=True, sock=True):
+        if not raw:
+            self.raw = None
+        else:
+            self.raw = _CertRaw(_CertSock(cert) if sock else None)
+
+
+def test_peer_cert_expiry_reads_not_after(agent):
+    response = _CertResponse({"notAfter": "Nov 14 22:13:20 2023 GMT"})
+    assert agent._peer_cert_expiry(response) == 1700000000.0
+
+
+def test_peer_cert_expiry_degrades_to_none_on_every_failure(agent):
+    # All of these are ORDINARY: a pooled/reused connection may not expose the
+    # socket, verify=False yields an empty dict, plain HTTP has no cert. None of
+    # them may break the fetch - the endpoint service just reports no cert.
+    assert agent._peer_cert_expiry(_CertResponse(sock=False)) is None
+    assert agent._peer_cert_expiry(_CertResponse(raw=False)) is None
+    assert agent._peer_cert_expiry(_CertResponse({})) is None  # verify=False
+    assert agent._peer_cert_expiry(_CertResponse(None)) is None
+    assert agent._peer_cert_expiry(_CertResponse({"notAfter": None})) is None
+    assert agent._peer_cert_expiry(_CertResponse({"notAfter": "not a date"})) is None
+    # A socket that raises (closed, not a TLS socket) is swallowed too.
+    assert agent._peer_cert_expiry(_CertResponse(OSError("closed"))) is None
+
+
+def test_endpoint_record_carries_the_cert_expiry(agent, monkeypatch):
+    monkeypatch.setattr(
+        agent,
+        "_fetch",
+        lambda endpoint, secret, debug=False: (
+            {"s": "UP"},
+            None,
+            {"status": 200, "cert_expiry": 1700000000.0},
+        ),
+    )
+    _results, _labels, record = agent._process_endpoint(
+        agent.parse_arguments(["--endpoint", "{}"]), 0, {"url": "https://x", "extractions": []}
+    )
+    assert record["cert_expiry"] == 1700000000.0

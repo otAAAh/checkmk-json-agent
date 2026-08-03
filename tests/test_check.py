@@ -1062,3 +1062,74 @@ def test_a_piggybacked_section_parses_as_an_ordinary_one(agent, check, monkeypat
         if isinstance(r, Result) and r.summary
     ]
     assert result.state == State.CRIT  # 'DOWN' fails the must-match
+
+
+# --- Endpoint TLS certificate expiry -----------------------------------------
+
+
+def _endpoint_record(**kw):
+    base = {
+        "name": "frontend",
+        "url": "https://x/health",
+        "ok": True,
+        "error": None,
+        "status": 200,
+        "elapsed": 0.01,
+        "size": 10,
+        "final_url": None,
+    }
+    base.update(kw)
+    return base
+
+
+def test_endpoint_reports_certificate_validity_in_days(check, monkeypatch):
+    _fixed_clock(check, monkeypatch, 1700000000.0)
+    section = _section(
+        check, [], endpoints=[_endpoint_record(cert_expiry=1700000000.0 + 42 * 86400)]
+    )
+    results = list(check.check_json_api_endpoint("frontend", {}, section))
+    (metric,) = [r for r in results if isinstance(r, Metric) and r.name == "json_api_cert_expiry"]
+    assert metric.value == 42.0
+    assert "Certificate expires in: 42 days" in _details(results)
+
+
+def test_endpoint_certificate_lower_levels_alert(check, monkeypatch):
+    # Lower levels: the alert is about running out of time.
+    _fixed_clock(check, monkeypatch, 1700000000.0)
+    section = _section(
+        check, [], endpoints=[_endpoint_record(cert_expiry=1700000000.0 + 5 * 86400)]
+    )
+    results = list(
+        check.check_json_api_endpoint(
+            "frontend", {"cert_expiry_levels": ["fixed", [30.0, 7.0]]}, section
+        )
+    )
+    (result,) = [
+        r for r in results if isinstance(r, Result) and "Certificate expires in" in r.details
+    ]
+    assert result.state == State.CRIT
+
+
+def test_endpoint_without_certificate_info_reports_nothing_about_it(check):
+    # Plain HTTP, verify=False, or a pooled connection: absent, not expired.
+    section = _section(check, [], endpoints=[_endpoint_record()])
+    results = list(check.check_json_api_endpoint("frontend", {}, section))
+    assert not [r for r in results if isinstance(r, Metric) and "cert" in r.name]
+    assert "Certificate" not in _details(results)
+
+
+def test_expired_certificate_renders_a_negative_number_of_days(check, monkeypatch):
+    # render.timespan-style crash guard: an expired cert is a negative duration.
+    _fixed_clock(check, monkeypatch, 1700000000.0)
+    section = _section(
+        check, [], endpoints=[_endpoint_record(cert_expiry=1700000000.0 - 3 * 86400)]
+    )
+    results = list(check.check_json_api_endpoint("frontend", {}, section))
+    assert "Certificate expires in: -3 days" in _details(results)
+
+
+def test_render_days_keeps_one_decimal_for_a_partial_day(check):
+    # The last day before expiry must not read as '0 days'.
+    assert check._render_days(42.0) == "42 days"
+    assert check._render_days(0.4) == "0.4 days"
+    assert check._render_days(-3.0) == "-3 days"

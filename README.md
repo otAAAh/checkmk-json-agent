@@ -62,8 +62,10 @@ Targets **Checkmk 2.4+** and the current stable plugin APIs
   `updated_at`)
 - **One service per endpoint, for free**: every endpoint also gets a
   `JSON API <name>` service reporting the request itself — HTTP status,
-  **response time** (with optional levels) and response size — no field
-  configuration needed
+  **response time** (with optional levels), response size and, for HTTPS, the
+  **TLS certificate's remaining validity** (with optional levels in days, read
+  from the connection the agent already makes — no second check against the same
+  URL) — no field configuration needed
 - **Transform the numeric value**: an optional arithmetic expression (using the
   variable `value`) applied to a numeric value before levels and the metric —
   e.g. `value / 1024 / 1024` for bytes→MiB or `(value - 32) * 5 / 9` for °F→°C;
@@ -170,14 +172,22 @@ status the rule does not accept, or a response that is not JSON) the service is
 CRIT and reports the error, while the field services of that endpoint go UNKNOWN
 as before.
 
-Response-time levels and the state for an unreachable endpoint are configured
-in a check-parameters rule of its own:
+Response-time levels, certificate-expiry levels and the state for an unreachable
+endpoint are configured in a check-parameters rule of its own:
 
 > **Setup → Service monitoring rules → Applications → Generic JSON API endpoint**
 > (ruleset `checkgroup_parameters:json_api_endpoint`)
 
-Without levels the response time is only recorded as a metric. To get rid of
-these services, use a **Disabled services** rule.
+Without levels the response time and the certificate's remaining validity are
+only recorded as metrics. To get rid of these services, use a **Disabled
+services** rule.
+
+The certificate is read off the connection the agent is already making, so it
+costs no extra request — but that also means it is only available for **HTTPS**
+endpoints with **certificate verification enabled**. Otherwise nothing about the
+certificate is reported (which is *absent*, not *expired*, and never alerts): a
+plain-HTTP endpoint has no certificate, `verify_cert` off yields none, and a
+connection reused from the pool may not expose one either.
 
 ### Overriding thresholds per folder / host / service
 
