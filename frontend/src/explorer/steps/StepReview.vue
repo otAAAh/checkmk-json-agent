@@ -91,8 +91,10 @@ function valueAsKind(value: unknown): 'counter' | 'timestamp' | null {
 }
 
 /** How many elements an aggregation would reduce, for the preview note. A
- * wildcard path resolves to one match per element; a wildcard-free path to the
- * array/object holding them. */
+ * wildcard path resolves to one match per element that HAS the named field —
+ * which is exactly the set the site aggregates; a wildcard-free path resolves to
+ * the array/object holding them. Does NOT account for a condition; see
+ * `hasFilter`. */
 function elementCount(matches: { value: Json }[], path: string): number | null {
   if (path.includes('[*]')) {
     return matches.length
@@ -105,6 +107,26 @@ function elementCount(matches: { value: Json }[], path: string): number | null {
     return Object.keys(value).length
   }
   return null
+}
+
+/** Whether the extraction carries an 'Only elements matching a condition' filter.
+ *
+ * Only its PRESENCE is determined, never its outcome, and that is deliberate: the
+ * operator is a hashed SingleChoice ident whose only handle is its title, and
+ * those titles are translated ('does not equal' → 'ist ungleich'), so telling
+ * 'equals' from 'matches regex' here would work in an English GUI and silently
+ * mispreview in every other one. Duplicating Python's `re.fullmatch` semantics in
+ * JS would be a second source of drift. A number labelled as pre-filter is honest;
+ * a confidently wrong one is what this preview is meant to avoid.
+ *
+ * `path` and `value` are plain Strings, so presence is reliable. */
+function hasFilter(x: ExtractionValue): boolean {
+  const filt = x.filter
+  if (!filt || typeof filt !== 'object' || Array.isArray(filt)) {
+    return false
+  }
+  const path = (filt as Record<string, unknown>).path
+  return typeof path === 'string' && path.trim() !== ''
 }
 
 /** Infer the match mode from the cfg keys (the mode string is a hashed ident, so
@@ -490,15 +512,24 @@ const reviews = computed<EndpointReview[]>(() =>
         }
         if (aggregate) {
           const elements = elementCount(matches, path)
+          const filtered = hasFilter(x)
+          let note: string
+          if (elements === null) {
+            note = _t('not an array or object — the service will be UNKNOWN')
+          } else if (filtered) {
+            // The condition narrows this set, by how much only the site knows.
+            note = _t('%{n} element(s) before the condition, filtered on the site', {
+              n: String(elements),
+            })
+          } else {
+            note = _t('%{n} element(s), aggregated on the site', { n: String(elements) })
+          }
           return [
             {
               service: name,
               path,
               value: undefined,
-              note:
-                elements === null
-                  ? _t('not an array or object — the service will be UNKNOWN')
-                  : _t('%{n} element(s), aggregated on the site', { n: String(elements) }),
+              note,
               defined,
               state: 'none' as StateKind,
               labels,
