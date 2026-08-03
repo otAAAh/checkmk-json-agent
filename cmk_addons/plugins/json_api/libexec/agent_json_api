@@ -538,8 +538,11 @@ def _aggregate_leaves(
     average load instead of one service per node. The filter applies to the
     element the leaf came from, exactly as it does when fanning out.
 
-    A leaf whose value path is missing is skipped (only the elements that have
-    the field are aggregated), but if NO leaf resolved at all that is reported -
+    A leaf whose value path is missing is skipped, so every mode - 'count'
+    included - sees the same set of elements: the ones that actually have the
+    field. 'nodes[*].load' counts the nodes reporting a load, which is what
+    naming the field asks for, and keeps 'count' consistent with the average
+    over those same values. If NO leaf resolved at all that is reported instead -
     a mistyped value path must not read as an empty collection.
     """
     # A missing container yields exactly one leaf, with no element behind it.
@@ -551,11 +554,13 @@ def _aggregate_leaves(
         for _labels, found, value, _error, element in leaves
         if not filtering or _matches_filter(element, filt)
     ]
-    if mode == "count":
-        return True, len(kept), ""
     values = [value for found, value in kept if found]
     if kept and not values:
         return False, None, "path not found in any element"
+    if mode == "count":
+        # Counting needs no numbers, only elements - a collection of strings has
+        # a length just as much as one of numbers does.
+        return True, len(values), ""
     return _aggregate_numbers(mode, values)
 
 

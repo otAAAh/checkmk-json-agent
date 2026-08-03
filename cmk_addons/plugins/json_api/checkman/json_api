@@ -21,10 +21,14 @@ description:
  maximum. The result is a number, to which the unit, levels, transform and
  metric all apply; a path that holds neither an array nor an object makes the
  service {UNKNOWN}, as does an average, minimum or maximum over no elements at
- all (a sum over none is 0). A {[*]} wildcard or an aggregation may additionally
- be restricted with a filter, so that only the elements whose sub-field matches
- a condition (equals, does not equal, matches or does not match a regular
- expression) become services or are aggregated.
+ all (a sum over none is 0). With a {[*]} wildcard naming a field, every function
+ - the count included - sees only the elements that actually have that field, so
+ {nodes[*].load} counts the nodes reporting a load; if no element has it at all
+ the service goes {UNKNOWN} rather than reporting an empty collection. A {[*]}
+ wildcard or an aggregation may additionally be restricted with a filter, so that
+ only the elements whose sub-field matches a condition (equals, does not equal,
+ matches or does not match a regular expression) become services or are
+ aggregated.
 
  A field may also be read as something other than a plain value. Read as a
  {counter}, the check monitors the change per second instead of the absolute
