@@ -30,6 +30,11 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
 CHANGELOG = REPO / "CHANGELOG.md"
+# Hand-written, per-version operator notes (service renames, new services on the
+# next discovery, ...). Nothing generated ever lands here; it is only *read*, and
+# only for the release body - CHANGELOG.md stays purely derived from the tags, so
+# the CI staleness check keeps working.
+UPGRADING = REPO / "UPGRADING.md"
 
 _VERSION_TAG = re.compile(r"^v(\d+)\.(\d+)\.(\d+)$")
 # Conventional-commit style prefix, e.g. "fix:", "feat(agent):", "ci!:".
@@ -198,6 +203,35 @@ def _full_changelog() -> str:
     return "\n".join(parts).rstrip() + "\n"
 
 
+def upgrade_notes(version: str, text: str | None = None) -> str:
+    """The hand-written UPGRADING.md section for ``version``, or ``""``.
+
+    Sections are ``## [X.Y.Z]`` (optionally followed by anything, e.g. a date) and
+    run until the next ``## `` heading. The body is returned with its ``###``
+    subheadings demoted one level, so it nests under the release notes' own ``##``
+    sections instead of competing with them.
+
+    ``text`` is for tests; by default UPGRADING.md is read. A missing file or a
+    version with no section is not an error - most releases need no notes.
+    """
+    if text is None:
+        if not UPGRADING.is_file():
+            return ""
+        text = UPGRADING.read_text()
+    pattern = re.compile(
+        r"^## \[" + re.escape(version.lstrip("v")) + r"\].*?$(?P<body>.*?)(?=^## |\Z)",
+        re.MULTILINE | re.DOTALL,
+    )
+    found = pattern.search(text)
+    if found is None:
+        return ""
+    body = found.group("body").strip()
+    if not body:
+        return ""
+    demoted = re.sub(r"^###", "####", body, flags=re.MULTILINE)
+    return f"### Upgrade notes\n\n{demoted}\n"
+
+
 def _one_version(version: str) -> str:
     version = version.lstrip("v")
     tag = f"v{version}"
@@ -205,10 +239,19 @@ def _one_version(version: str) -> str:
     if tag in tags:
         idx = tags.index(tag)
         revrange = f"{tags[idx - 1]}..{tag}" if idx > 0 else tag
-        return _render_version(version, _tag_date(tag), _commits(revrange)).rstrip() + "\n"
-    # Not tagged yet (e.g. building notes before the tag exists): use HEAD range.
-    revrange = f"{tags[-1]}..HEAD" if tags else "HEAD"
-    return _render_version(version, None, _commits(revrange)).rstrip() + "\n"
+        rendered = _render_version(version, _tag_date(tag), _commits(revrange))
+    else:
+        # Not tagged yet (e.g. building notes before the tag exists): use HEAD range.
+        revrange = f"{tags[-1]}..HEAD" if tags else "HEAD"
+        rendered = _render_version(version, None, _commits(revrange))
+    notes = upgrade_notes(version)
+    if not notes:
+        return rendered.rstrip() + "\n"
+    # Slot the notes in directly under the "## [X.Y.Z]" header, ahead of the
+    # generated Features/Fixes sections: what breaks matters more to someone
+    # deciding whether to upgrade than what was added.
+    header, _, body = rendered.partition("\n")
+    return f"{header}\n\n{notes.rstrip()}\n{body}".rstrip() + "\n"
 
 
 def main() -> int:

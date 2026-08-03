@@ -451,11 +451,18 @@ compilation needed.
 ## Releasing
 
 Releases are cut from annotated version tags. See [`CHANGELOG.md`](CHANGELOG.md)
-for the per-version history.
+for the per-version history, and [`UPGRADING.md`](UPGRADING.md) for the notes an
+operator needs *before* upgrading — service renames, new services turning up on
+the next discovery, changed check results.
 
 1. Bump `version` in `pyproject.toml` and the `mkp add`/`mkp enable` examples above.
 2. `make changelog` to refresh `CHANGELOG.md`, then commit both.
-3. Tag and push:
+3. If this release renames services, adds services to existing rules, or changes
+   what an existing rule reports, move the `[Unreleased]` block in
+   `UPGRADING.md` under a `## [X.Y.Z]` heading. `gen_changelog.py --version`
+   picks it up automatically; nothing else reads the file, so a missing note is
+   silent — this step is the whole safeguard.
+4. Tag and push:
 
    ```sh
    git tag -a vX.Y.Z -m "Release X.Y.Z"
