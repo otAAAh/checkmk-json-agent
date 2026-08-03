@@ -373,6 +373,12 @@ def _fetch(
 
 _WILDCARD = "[*]"
 
+# The 'element' of a leaf that has no element behind it, because the wildcard's
+# container was missing altogether. A distinct sentinel rather than ``None``:
+# ``None`` is also an ordinary JSON value, so an array holding one (``[null]``)
+# would otherwise be indistinguishable from "there was no array at all".
+_NO_ELEMENT = object()
+
 
 def _split_wildcards(path: str) -> list[str]:
     """Split a path on every '[*]' wildcard into segments.
@@ -546,8 +552,10 @@ def _aggregate_leaves(
     over those same values. If NO leaf resolved at all that is reported instead -
     a mistyped value path must not read as an empty collection.
     """
-    # A missing container yields exactly one leaf, with no element behind it.
-    if len(leaves) == 1 and not leaves[0][1] and leaves[0][4] is None:
+    # A missing container yields exactly one leaf, with no element behind it -
+    # identified by the sentinel, so an array holding a single JSON null (a real
+    # element, with a real length of 1) is not mistaken for it.
+    if len(leaves) == 1 and leaves[0][4] is _NO_ELEMENT:
         return False, None, leaves[0][3]
     filtering = isinstance(filt, dict) and bool(filt.get("path"))
     kept = [
@@ -627,8 +635,8 @@ def _expand_wildcards(
     carries one label per wildcard level (joined into the composite service name
     by the caller); ``label_path`` is resolved relative to each level's element,
     with the array index (or object key) as the fallback. ``element`` is the leaf
-    element node (``None`` when the container was missing) so the caller can
-    resolve per-element service labels against it.
+    element node (``_NO_ELEMENT`` when the container was missing) so the caller
+    can resolve per-element service labels against it.
     """
     # Base case: no more wildcards, ``segments[0]`` is the value path itself.
     if len(segments) == 1:
@@ -643,7 +651,7 @@ def _expand_wildcards(
     found_container, container = _resolve_path(node, container_path)
     pairs = _iter_container(container) if found_container else None
     if pairs is None:
-        return [([], False, None, "array or object not found at wildcard path", None)]
+        return [([], False, None, "array or object not found at wildcard path", _NO_ELEMENT)]
 
     expanded: list[tuple[list[str], bool, object, str, object]] = []
     elements = [element for _default, element in pairs]

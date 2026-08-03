@@ -944,6 +944,44 @@ def test_aggregate_wildcard_missing_container_is_not_found(agent):
     assert "array or object not found" in result["error"]
 
 
+def test_expand_wildcards_distinguishes_a_null_element_from_no_container(agent):
+    # 'element' is how the caller tells "there was no array here" from "there was
+    # an array, holding this". JSON null is an ordinary value, so it must not be
+    # the marker for the first case.
+    (missing,) = agent._expand_wildcards({}, ["nodes", "load"], None)
+    assert missing[4] is agent._NO_ELEMENT
+
+    (null_element,) = agent._expand_wildcards({"nodes": [None]}, ["nodes", "load"], None)
+    assert null_element[4] is None
+
+
+def test_count_of_a_null_element_counts_it(agent):
+    # [null] is a collection of one element, not a missing collection.
+    doc = {"nodes": [None]}
+    specs = [{"path": "nodes[*]", "service": "Nodes", "aggregate": "count"}]
+    (result,) = agent._extract(doc, specs, "http://test/h")
+    assert result["found"] is True
+    assert result["value"] == 1
+
+
+def test_filtered_aggregation_over_a_null_element_is_empty_not_an_error(agent):
+    # The null element is dropped by the filter (nothing to resolve within it),
+    # leaving an empty selection - which counts 0. Reading it as a missing
+    # container instead would report the user's path as wrong.
+    doc = {"nodes": [None]}
+    specs = [
+        {
+            "path": "nodes[*].load",
+            "service": "Load",
+            "aggregate": "count",
+            "filter": {"path": "status", "op": "not_equals", "value": "ok"},
+        }
+    ]
+    (result,) = agent._extract(doc, specs, "http://test/h")
+    assert result["found"] is True
+    assert result["value"] == 0
+
+
 def test_aggregate_wildcard_missing_leaf_path_is_not_found(agent):
     specs = [{"path": "queues[*].nope", "service": "Nope", "aggregate": "sum"}]
     (result,) = agent._extract(AGG_DOC, specs, "http://test/h")
