@@ -34,6 +34,11 @@ Targets **Checkmk 2.4+** and the current stable plugin APIs
   labelled by a field you pick (or the index/key); multiple wildcards
   (e.g. `pods[*].containers[*].ready`) expand the cartesian product, with
   composite `<pod> / <container>` labels
+- **One Checkmk host per element** (piggyback): instead of many services on the
+  polling host, name a field within each `[*]` element and every element becomes
+  a host of its own — so an API describing a fleet gives you hosts, each with its
+  own services, downtimes, contact groups and availability, not just a long
+  service list
 - **Aggregate a collection into one value**: where `[*]` fans a collection out
   into one service per element, an aggregation collapses it into a single
   service — the **number of elements** (queue length, number of unhealthy
@@ -136,6 +141,7 @@ Each **field to monitor** has:
 | **Service name** | Becomes the service (shown as `JSON <name>`) |
 | **JSON path** | Dotted path; use `[*]` for array discovery |
 | **Per-element name suffix** | For `[*]`: field within each element, appended to the service name to tell the per-element services apart (defaults to the array index); it does not replace the service name |
+| **Create one host per element, named by this field** | Optional, for `[*]`: field within each element holding a **Checkmk host name**. Each element then becomes a piggyback host carrying this service under its plain name (the host says which element it is, so no name suffix is added). Set the same field on several fields of the endpoint to collect them on the same hosts. Only host-name-safe characters are kept (letters, digits, `-`, `_`, `.`); anything else becomes `_`. An element whose field is missing keeps its service on the polling host. **The hosts must exist in Checkmk** or the data is held and never monitored — see [One host per element](#one-host-per-element) |
 | **Service labels** | Optional: attach Checkmk service labels to *this* service from response fields, each key prefixed with `json_api/`. For a `[*]` path the value is resolved within each element (e.g. `name`), so each per-element service gets its own label; otherwise from the response root. Host-wide facts go in the endpoint's **Host labels** instead. Set at discovery, so pick stable, low-cardinality fields |
 | **Aggregate a collection into one value** | Optional: `count` (number of elements) / `sum` / `avg` / `min` / `max` over the array or object at the path — or over the values a `[*]` wildcard expands to, which then yields *one* service instead of one per element. The result is a number, so unit, levels, transform and metric all apply. Where the `[*]` path names a field, every function — `count` included — only sees the elements that have it (so `nodes[*].load` counts the nodes reporting a load, and a path no element has becomes UNKNOWN). A path that is neither an array nor an object becomes UNKNOWN, as does `avg`/`min`/`max` over no elements (`sum` over none is `0`) |
 | **Only elements matching a condition** | Optional: for a `[*]` wildcard or an aggregation, keep only elements whose sub-field matches (path + operator equals/not-equals/regex/not-regex + value). Resolved within each element; an element missing the field is dropped. No effect without a wildcard or an aggregation |
@@ -295,6 +301,37 @@ Given a payload with a `nodes` array:
 Produces `JSON Node web-1` (OK) and `JSON Node web-2` (CRIT). If a label value
 repeats across elements, every occurrence is suffixed with its index so two
 elements never collapse into one service.
+
+### One host per element
+
+The same payload, but with **Create one host per element, named by this field**
+set to `name` instead of a name suffix:
+
+| Service name | JSON path | Create one host per element | Check |
+|---|---|---|---|
+| `Node` | `nodes[*].status` | `name` | must match `UP` (else CRIT) |
+
+Now the elements are *hosts*, not services: host `web-1` gets `JSON Node` (OK)
+and host `web-2` gets `JSON Node` (CRIT). Add more fields with the same host
+field (`nodes[*].load`, `nodes[*].version`) and they land on those same hosts.
+
+Why bother, when the services already told you the same thing? Because a host is
+a first-class object in Checkmk and an array element isn't: each element gets its
+own downtimes, acknowledgements, contact and host groups, availability report,
+parent/child relationships and place in the folder tree. That is the difference
+between monitoring an API and monitoring the fleet it describes.
+
+Three things to know:
+
+- **The hosts must already exist in Checkmk.** Piggyback data for an unknown host
+  is stored but never monitored — this is standard Checkmk behaviour and the most
+  common way to be confused by it. Create them by hand, or automatically with
+  Dynamic host management (Enterprise/Cloud).
+- **The `JSON API <name>` endpoint service stays on the polling host.** It reports
+  the *request*, which belongs to the host holding the rule, not to any element.
+  So does anything you extract from outside the wildcard, such as an aggregation.
+- **If an endpoint is unreachable**, its services report the failure on the
+  polling host: there is no response to read host names out of.
 
 ### Aggregating a collection
 

@@ -1030,3 +1030,35 @@ def test_rate_summary_is_not_a_full_float_repr(check, monkeypatch):
     # would read '19.999451493365736'), and a tiny rate keeps enough of them.
     assert check._fmt_rate(19.999451493365736) == "19.9995"
     assert check._fmt_rate(0.000123456789) == "0.000123457"
+
+
+def test_a_piggybacked_section_parses_as_an_ordinary_one(agent, check, monkeypatch, capsys):
+    # The point of reusing the section format for piggyback hosts: the check has
+    # no idea it was piggybacked, so every field feature keeps working there.
+    doc = {"nodes": [{"name": "node-01", "health": "UP"}, {"name": "node-02", "health": "DOWN"}]}
+    monkeypatch.setattr(agent, "_fetch", lambda endpoint, secret, debug=False: (doc, None, {}))
+    endpoint = {
+        "url": "http://cluster",
+        "extractions": [
+            {
+                "path": "nodes[*].health",
+                "service": "Health",
+                "piggyback_host": "name",
+                "match": ["must_match", {"pattern": "UP"}],
+            }
+        ],
+    }
+    assert agent.main(["--endpoint", json.dumps(endpoint)]) == 0
+    lines = capsys.readouterr().out.splitlines()
+    node2_section = lines[lines.index("<<<<node-02>>>>") + 2]
+
+    section = check.parse_json_api([[node2_section]])
+    assert [s.item for s in check.discover_json_api(section)] == ["Health"]
+    # A piggyback host has no endpoint records, so no endpoint service.
+    assert list(check.discover_json_api_endpoint(section)) == []
+    (result,) = [
+        r
+        for r in check.check_json_api("Health", {}, section)
+        if isinstance(r, Result) and r.summary
+    ]
+    assert result.state == State.CRIT  # 'DOWN' fails the must-match

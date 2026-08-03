@@ -573,6 +573,34 @@ def _aggregate_leaves(
     return _aggregate_numbers(mode, values)
 
 
+# Checkmk host names are used in file paths, Livestatus queries and config, so
+# only this conservative set survives; anything else becomes '_'. Mirrors what
+# Checkmk itself accepts for a host name.
+_HOST_NAME_INVALID = re.compile(r"[^-0-9A-Za-z_.]")
+
+
+def _piggyback_host(element: object, host_path: object) -> str | None:
+    """The piggyback host name for one element, or ``None`` when there is none.
+
+    The name is read from a field WITHIN the element (the same way a filter or a
+    label is), then sanitised: a host name ends up in file paths and config, so
+    the character set is restricted rather than trusted. An element whose field is
+    missing, non-scalar, or sanitises to nothing yields ``None`` - the caller
+    leaves that element's services on the polling host rather than inventing a
+    host name for them.
+    """
+    if not isinstance(host_path, str) or not host_path.strip():
+        return None
+    found, value = _resolve_path(element, host_path.strip())
+    if not found:
+        return None
+    text = _label_value(value)
+    if text is None:
+        return None
+    cleaned = _HOST_NAME_INVALID.sub("_", text.strip()).strip("_.")
+    return cleaned or None
+
+
 def _result(
     spec: dict,
     service: str,
@@ -581,12 +609,17 @@ def _result(
     error: str,
     url: str,
     labels: list[dict] | None = None,
+    host: str | None = None,
 ) -> dict:
     # Values that are not JSON scalars (dict/list) are reported as strings.
     if found and isinstance(value, (dict, list)):
         value = json.dumps(value)
     return {
         "service": service,
+        # Which host this result belongs to: None is the polling host (its
+        # services go into the plain section), a name means a piggyback host and
+        # is stripped back out before the section is written.
+        "host": host,
         "path": spec["path"],
         "url": url,
         "found": found,
@@ -695,14 +728,25 @@ def _extract(document: object, extractions: list[dict], url: str) -> list[dict]:
         # An optional filter keeps only the elements whose sub-field matches
         # (e.g. only the nodes that are NOT 'ok'); a not-found leaf is kept so
         # the "array or object not found" error still surfaces.
+        host_path = spec.get("piggyback_host")
         for label_segments, found, value, error, element in leaves:
             if found and isinstance(filt, dict) and filt.get("path"):
                 if not _matches_filter(element, filt):
                     continue
+            # With a piggyback host field, the element becomes its own Checkmk
+            # host, so the host carries the identity and the service keeps its
+            # plain name - 'JSON Health' on 50 hosts, not 'JSON Health node-01'
+            # on one. An element whose host name does not resolve falls back to
+            # the labelled name on the polling host, so it is still monitored
+            # instead of vanishing.
+            host = _piggyback_host(element, host_path)
             label = " / ".join(label_segments)
-            service = f"{spec['service']} {label}" if label else spec["service"]
+            if host is not None:
+                service = spec["service"]
+            else:
+                service = f"{spec['service']} {label}" if label else spec["service"]
             labels = _resolve_labels(label_specs, element)
-            results.append(_result(spec, service, found, value, error, url, labels))
+            results.append(_result(spec, service, found, value, error, url, labels, host))
     return results
 
 
@@ -941,6 +985,25 @@ def _process_endpoint(
         return _fail(f"Endpoint processing failed: {exc}")
 
 
+def _split_by_host(results: list[dict]) -> tuple[list[dict], dict[str, list[dict]]]:
+    """Partition results into the polling host's own and per-piggyback-host.
+
+    The ``host`` key is an internal routing hint, not part of the section format,
+    so it is stripped here: the check sees identical payloads either way and needs
+    no knowledge of piggybacking at all. Insertion order is preserved so the
+    output stays deterministic across runs.
+    """
+    own: list[dict] = []
+    piggybacked: dict[str, list[dict]] = {}
+    for result in results:
+        host = result.pop("host", None)
+        if host is None:
+            own.append(result)
+        else:
+            piggybacked.setdefault(host, []).append(result)
+    return own, piggybacked
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     args = parse_arguments(sys.argv[1:] if argv is None else argv)
 
@@ -962,9 +1025,24 @@ def main(argv: Sequence[str] | None = None) -> int:
                 host_labels.update(endpoint_host_labels)  # later endpoints win per key
                 endpoint_records.append(record)
 
-    payload = {"results": results, "host_labels": host_labels, "endpoints": endpoint_records}
+    own, piggybacked = _split_by_host(results)
+    # The polling host's own section: the endpoint records live here too, because
+    # they describe the REQUEST, which belongs to the host holding the rule - not
+    # to any element the response happened to contain.
+    payload = {"results": own, "host_labels": host_labels, "endpoints": endpoint_records}
     sys.stdout.write("<<<json_api:sep(0)>>>\n")
     sys.stdout.write(json.dumps(payload) + "\n")
+    for host, host_results in piggybacked.items():
+        # One section per piggyback host, in the same format - so the check parses
+        # it with no idea it was piggybacked, and every field feature (levels,
+        # match, counter, timestamp, ...) works there unchanged.
+        sys.stdout.write(f"<<<<{host}>>>>\n")
+        sys.stdout.write("<<<json_api:sep(0)>>>\n")
+        sys.stdout.write(json.dumps({"results": host_results, "host_labels": {}}) + "\n")
+    if piggybacked:
+        # Close the last piggyback section, or everything after it in the agent
+        # output would be attributed to that host.
+        sys.stdout.write("<<<<>>>>\n")
     # Flush explicitly so the section is delivered no matter how stdout is
     # connected. Checkmk always reads the agent through a pipe (block-buffered,
     # flushed at exit), but a consultant copying the program call out of

@@ -150,3 +150,17 @@ def test_explorer_choices_match_the_ruleset(explorer_output: dict):
         assert f'"{choice}"' in source
     for fmt in ("auto", "epoch", "epoch_ms", "iso"):
         assert f'"{fmt}"' in ruleset
+
+
+def test_explorer_emits_the_piggyback_host_field(rule_value: dict, explorer_output: dict):
+    # It turns a '[*]' element into its own Checkmk host, so it must reach both
+    # the rule value and the agent command line - a rule that silently drops it
+    # would put every service back on the polling host.
+    by_service = {x["service"]: x for x in rule_value["endpoints"][0]["extractions"]}
+    assert by_service["Node"]["piggyback_host"] == "name"
+    # Optional: a field without it must not carry the key at all.
+    assert "piggyback_host" not in by_service["Health"]
+
+    cli = {x["service"]: x for x in explorer_output["cli"][0]["extractions"]}
+    assert cli["Node"]["piggyback_host"] == "name"
+    assert "piggyback_host" not in cli["Health"]

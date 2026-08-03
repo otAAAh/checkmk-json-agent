@@ -73,6 +73,7 @@ const FIXTURE = {
       service: "Node",
       path: "nodes[*].load",
       label_path: "name",
+      pbHost: "name",
       aggregate: "avg",
       valueAs: "",
       tsFormat: "auto",
