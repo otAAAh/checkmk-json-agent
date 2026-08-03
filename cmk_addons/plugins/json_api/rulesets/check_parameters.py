@@ -75,6 +75,24 @@ def _endpoint_parameter_form() -> Dictionary:
                     prefill_fixed_levels=InputHint((2.0, 5.0)),
                 ),
             ),
+            "cert_expiry_levels": DictElement(
+                required=False,
+                parameter_form=SimpleLevels(
+                    title=Title("Lower levels for the TLS certificate's remaining validity"),
+                    help_text=Help(
+                        "How many days the endpoint's TLS certificate must still be "
+                        "valid for. Read from the connection the agent already makes, "
+                        "so no second check against the same URL is needed. Only "
+                        "available for HTTPS endpoints with certificate verification "
+                        "enabled; otherwise the certificate is not reported and these "
+                        "levels never apply. Without levels the remaining validity is "
+                        "only recorded as a metric."
+                    ),
+                    form_spec_template=Float(unit_symbol="days"),
+                    level_direction=LevelDirection.LOWER,
+                    prefill_fixed_levels=InputHint((30.0, 7.0)),
+                ),
+            ),
             "state_unreachable": DictElement(
                 required=False,
                 parameter_form=ServiceState(

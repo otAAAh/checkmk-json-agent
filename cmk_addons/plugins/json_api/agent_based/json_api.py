@@ -101,6 +101,17 @@ def _rate_metric_name(unit: object) -> str:
     return _UNIT_RATE_METRIC.get(unit if isinstance(unit, str) else None, "json_api_rate")
 
 
+def _render_days(days: float) -> str:
+    """A number of days, negative (already expired) included.
+
+    Whole days read as '42 days'; a fraction keeps one decimal so the last day
+    before expiry does not render as '0 days'.
+    """
+    rounded = round(days, 1)
+    shown = int(rounded) if float(rounded).is_integer() else rounded
+    return f"{shown} days"
+
+
 def _render_seconds(seconds: float) -> str:
     """Render a number of seconds as a duration, including a negative one.
 
@@ -179,6 +190,10 @@ class EndpointStatus:
     elapsed: float | None
     size: int | None
     final_url: str | None
+    # The peer certificate's notAfter as a Unix epoch, when the agent could read
+    # it (HTTPS, verification on, socket still exposed). None means "no
+    # certificate info", never "expired".
+    cert_expiry: float | None = None
 
 
 @dataclass(frozen=True)
@@ -344,6 +359,7 @@ def _endpoint_statuses(raw: object) -> dict[str, EndpointStatus]:
             elapsed=_optional_number(record.get("elapsed")),
             size=_optional_int(record.get("size")),
             final_url=_optional_str(record.get("final_url")),
+            cert_expiry=_optional_number(record.get("cert_expiry")),
         )
     return statuses
 
@@ -869,6 +885,18 @@ def check_json_api_endpoint(
     if endpoint.size is not None:
         yield Result(state=State.OK, notice=f"Response size: {render.bytes(endpoint.size)}")
         yield Metric("json_api_response_size", endpoint.size)
+    if endpoint.cert_expiry is not None:
+        # Days rather than seconds: it is what a certificate policy is written in
+        # ("renew 30 days out"), so it is what the levels ask for. LOWER levels -
+        # the alert is about running out of time.
+        yield from check_levels(
+            (endpoint.cert_expiry - time.time()) / 86400.0,
+            levels_lower=_coerce_levels(params.get("cert_expiry_levels")),
+            metric_name="json_api_cert_expiry",
+            label="Certificate expires in",
+            render_func=_render_days,
+            notice_only=True,
+        )
 
 
 agent_section_json_api = AgentSection(

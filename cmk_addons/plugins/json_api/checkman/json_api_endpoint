@@ -14,13 +14,22 @@ description:
  from sending the request until the whole response body has been read, and is
  exposed as a metric; it is only checked against levels once you configure them.
 
+ For an {HTTPS} endpoint with certificate verification enabled, the TLS
+ certificate's remaining validity is also reported, in days, as a metric with
+ optional lower levels. It is read from the connection the agent already makes,
+ so it costs no extra request and needs no second check against the same URL.
+ When it cannot be read - plain HTTP, verification turned off, or a connection
+ reused from the pool - nothing about the certificate is reported; that is
+ {absent}, not {expired}, and never causes an alert.
+
  When the request fails outright - connection refused, a TLS error, a timeout,
  an HTTP status that the rule does not accept, or a response that is not JSON -
  the service is {CRIT} and reports the error. That state is configurable, so an
  endpoint that is allowed to be unavailable can be a mere {WARN}.
 
- Configure the levels for the response time and the state for an unreachable
- endpoint with the check parameters rule {Generic JSON API endpoint} (Setup >
+ Configure the levels for the response time, the levels for the certificate's
+ remaining validity, and the state for an unreachable endpoint with the check
+ parameters rule {Generic JSON API endpoint} (Setup >
  Service monitoring rules > Applications). The endpoint's connection settings -
  and its optional name - live in the {Generic JSON API} special agent rule.
 

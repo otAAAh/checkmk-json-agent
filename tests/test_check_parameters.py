@@ -29,7 +29,11 @@ def test_endpoint_parameter_form_builds(check_ruleset):
 
 def test_endpoint_parameter_form_has_expected_keys(check_ruleset):
     form = check_ruleset._endpoint_parameter_form()
-    assert set(form.elements) == {"response_time_levels", "state_unreachable"}
+    assert set(form.elements) == {
+        "response_time_levels",
+        "cert_expiry_levels",
+        "state_unreachable",
+    }
 
 
 def test_endpoint_ruleset_name_matches_its_check_plugin(check_ruleset, check):
