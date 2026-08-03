@@ -778,6 +778,69 @@ def test_timestamp_in_the_future_is_a_negative_age(check, monkeypatch):
     assert any(isinstance(r, Result) and r.summary == "Age: -10 minutes 0 seconds" for r in results)
 
 
+def test_negative_age_with_the_seconds_unit_renders_instead_of_crashing(check, monkeypatch):
+    # The 'seconds' unit is the natural pick for an age, and it maps to
+    # render.timespan, which raises on a negative value - so a timestamp in the
+    # future used to crash the check instead of rendering a negative duration.
+    _fixed_clock(check, monkeypatch, 1700000000.0)
+    section = _section(
+        check,
+        [
+            _entry(
+                "Cert",
+                value=1700000600,
+                unit="seconds",
+                value_as=["timestamp", {"format": "epoch"}],
+            )
+        ],
+    )
+    results = list(check.check_json_api("Cert", {}, section))
+    (metric,) = [r for r in results if isinstance(r, Metric)]
+    assert metric.name == "json_api_seconds"
+    assert metric.value == -600.0
+    assert any(isinstance(r, Result) and r.summary == "Age: -10 minutes 0 seconds" for r in results)
+
+
+def test_negative_age_with_the_seconds_unit_and_levels_renders_instead_of_crashing(
+    check, monkeypatch
+):
+    # Same as above on the check_levels path, which renders the value AND the
+    # levels line through the unit's render func.
+    _fixed_clock(check, monkeypatch, 1700000000.0)
+    section = _section(
+        check,
+        [
+            _entry(
+                "Cert",
+                value=1700000600,
+                unit="seconds",
+                value_as=["timestamp", {"format": "epoch"}],
+                levels_upper=["fixed", [3600.0, 7200.0]],
+            )
+        ],
+    )
+    (result,) = [
+        r
+        for r in check.check_json_api("Cert", {}, section)
+        if isinstance(r, Result) and r.summary.startswith("Age:")
+    ]
+    # Well below the upper levels: a future timestamp is not stale.
+    assert result.state == State.OK
+    assert result.summary == "Age: -10 minutes 0 seconds"
+
+
+def test_negative_plain_value_with_the_seconds_unit_renders(check):
+    # Not a derived age: an API that simply reports a negative number for a field
+    # whose unit is seconds (e.g. a clock skew) must render, not crash.
+    section = _section(check, [_entry("Skew", value=-90, unit="seconds")])
+    (result,) = [
+        r
+        for r in check.check_json_api("Skew", {}, section)
+        if isinstance(r, Result) and r.summary.startswith("Value:")
+    ]
+    assert result.summary == "Value: -1 minute 30 seconds"
+
+
 def test_timestamp_explicit_unit_wins_over_the_age_metric(check, monkeypatch):
     # A rule that transforms the age into hours picks its own unit; that must not
     # be overridden by the age metric's duration rendering.

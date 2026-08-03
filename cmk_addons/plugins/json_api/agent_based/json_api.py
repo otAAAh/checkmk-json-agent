@@ -101,13 +101,25 @@ def _rate_metric_name(unit: object) -> str:
     return _UNIT_RATE_METRIC.get(unit if isinstance(unit, str) else None, "json_api_rate")
 
 
+def _render_seconds(seconds: float) -> str:
+    """Render a number of seconds as a duration, including a negative one.
+
+    ``render.timespan`` raises on a negative value, but a negative duration is an
+    ordinary thing to monitor here: the age of a timestamp in the future (a
+    certificate expiry, a scheduled run), or simply a negative number the API
+    reported for a field whose unit is seconds. Both render as a duration with a
+    leading '-' instead of crashing the service.
+    """
+    return render.timespan(seconds) if seconds >= 0 else f"-{render.timespan(-seconds)}"
+
+
 # The unit chosen in the rule also decides how the value is *rendered* in the
 # summary/details (and the levels line), so "1572864" with unit=bytes reads as
 # "1.50 MiB" like the graph does - not just as a bare number. Units without a
 # dedicated renderer ("count", or none) fall back to the plain number.
 _UNIT_RENDER: dict[str, Callable[[float], str]] = {
     "bytes": render.bytes,
-    "seconds": render.timespan,
+    "seconds": _render_seconds,
     "percent": render.percent,
 }
 
@@ -130,17 +142,6 @@ def _rate_render_func(unit: object) -> Callable[[float], str]:
 
 def _fmt_rate(number: float) -> str:
     return _fmt_number(number) if float(number).is_integer() else f"{number:.6g}"
-
-
-def _render_age(seconds: float) -> str:
-    """Render an age as a duration, including a negative one.
-
-    ``render.timespan`` refuses negative values, but a timestamp in the future is
-    a perfectly ordinary thing for an API to report (a certificate expiry, a
-    scheduled run), so it is rendered as a duration with a leading '-' instead of
-    crashing the service.
-    """
-    return render.timespan(seconds) if seconds >= 0 else f"-{render.timespan(-seconds)}"
 
 
 @dataclass(frozen=True)
@@ -681,7 +682,7 @@ def _derive(entry: Item) -> tuple[float | None, str, Callable[[float], str] | No
     # rule explicitly chose a unit (e.g. after a transform into hours).
     if isinstance(entry.unit, str):
         return time.time() - stamp, entry.metric_name, entry.render_func, [reading]
-    return time.time() - stamp, _AGE_METRIC, _render_age, [reading]
+    return time.time() - stamp, _AGE_METRIC, _render_seconds, [reading]
 
 
 # What the derived number is called in the summary and the levels line.
