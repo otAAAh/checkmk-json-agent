@@ -38,6 +38,7 @@ import time
 from collections.abc import Sequence
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from urllib.parse import urlsplit, urlunsplit
 
 import requests
 from cmk.utils import password_store as _legacy_pwstore
@@ -825,10 +826,31 @@ def _element_labels(pairs: list[tuple[str, object]], label_path: str | None) -> 
     ]
 
 
+def _url_without_query(url: str) -> str:
+    """``url`` with its query string and fragment removed.
+
+    An API that authenticates via a query parameter (``?api_key=...``) would
+    otherwise carry that secret into a service description, which travels much
+    further than the service details do: notifications, availability reports, BI
+    aggregations, the metric paths on disk. The full URL stays in the endpoint
+    service's details, where it belongs.
+
+    Anything that does not parse - or that parses to nothing at all - is returned
+    unchanged rather than replaced by an empty item.
+    """
+    try:
+        split = urlsplit(url)
+    except ValueError:
+        return url
+    return urlunsplit(split._replace(query="", fragment="")) or url
+
+
 def _endpoint_name(endpoint: dict, url: str) -> str:
-    """The endpoint's service item: its configured name, else the URL."""
+    """The endpoint's service item: its configured name, else the bare URL."""
     name = endpoint.get("name")
-    return name if isinstance(name, str) and name.strip() else url
+    if isinstance(name, str) and name.strip():
+        return name.strip()
+    return _url_without_query(url)
 
 
 def _endpoint_record(

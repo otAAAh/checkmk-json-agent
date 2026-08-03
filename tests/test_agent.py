@@ -1039,6 +1039,35 @@ def test_endpoint_record_falls_back_to_the_url_as_name(agent):
     assert agent._endpoint_name({}, "http://x") == "http://x"
     assert agent._endpoint_name({"name": "  "}, "http://x") == "http://x"
     assert agent._endpoint_name({"name": "api"}, "http://x") == "api"
+    # A configured name is used as given, minus surrounding whitespace (it is a
+    # service description, not free text).
+    assert agent._endpoint_name({"name": " api "}, "http://x") == "api"
+
+
+def test_endpoint_name_drops_the_query_string(agent):
+    # An API key in a query parameter must not travel into a service description,
+    # which reaches notifications, availability reports and the metric paths.
+    assert (
+        agent._endpoint_name({}, "https://api.example.com/health?api_key=s3cr3t&v=2")
+        == "https://api.example.com/health"
+    )
+    assert agent._endpoint_name({}, "https://api.example.com/health#frag") == (
+        "https://api.example.com/health"
+    )
+    # Nothing to drop: unchanged, including the port and a trailing slash.
+    assert agent._endpoint_name({}, "https://api.example.com:8443/health/") == (
+        "https://api.example.com:8443/health/"
+    )
+    # A configured name wins outright - no URL parsing involved.
+    assert agent._endpoint_name({"name": "frontend"}, "https://x/health?k=v") == "frontend"
+
+
+def test_url_without_query_never_yields_an_empty_item(agent):
+    # The '?' placeholder for a blob with no 'url' at all, and a URL that is
+    # nothing but a query, must not collapse to an empty service description.
+    assert agent._url_without_query("?") == "?"
+    assert agent._url_without_query("") == ""
+    assert agent._url_without_query("not a url") == "not a url"
 
 
 def test_main_emits_one_endpoint_record_per_endpoint(agent, monkeypatch, capsys):
