@@ -25,12 +25,17 @@ jobs:
       # Dev tooling is pinned in requirements-dev.txt (Dependabot-tracked). The
       # runtime deps (cmk.*, requests) stay covered by mypy's ignore_missing_imports.
       - run: pip install -r requirements-dev.txt
+      # 'gui' ships in the Explorer MKP, so it is production code and is checked
+      # like the rest. Keep these paths in lock-step with RUFF_SOURCES /
+      # MYPY_SOURCES in the Makefile, so `make format lint typecheck` cannot pass
+      # while CI fails. mypy omits 'tests' on purpose: the suite is deliberately
+      # untyped and disallow_untyped_defs is on globally.
       - name: Format check
-        run: ruff format --check cmk_addons scripts tests
+        run: ruff format --check cmk_addons scripts tests gui
       - name: Lint
-        run: ruff check cmk_addons scripts tests
+        run: ruff check cmk_addons scripts tests gui
       - name: Type check
-        run: mypy cmk_addons scripts
+        run: mypy cmk_addons scripts gui
       # Only the agent package here: it is the stdlib-only, GUI-free one. The
       # Explorer package needs the built wizard bundle (see the frontend-build
       # and release workflows) and build_explorer() now refuses to package
