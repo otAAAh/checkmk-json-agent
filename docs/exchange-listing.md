@@ -26,9 +26,19 @@ included. One rule. Any API. Done.
   monitor its per-second **rate** instead of an ever-growing total
   (`requests_total`); mark it as a **timestamp** and monitor its **age**, so
   upper levels alert on stale data (`last_backup` older than 26 h → WARN).
+- 🖧 **One Checkmk host per element** — point a `[*]` field at a field holding a
+  host name and every element becomes a **host of its own**, not just another
+  service. An API describing a fleet gives you hosts with their own downtimes,
+  contact groups and availability, instead of one host with a hundred services.
 - 🩺 **Every endpoint monitors itself** — each endpoint also gets a
   `JSON API <name>` service with the **HTTP status, response time** (thresholds
-  optional) and response size. Zero configuration; it comes with the rule.
+  optional), response size and, for HTTPS, the **TLS certificate's remaining
+  validity** — read from the connection it is already making, so no second check
+  against the same URL. Zero configuration; it comes with the rule.
+- 🐢 **Rate-limited API? Cache it** — give an endpoint a TTL and the agent reuses
+  its last response instead of asking again, so monitoring cannot exhaust a
+  request quota. It never caches an error and never answers a failed request from
+  an expired cache, so a real outage still shows up.
 - 🔗 **Many endpoints, one rule** — poll several APIs together, each with its own
   method, auth, and fields; an unreachable one only affects its own services.
 - 📈 **Thresholds & graphs in Checkmk** — WARN/CRIT and metrics live in *your*

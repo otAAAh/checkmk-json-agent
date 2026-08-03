@@ -21,7 +21,8 @@ The section payload looks like:
                   "match": ["must_match", "UP|ok"]}, ...],
      "endpoints": [{"name": "...", "url": "...", "ok": true, "error": null,
                     "status": 200, "elapsed": 0.031, "size": 412,
-                    "final_url": "...", "cert_expiry": 1800000000.0}, ...]}
+                    "final_url": "...", "cert_expiry": 1800000000.0,
+                    "from_cache": false}, ...]}
 
 The 'endpoints' list carries one record per configured endpoint - the outcome of
 the request itself (HTTP status, how long it took, how much came back) - which
@@ -30,11 +31,14 @@ extracted from the body.
 """
 
 import argparse
+import hashlib
 import json
 import math
+import os
 import re
 import ssl
 import sys
+import tempfile
 import time
 from collections.abc import Sequence
 from concurrent.futures import ThreadPoolExecutor
@@ -315,6 +319,140 @@ def _peer_cert_expiry(response: requests.Response) -> float | None:
         return float(ssl.cert_time_to_seconds(not_after))
     except ValueError:
         return None
+# Per-endpoint response cache. Opt-in: no TTL configured means "always fetch",
+# which is the right default for monitoring. It exists for rate-limited,
+# expensive or fanned-out endpoints, where the request RATE is the problem rather
+# than the freshness. Checkmk's own fetcher cache cannot express this - it is
+# host-wide, all-or-nothing, and sized by a site-global setting during checking.
+_CACHE_DIR_NAME = "json_api_cache"
+# Files this old are removed on the next write, so a rule edit that changes an
+# endpoint's identity (and thus its key) cannot leak files forever.
+_CACHE_PRUNE_AFTER = 7 * 86400
+
+
+def _cache_dir() -> Path | None:
+    """The directory to cache responses in, or ``None`` if there isn't one.
+
+    Prefers the tmp directory Checkmk hands the agent, then the site's own tmp,
+    and only then the system default - a monitoring cache belongs inside the site
+    so it is cleaned out with it. ``None`` (nothing writable) disables caching
+    rather than failing the fetch.
+    """
+    directory = Path(tempfile.gettempdir()) / _CACHE_DIR_NAME
+    if mk_tmp := os.environ.get("MK_TMPDIR"):
+        directory = Path(mk_tmp) / _CACHE_DIR_NAME
+    elif omd_root := os.environ.get("OMD_ROOT"):
+        directory = Path(omd_root) / "tmp" / _CACHE_DIR_NAME
+    try:
+        directory.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        return None
+    return directory
+
+
+def _cache_key(endpoint: dict) -> str:
+    """A stable hash over everything that changes this endpoint's response.
+
+    The secret is deliberately NOT part of it and is never stored: it does not
+    reach this blob at all (it travels separately as '--secret_<i>'), and hashing
+    it would put a credential-derived value on disk for no benefit. Two endpoints
+    differing only by credential are a pathological config; the identity below
+    covers the realistic cases.
+    """
+    identity = json.dumps(
+        [
+            endpoint.get("url"),
+            endpoint.get("method", "GET"),
+            _effective_body(endpoint),
+            endpoint.get("headers"),
+            endpoint.get("auth"),
+            endpoint.get("verify_cert", True),
+            endpoint.get("ca_bundle"),
+            endpoint.get("client_cert"),
+            endpoint.get("accept_status"),
+            endpoint.get("proxy"),
+        ],
+        sort_keys=True,
+        default=str,
+    )
+    return hashlib.sha256(identity.encode("utf-8")).hexdigest()
+
+
+def _cache_ttl(endpoint: dict) -> float | None:
+    """The configured cache TTL in seconds, or ``None`` for "always fetch"."""
+    ttl = endpoint.get("cache_ttl")
+    if isinstance(ttl, bool) or not isinstance(ttl, (int, float)):
+        return None
+    return float(ttl) if ttl > 0 else None
+
+
+def _cache_read(endpoint: dict, ttl: float) -> tuple[bytes, dict] | None:
+    """A cached ``(body, meta)`` younger than ``ttl``, else ``None``.
+
+    Anything unreadable or malformed counts as a miss, so a broken cache file
+    costs one extra request and nothing else.
+    """
+    directory = _cache_dir()
+    if directory is None:
+        return None
+    path = directory / f"{_cache_key(endpoint)}.json"
+    try:
+        entry = json.loads(path.read_text(encoding="utf-8"))
+        stored = float(entry["stored"])
+        body = entry["body"].encode("utf-8")
+        meta = entry["meta"]
+    except (OSError, ValueError, KeyError, TypeError, AttributeError):
+        return None
+    if not isinstance(meta, dict):
+        return None
+    age = time.time() - stored
+    # A negative age means the clock moved backwards; treat it as a miss rather
+    # than serving something we cannot reason about.
+    if age < 0 or age > ttl:
+        return None
+    # 'elapsed' is dropped deliberately: no request was made, so there is no
+    # response time. Replaying the original one would chart a measurement that
+    # never happened, over and over, for the whole TTL. Status, size and the final
+    # URL DO still describe the body being served, so they are kept.
+    return body, {**meta, "elapsed": None, "from_cache": True, "cache_age": age}
+
+
+def _cache_write(endpoint: dict, body: bytes, meta: dict) -> None:
+    """Store a fresh response. Best effort: a failure must not fail the fetch."""
+    directory = _cache_dir()
+    if directory is None:
+        return
+    path = directory / f"{_cache_key(endpoint)}.json"
+    entry = {
+        "stored": time.time(),
+        "body": body.decode("utf-8", "replace"),
+        "meta": {k: v for k, v in meta.items() if k not in ("from_cache", "cache_age")},
+    }
+    try:
+        # Write-then-rename so a concurrent read never sees a half-written file,
+        # and 0600 because a response body can hold anything the API returns.
+        temporary = path.with_suffix(f".{os.getpid()}.tmp")
+        temporary.write_text(json.dumps(entry), encoding="utf-8")
+        temporary.chmod(0o600)
+        temporary.replace(path)
+        _prune_cache(directory)
+    except OSError:
+        return
+
+
+def _prune_cache(directory: Path) -> None:
+    """Drop cache files nothing will read again (stale keys after a rule edit)."""
+    cutoff = time.time() - _CACHE_PRUNE_AFTER
+    try:
+        entries = list(directory.glob("*.json"))
+    except OSError:
+        return
+    for entry in entries:
+        try:
+            if entry.stat().st_mtime < cutoff:
+                entry.unlink(missing_ok=True)
+        except OSError:
+            continue
 
 
 def _fetch(
@@ -334,7 +472,19 @@ def _fetch(
         "size": None,
         "final_url": None,
         "cert_expiry": None,
+        "from_cache": False,
+        "cache_age": None,
     }
+    # A cached body younger than the endpoint's TTL is served without touching the
+    # network at all - that is the whole point, for an API with a request quota.
+    if (ttl := _cache_ttl(endpoint)) is not None and (hit := _cache_read(endpoint, ttl)):
+        cached_body, cached_meta = hit
+        _debug(debug, f"  served from cache ({cached_meta['cache_age']:.0f}s old)")
+        try:
+            return json.loads(cached_body), None, cached_meta
+        except ValueError as exc:
+            # Cached something unparseable: fall through and fetch fresh.
+            _debug(debug, f"  cached body is not valid JSON ({exc}), fetching")
     started = time.monotonic()
 
     def _timed() -> dict:
@@ -409,9 +559,15 @@ def _fetch(
         _debug(debug, f"  body: {preview}{suffix}")
 
     try:
-        return json.loads(raw), None, _timed()
+        document = json.loads(raw)
     except ValueError as exc:
         return None, f"Response is not valid JSON: {exc}", _timed()
+    timed = _timed()
+    if ttl is not None:
+        # Only a response we could actually parse is worth caching; an error or a
+        # non-JSON body would just be replayed for the whole TTL.
+        _cache_write(endpoint, raw, timed)
+    return document, None, timed
 
 
 _WILDCARD = "[*]"
@@ -968,6 +1124,8 @@ def _endpoint_record(
         "size": meta.get("size"),
         "final_url": meta.get("final_url"),
         "cert_expiry": meta.get("cert_expiry"),
+        "from_cache": bool(meta.get("from_cache")),
+        "cache_age": meta.get("cache_age"),
     }
 
 

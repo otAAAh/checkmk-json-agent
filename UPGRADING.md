@@ -14,6 +14,20 @@ GitHub Release body, so these notes travel with the release people actually read
 
 ## [Unreleased]
 
+### The response cache is opt-in, and deliberately fails loudly
+
+Nothing changes unless you set the new per-endpoint **Re-read at most every
+(seconds)**. When you do, two behaviours are worth knowing before you rely on it:
+
+- **A failing request is never answered from an expired cache.** The endpoint goes
+  CRIT as it would without caching. This is deliberate — monitoring that serves
+  stale data through an outage is worse than useless — but it does mean a cache
+  does not make an endpoint more available, only less frequently polled.
+- **A cached serve records no response-time metric.** The `JSON API <name>`
+  service reports `from cache (N old)` instead. So a graph of an endpoint with a
+  long TTL will have gaps: those are intervals where nothing was measured, not
+  intervals where the API was slow.
+
 ### Piggyback hosts must exist before they are monitored
 
 Purely additive — nothing changes unless you set the new **Create one host per

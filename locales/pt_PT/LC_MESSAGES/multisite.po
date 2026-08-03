@@ -6,7 +6,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: checkmk-json-agent\n"
 "Report-Msgid-Bugs-To: https://github.com/otAAAh/checkmk-json-agent/issues\n"
-"POT-Creation-Date: 2026-08-03 10:07+0200\n"
+"POT-Creation-Date: 2026-08-03 10:17+0200\n"
 "PO-Revision-Date: 2026-07-06 12:00+0000\n"
 "Last-Translator: checkmk-json-agent contributors\n"
 "Language-Team: Portuguese (Portugal)\n"
@@ -169,7 +169,7 @@ msgstr "Torna-se a descrição do serviço Checkmk para este campo."
 
 #: cmk_addons/plugins/json_api/rulesets/special_agent.py:231
 #: cmk_addons/plugins/json_api/rulesets/special_agent.py:310
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:762
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:786
 msgid "JSON path"
 msgstr "Caminho JSON"
 
@@ -282,7 +282,7 @@ msgstr ""
 "resposta para um caminho sem caracteres universais."
 
 #: cmk_addons/plugins/json_api/rulesets/special_agent.py:322
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:774
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:798
 msgid "Label key (optional)"
 msgstr "Chave da etiqueta (opcional)"
 
@@ -685,10 +685,40 @@ msgid "Per-request timeout. Defaults to 30 seconds."
 msgstr "Tempo limite por pedido. Por predefinição, 30 segundos."
 
 #: cmk_addons/plugins/json_api/rulesets/special_agent.py:700
+msgid "Re-read at most every (seconds)"
+msgstr "Reler no máximo a cada (segundos)"
+
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:702
+msgid ""
+"Reuse the last response for this endpoint instead of requesting it again, as "
+"long as it is younger than this. For APIs with a request quota, expensive "
+"endpoints, or a rule shared across many hosts - anything where the request "
+"RATE is the problem rather than the freshness of the data. Without it, every "
+"check interval on every host issues a request, which can exhaust a quota and "
+"turn the monitoring itself into the outage. Only a response that parsed as "
+"JSON is cached, and a failing request is never answered from an expired "
+"cache - a real outage must not hide behind stale data. While a cached body "
+"is served the endpoint's own service says so and reports no response time, "
+"because no request was made. Leave unset to always fetch fresh."
+msgstr ""
+"Reutilizar a última resposta deste endpoint em vez de a pedir novamente, "
+"desde que seja mais recente do que este valor. Para APIs com uma quota de "
+"pedidos, endpoints dispendiosos ou uma regra partilhada por muitos hosts - "
+"sempre que o problema seja a TAXA de pedidos e não a actualidade dos dados. "
+"Sem isto, cada intervalo de verificação em cada host faz um pedido, o que "
+"pode esgotar uma quota e transformar a própria monitorização na falha. Só é "
+"colocada em cache uma resposta que tenha sido analisada como JSON, e um "
+"pedido falhado nunca é respondido a partir de uma cache expirada - uma falha "
+"real não se pode esconder atrás de dados desactualizados. Enquanto um "
+"conteúdo em cache é servido, o serviço próprio do endpoint indica-o e não "
+"comunica qualquer tempo de resposta, porque não foi feito nenhum pedido. "
+"Deixe sem definir para consultar sempre em directo."
+
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:724
 msgid "Additional accepted HTTP status codes"
 msgstr "Códigos de estado HTTP adicionais aceites"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:702
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:726
 msgid ""
 "By default only 2xx responses are read; any other status makes the "
 "endpoint's services UNKNOWN. Add extra status codes to accept here - for "
@@ -703,15 +733,15 @@ msgstr ""
 "resposta aceite é analisado e extraído como habitualmente. 2xx é sempre "
 "aceite."
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:710
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:734
 msgid "Status code"
 msgstr "Código de estado"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:718
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:742
 msgid "HTTP proxy"
 msgstr "Proxy HTTP"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:720
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:744
 msgid ""
 "Route this endpoint's request through an HTTP proxy - useful when the "
 "Checkmk server reaches the API only via a corporate egress proxy. Choose the "
@@ -725,11 +755,11 @@ msgstr ""
 "explícito, ou 'sem proxy' para ignorar qualquer proxy definido no ambiente. "
 "Sem esta definição, as variáveis de proxy do ambiente são respeitadas."
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:734
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:758
 msgid "Fields to monitor"
 msgstr "Campos a monitorizar"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:736
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:760
 msgid ""
 "Each entry becomes one Checkmk service, built from the value found at the "
 "given JSON path."
@@ -737,11 +767,11 @@ msgstr ""
 "Cada entrada torna-se um serviço Checkmk, criado a partir do valor "
 "encontrado no caminho JSON indicado."
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:745
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:769
 msgid "Host labels"
 msgstr "Etiquetas de host"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:747
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:771
 msgid ""
 "Attach Checkmk host labels to the monitored host, built from fields in this "
 "endpoint's response. Each key is prefixed with 'json_api/' and the value is "
@@ -760,7 +790,7 @@ msgstr ""
 "<element>' para que as chaves se mantenham únicas. Definidas durante a "
 "deteção, por isso escolha campos estáveis e de baixa cardinalidade."
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:764
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:788
 msgid ""
 "From the response root, e.g. 'version', 'cluster.region', or a '[*]' "
 "wildcard like 'components[*]' for one label per element."
@@ -768,7 +798,7 @@ msgstr ""
 "A partir da raiz da resposta, p. ex. 'version', 'cluster.region', ou um "
 "carácter universal '[*]' como 'components[*]' para uma etiqueta por elemento."
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:776
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:800
 msgid ""
 "Defaults to the path's last segment. For a '[*]' path the element id is "
 "appended ('<key>/<element>'). The 'json_api/' prefix is added automatically."
@@ -777,11 +807,11 @@ msgstr ""
 "acrescentado o id do elemento ('<key>/<element>'). O prefixo 'json_api/' é "
 "adicionado automaticamente."
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:786
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:810
 msgid "Value field (for '[*]' wildcards)"
 msgstr "Campo de valor (para caracteres universais '[*]')"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:788
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:812
 msgid ""
 "For a '[*]' path: a path within each element for the label value (e.g. "
 "'status'). Defaults to 'true' (a set-membership tag). Ignored without a "
@@ -791,11 +821,11 @@ msgstr ""
 "etiqueta (p. ex. 'status'). Por predefinição 'true' (uma etiqueta de "
 "pertença). Ignorado sem carácter universal."
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:821
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:845
 msgid "Endpoints"
 msgstr "Endpoints"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:823
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:847
 msgid ""
 "One or more HTTP/JSON endpoints. Each is fetched with its own connection "
 "settings and extractions; all results are merged into one section. An "
@@ -806,7 +836,7 @@ msgstr ""
 "única secção. Um endpoint que não possa ser alcançado afeta apenas os seus "
 "próprios serviços."
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:838
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:862
 #: cmk_addons/plugins/json_api/rulesets/check_parameters.py:114
 msgid "Generic JSON API"
 msgstr "API JSON genérica"

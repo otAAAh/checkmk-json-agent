@@ -685,3 +685,24 @@ def test_piggyback_host_defaults_to_none(ssc):
     )
     (endpoint,) = _endpoints(ssc, args)
     assert endpoint["extractions"][0]["piggyback_host"] is None
+
+
+def test_cache_ttl_passed_through(ssc):
+    args = _command_args(
+        ssc,
+        {
+            "endpoints": [
+                {"url": "http://x", "verify_cert": True, "cache_ttl": 300.0, "extractions": []}
+            ]
+        },
+    )
+    (endpoint,) = _endpoints(ssc, args)
+    assert endpoint["cache_ttl"] == 300.0
+
+
+def test_cache_ttl_defaults_to_none(ssc):
+    args = _command_args(
+        ssc, {"endpoints": [{"url": "http://x", "verify_cert": True, "extractions": []}]}
+    )
+    (endpoint,) = _endpoints(ssc, args)
+    assert endpoint["cache_ttl"] is None

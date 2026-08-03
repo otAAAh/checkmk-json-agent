@@ -3,6 +3,7 @@
 """Tests for the special agent: path resolution, extraction, args, auth."""
 
 import json
+import os
 
 import pytest
 
@@ -1131,6 +1132,8 @@ def test_process_endpoint_returns_a_record(agent, monkeypatch):
         "size": None,
         "final_url": None,
         "cert_expiry": None,
+        "from_cache": False,
+        "cache_age": None,
     }
 
 
@@ -1422,3 +1425,155 @@ def test_endpoint_record_carries_the_cert_expiry(agent, monkeypatch):
         agent.parse_arguments(["--endpoint", "{}"]), 0, {"url": "https://x", "extractions": []}
     )
     assert record["cert_expiry"] == 1700000000.0
+
+
+# --- Per-endpoint response cache ---------------------------------------------
+
+
+@pytest.fixture
+def cache_dir(agent, monkeypatch, tmp_path):
+    """Point the agent's cache at a tmp dir (never the real site tmp)."""
+    directory = tmp_path / "cache"
+    directory.mkdir()
+    monkeypatch.setattr(agent, "_cache_dir", lambda: directory)
+    return directory
+
+
+def test_cache_ttl_reads_the_endpoint_setting(agent):
+    assert agent._cache_ttl({"cache_ttl": 300}) == 300.0
+    assert agent._cache_ttl({"cache_ttl": 0.5}) == 0.5
+    # Absent, zero/negative, or a non-number all mean "always fetch".
+    assert agent._cache_ttl({}) is None
+    assert agent._cache_ttl({"cache_ttl": 0}) is None
+    assert agent._cache_ttl({"cache_ttl": -5}) is None
+    assert agent._cache_ttl({"cache_ttl": "300"}) is None
+    assert agent._cache_ttl({"cache_ttl": True}) is None
+
+
+def test_cache_key_changes_with_the_request_identity(agent):
+    base = {"url": "http://a", "method": "POST", "body": '{"q":1}'}
+    key = agent._cache_key(base)
+    assert key == agent._cache_key(dict(base))  # stable
+    assert key != agent._cache_key({**base, "url": "http://b"})
+    assert key != agent._cache_key({**base, "body": '{"q":2}'})
+    assert key != agent._cache_key({**base, "headers": [["X", "1"]]})
+    assert key != agent._cache_key({**base, "verify_cert": False})
+    assert key != agent._cache_key({**base, "proxy": {"mode": "no_proxy"}})
+
+
+def test_cache_round_trip_serves_a_fresh_entry(agent, cache_dir):
+    endpoint = {"url": "http://a", "cache_ttl": 300}
+    agent._cache_write(endpoint, b'{"s": "UP"}', {"status": 200, "elapsed": 0.4, "size": 11})
+    body, meta = agent._cache_read(endpoint, 300)
+    assert json.loads(body) == {"s": "UP"}
+    assert meta["from_cache"] is True
+    assert 0 <= meta["cache_age"] < 5
+    # Status and size describe the body being served, so they are kept...
+    assert meta["status"] == 200
+    assert meta["size"] == 11
+    # ...but the response time is NOT: no request was made, and replaying the
+    # original would chart a measurement that never happened, for the whole TTL.
+    assert meta["elapsed"] is None
+
+
+def test_cache_entry_older_than_the_ttl_is_a_miss(agent, cache_dir, monkeypatch):
+    endpoint = {"url": "http://a", "cache_ttl": 60}
+    agent._cache_write(endpoint, b"{}", {})
+    real_time = agent.time.time
+    monkeypatch.setattr(agent.time, "time", lambda: real_time() + 61)
+    assert agent._cache_read(endpoint, 60) is None
+
+
+def test_cache_read_treats_damage_as_a_miss(agent, cache_dir):
+    endpoint = {"url": "http://a"}
+    # No file at all, and a corrupt one: both cost one extra request, nothing else.
+    assert agent._cache_read(endpoint, 300) is None
+    (cache_dir / f"{agent._cache_key(endpoint)}.json").write_text("not json")
+    assert agent._cache_read(endpoint, 300) is None
+    (cache_dir / f"{agent._cache_key(endpoint)}.json").write_text('{"stored": 1}')
+    assert agent._cache_read(endpoint, 300) is None
+
+
+def test_cache_write_is_owner_only(agent, cache_dir):
+    endpoint = {"url": "http://a"}
+    agent._cache_write(endpoint, b"{}", {})
+    path = cache_dir / f"{agent._cache_key(endpoint)}.json"
+    assert path.stat().st_mode & 0o777 == 0o600
+    # No temp files left behind.
+    assert [p.name for p in cache_dir.iterdir()] == [path.name]
+
+
+def test_prune_cache_removes_only_stale_files(agent, cache_dir):
+    fresh = cache_dir / "fresh.json"
+    stale = cache_dir / "stale.json"
+    fresh.write_text("{}")
+    stale.write_text("{}")
+    old = agent.time.time() - agent._CACHE_PRUNE_AFTER - 1
+    os.utime(stale, (old, old))
+    agent._prune_cache(cache_dir)
+    assert fresh.exists()
+    assert not stale.exists()
+
+
+def test_fetch_serves_from_cache_without_a_request(agent, cache_dir, monkeypatch):
+    endpoint = {"url": "http://a", "cache_ttl": 300}
+    agent._cache_write(endpoint, b'{"s": "UP"}', {"status": 200, "size": 11})
+
+    def explode(*_args, **_kw):
+        raise AssertionError("a cache hit must not touch the network")
+
+    monkeypatch.setattr(agent, "_build_session", explode)
+    document, error, meta = agent._fetch(endpoint, None)
+    assert document == {"s": "UP"}
+    assert error is None
+    assert meta["from_cache"] is True
+    assert meta["elapsed"] is None
+
+
+def test_fetch_without_a_ttl_never_reads_the_cache(agent, cache_dir, monkeypatch):
+    # Freshness is the default; a stored body must not be served without opting in.
+    endpoint = {"url": "http://a"}
+    agent._cache_write(endpoint, b'{"s": "STALE"}', {})
+    monkeypatch.setattr(
+        agent, "_build_session", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("live"))
+    )
+    with pytest.raises(RuntimeError, match="live"):
+        agent._fetch(endpoint, None)
+
+
+def test_fetch_caches_only_a_parseable_response(agent, cache_dir, monkeypatch):
+    # A non-JSON body must not be stored, or the error would be replayed for the
+    # whole TTL instead of being retried.
+    endpoint = {"url": "http://a", "cache_ttl": 300}
+    _capture_request(agent, monkeypatch, _FakeResponse(b"nope"))
+    _document, error, _meta = agent._fetch(endpoint, None)
+    assert error is not None
+    assert agent._cache_read(endpoint, 300) is None
+
+
+def test_fetch_stores_a_successful_response(agent, cache_dir, monkeypatch):
+    endpoint = {"url": "http://a", "cache_ttl": 300}
+    _capture_request(agent, monkeypatch, _FakeResponse(b'{"s": "UP"}'))
+    document, error, meta = agent._fetch(endpoint, None)
+    assert (document, error) == ({"s": "UP"}, None)
+    assert meta["from_cache"] is False
+    body, cached = agent._cache_read(endpoint, 300)
+    assert json.loads(body) == {"s": "UP"}
+    assert cached["status"] == 200
+
+
+def test_endpoint_record_reports_the_cache_state(agent, monkeypatch):
+    monkeypatch.setattr(
+        agent,
+        "_fetch",
+        lambda endpoint, secret, debug=False: (
+            {"s": "UP"},
+            None,
+            {"status": 200, "elapsed": None, "from_cache": True, "cache_age": 120.0},
+        ),
+    )
+    _results, _labels, record = agent._process_endpoint(
+        agent.parse_arguments(["--endpoint", "{}"]), 0, {"url": "http://x", "extractions": []}
+    )
+    assert record["from_cache"] is True
+    assert record["cache_age"] == 120.0

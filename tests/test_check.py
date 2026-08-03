@@ -1133,3 +1133,50 @@ def test_render_days_keeps_one_decimal_for_a_partial_day(check):
     assert check._render_days(42.0) == "42 days"
     assert check._render_days(0.4) == "0.4 days"
     assert check._render_days(-3.0) == "-3 days"
+
+
+def _cache_endpoint(**kw):
+    base = {
+        "name": "frontend",
+        "url": "https://x/health",
+        "ok": True,
+        "error": None,
+        "status": 200,
+        "elapsed": None,
+        "size": 11,
+        "final_url": None,
+        "from_cache": True,
+        "cache_age": 120.0,
+    }
+    base.update(kw)
+    return base
+
+
+def test_endpoint_says_so_when_served_from_cache(check):
+    section = _section(check, [], endpoints=[_cache_endpoint()])
+    results = list(check.check_json_api_endpoint("frontend", {}, section))
+    summary = next(
+        r.summary for r in results if isinstance(r, Result) and r.summary.startswith("HTTP")
+    )
+    # In the SUMMARY, not just the details: a bare "HTTP 200" would claim the API
+    # answered just now, when nothing was asked.
+    assert summary == "HTTP 200, from cache (2 minutes 0 seconds old)"
+
+
+def test_a_cached_serve_records_no_response_time(check):
+    # The metric must not be fed a replayed measurement for the whole TTL.
+    section = _section(check, [], endpoints=[_cache_endpoint()])
+    results = list(check.check_json_api_endpoint("frontend", {}, section))
+    assert not [r for r in results if isinstance(r, Metric) and r.name == "json_api_response_time"]
+    # The response size still describes the body being served, so it is reported.
+    assert any(isinstance(r, Metric) and r.name == "json_api_response_size" for r in results)
+
+
+def test_a_live_serve_is_unchanged(check):
+    section = _section(check, [], endpoints=[_cache_endpoint(from_cache=False, elapsed=0.03)])
+    results = list(check.check_json_api_endpoint("frontend", {}, section))
+    summary = next(
+        r.summary for r in results if isinstance(r, Result) and r.summary.startswith("HTTP")
+    )
+    assert summary == "HTTP 200"
+    assert any(isinstance(r, Metric) and r.name == "json_api_response_time" for r in results)

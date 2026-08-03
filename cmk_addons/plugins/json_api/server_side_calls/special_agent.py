@@ -121,6 +121,9 @@ class Endpoint(BaseModel, frozen=True):
     client_cert: ClientCert | None = None
     follow_redirects: bool = True
     timeout: float | None = None
+    # Reuse the last response while it is younger than this many seconds
+    # (the agent owns the cache). None = always fetch fresh.
+    cache_ttl: float | None = None
     # Extra HTTP status codes to accept beyond 2xx (the agent reads their body).
     accept_status: Sequence[int] = ()
     # HTTP proxy: the framework resolves the rule's Proxy choice into one of
@@ -176,6 +179,7 @@ def _endpoint_json(endpoint: Endpoint, macros: Mapping[str, str]) -> str:
         "client_cert": endpoint.client_cert.model_dump() if endpoint.client_cert else None,
         "follow_redirects": endpoint.follow_redirects,
         "timeout": endpoint.timeout,
+        "cache_ttl": endpoint.cache_ttl,
         "accept_status": list(endpoint.accept_status),
         "proxy": _proxy_spec(endpoint.proxy),
         "auth": endpoint.auth[0] if endpoint.auth else None,

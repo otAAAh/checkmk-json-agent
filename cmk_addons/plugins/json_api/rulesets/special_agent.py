@@ -694,6 +694,30 @@ def _endpoint() -> Dictionary:
                     custom_validate=(validators.NumberInRange(min_value=0.1),),
                 ),
             ),
+            "cache_ttl": DictElement(
+                required=False,
+                parameter_form=Float(
+                    title=Title("Re-read at most every (seconds)"),
+                    help_text=Help(
+                        "Reuse the last response for this endpoint instead of "
+                        "requesting it again, as long as it is younger than this. "
+                        "For APIs with a request quota, expensive endpoints, or a "
+                        "rule shared across many hosts - anything where the "
+                        "request RATE is the problem rather than the freshness of "
+                        "the data. Without it, every check interval on every host "
+                        "issues a request, which can exhaust a quota and turn the "
+                        "monitoring itself into the outage. Only a response that "
+                        "parsed as JSON is cached, and a failing request is never "
+                        "answered from an expired cache - a real outage must not "
+                        "hide behind stale data. While a cached body is served the "
+                        "endpoint's own service says so and reports no response "
+                        "time, because no request was made. Leave unset to always "
+                        "fetch fresh."
+                    ),
+                    prefill=InputHint(300.0),
+                    custom_validate=(validators.NumberInRange(min_value=1.0),),
+                ),
+            ),
             "accept_status": DictElement(
                 required=False,
                 parameter_form=List(
