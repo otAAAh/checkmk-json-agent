@@ -58,6 +58,7 @@ def test_basic_command_line(ssc):
             "path": "status",
             "service": "Health",
             "label_path": None,
+            "piggyback_host": None,
             "filter": None,
             "unit": None,
             "labels": [],
@@ -642,3 +643,45 @@ def test_unknown_aggregate_is_rejected(ssc):
                 ]
             }
         )
+
+
+def test_piggyback_host_passed_through(ssc):
+    # The agent needs it to route the element's services into a '<<<<host>>>>'
+    # section; a model that dropped it would silently disable piggybacking.
+    args = _command_args(
+        ssc,
+        {
+            "endpoints": [
+                {
+                    "url": "http://x",
+                    "verify_cert": True,
+                    "extractions": [
+                        {
+                            "path": "nodes[*].health",
+                            "service": "Health",
+                            "piggyback_host": "name",
+                        }
+                    ],
+                }
+            ]
+        },
+    )
+    (endpoint,) = _endpoints(ssc, args)
+    assert endpoint["extractions"][0]["piggyback_host"] == "name"
+
+
+def test_piggyback_host_defaults_to_none(ssc):
+    args = _command_args(
+        ssc,
+        {
+            "endpoints": [
+                {
+                    "url": "http://x",
+                    "verify_cert": True,
+                    "extractions": [{"path": "s", "service": "S"}],
+                }
+            ]
+        },
+    )
+    (endpoint,) = _endpoints(ssc, args)
+    assert endpoint["extractions"][0]["piggyback_host"] is None

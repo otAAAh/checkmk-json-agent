@@ -14,6 +14,23 @@ GitHub Release body, so these notes travel with the release people actually read
 
 ## [Unreleased]
 
+### Piggyback hosts must exist before they are monitored
+
+Purely additive — nothing changes unless you set the new **Create one host per
+element, named by this field** on a `[*]` field. But when you do, be aware of the
+standard Checkmk piggyback rule: **data for a host that does not exist in Checkmk
+is stored and never monitored.** No error, no service, no warning on the polling
+host — it simply sits in the piggyback directory.
+
+**Effect:** create the hosts first (by hand, or with Dynamic host management on
+Enterprise/Cloud), then run a discovery. If you enable the option and see nothing,
+this is why.
+
+Switching an existing `[*]` field over to per-element hosts also *moves* its
+services: the label-suffixed services on the polling host (`JSON Node web-1`)
+disappear and are replaced by plainly-named ones on the new hosts (`JSON Node` on
+host `web-1`), so their metric history restarts.
+
 ### The endpoint service item drops the URL's query string
 
 Endpoints **without** a configured **Name** take their service item from the URL,

@@ -1226,3 +1226,137 @@ def test_aggregate_trims_an_integral_result(agent):
         {"vals": [1, 2]}, [{"path": "vals", "service": "V", "aggregate": "avg"}], "u"
     )
     assert result["value"] == 1.5
+
+
+# --- Piggyback hosts ----------------------------------------------------------
+
+PB_DOC = {
+    "nodes": [
+        {"name": "node-01", "health": "UP", "load": 1},
+        {"name": "node-02", "health": "DOWN", "load": 2},
+    ]
+}
+
+
+def test_piggyback_host_reads_and_sanitises_the_name(agent):
+    assert agent._piggyback_host({"name": "node-01"}, "name") == "node-01"
+    # Only host-name-safe characters survive; the rest become '_'.
+    assert agent._piggyback_host({"name": "web 01/prod"}, "name") == "web_01_prod"
+    assert agent._piggyback_host({"n": {"deep": "a.b-c_d"}}, "n.deep") == "a.b-c_d"
+    # A number or bool is a usable name; a container or a missing field is not.
+    assert agent._piggyback_host({"id": 7}, "id") == "7"
+    assert agent._piggyback_host({"name": {"x": 1}}, "name") is None
+    assert agent._piggyback_host({}, "name") is None
+    # Nothing configured, or a name that sanitises away to nothing.
+    assert agent._piggyback_host({"name": "x"}, None) is None
+    assert agent._piggyback_host({"name": "  "}, "name") is None
+    assert agent._piggyback_host({"name": "///"}, "name") is None
+
+
+def test_extraction_routes_each_element_to_its_own_host(agent):
+    specs = [{"path": "nodes[*].health", "service": "Health", "piggyback_host": "name"}]
+    results = agent._extract(PB_DOC, specs, "http://test/h")
+    # The host carries the identity, so the service keeps its plain name.
+    assert [(r["host"], r["service"], r["value"]) for r in results] == [
+        ("node-01", "Health", "UP"),
+        ("node-02", "Health", "DOWN"),
+    ]
+
+
+def test_extraction_without_piggyback_is_unchanged(agent):
+    specs = [{"path": "nodes[*].health", "service": "Health", "label_path": "name"}]
+    results = agent._extract(PB_DOC, specs, "http://test/h")
+    assert [(r["host"], r["service"]) for r in results] == [
+        (None, "Health node-01"),
+        (None, "Health node-02"),
+    ]
+
+
+def test_element_without_a_resolvable_host_stays_on_the_polling_host(agent):
+    # Losing the service would be worse than putting it somewhere imperfect.
+    doc = {"nodes": [{"name": "node-01", "health": "UP"}, {"health": "DOWN"}]}
+    specs = [{"path": "nodes[*].health", "service": "Health", "piggyback_host": "name"}]
+    results = agent._extract(doc, specs, "http://test/h")
+    assert [(r["host"], r["service"], r["value"]) for r in results] == [
+        ("node-01", "Health", "UP"),
+        (None, "Health 1", "DOWN"),  # labelled by index, on the polling host
+    ]
+
+
+def test_piggyback_composes_with_the_element_filter(agent):
+    specs = [
+        {
+            "path": "nodes[*].health",
+            "service": "Health",
+            "piggyback_host": "name",
+            "filter": {"path": "health", "op": "not_equals", "value": "UP"},
+        }
+    ]
+    results = agent._extract(PB_DOC, specs, "http://test/h")
+    assert [(r["host"], r["value"]) for r in results] == [("node-02", "DOWN")]
+
+
+def test_split_by_host_partitions_and_strips_the_routing_key(agent):
+    results = [
+        {"service": "A", "host": None},
+        {"service": "B", "host": "h1"},
+        {"service": "C", "host": "h1"},
+        {"service": "D", "host": "h2"},
+    ]
+    own, piggybacked = agent._split_by_host(results)
+    assert own == [{"service": "A"}]
+    assert piggybacked == {
+        "h1": [{"service": "B"}, {"service": "C"}],
+        "h2": [{"service": "D"}],
+    }
+    # 'host' is internal routing, never part of the section format.
+    assert all("host" not in r for r in own)
+    assert all("host" not in r for group in piggybacked.values() for r in group)
+
+
+def test_main_emits_a_piggyback_section_per_host(agent, monkeypatch, capsys):
+    monkeypatch.setattr(
+        agent, "_fetch", lambda endpoint, secret, debug=False: (PB_DOC, None, {"status": 200})
+    )
+    endpoint = {
+        "url": "http://cluster",
+        "name": "cluster",
+        "extractions": [
+            {"path": "nodes[*].health", "service": "Health", "piggyback_host": "name"},
+            {"path": "nodes[*].load", "service": "Load", "piggyback_host": "name"},
+            {"path": "nodes", "service": "Node count", "aggregate": "count"},
+        ],
+    }
+    assert agent.main(["--endpoint", json.dumps(endpoint)]) == 0
+    out = capsys.readouterr().out
+    lines = out.splitlines()
+
+    # The polling host's section comes first and holds only its own services.
+    assert lines[0] == "<<<json_api:sep(0)>>>"
+    own = json.loads(lines[1])
+    assert [r["service"] for r in own["results"]] == ["Node count"]
+    # The endpoint record describes the REQUEST, so it stays with the polling host.
+    assert [r["name"] for r in own["endpoints"]] == ["cluster"]
+
+    # Then one section per piggyback host, in the same format, and both
+    # extractions land on the same host.
+    assert lines[2] == "<<<<node-01>>>>"
+    assert lines[3] == "<<<json_api:sep(0)>>>"
+    node1 = json.loads(lines[4])
+    assert sorted(r["service"] for r in node1["results"]) == ["Health", "Load"]
+    assert "endpoints" not in node1  # no endpoint service on a piggyback host
+    assert lines[5] == "<<<<node-02>>>>"
+
+    # The last piggyback section is closed, or later agent output would be
+    # attributed to that host.
+    assert lines[-1] == "<<<<>>>>"
+
+
+def test_main_emits_no_piggyback_markers_without_piggyback_hosts(agent, monkeypatch, capsys):
+    monkeypatch.setattr(
+        agent, "_fetch", lambda endpoint, secret, debug=False: ({"s": "UP"}, None, {})
+    )
+    endpoint = {"url": "http://a", "extractions": [{"path": "s", "service": "A"}]}
+    assert agent.main(["--endpoint", json.dumps(endpoint)]) == 0
+    out = capsys.readouterr().out
+    assert "<<<<" not in out

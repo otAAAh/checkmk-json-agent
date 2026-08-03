@@ -132,6 +132,7 @@ def test_extraction_form_has_the_expected_keys(ruleset):
         "service",
         "path",
         "label_path",
+        "piggyback_host",
         "labels",
         "aggregate",
         "filter",

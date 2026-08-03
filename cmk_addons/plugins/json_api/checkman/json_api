@@ -30,6 +30,16 @@ description:
  matches or does not match a regular expression) become services or are
  aggregated.
 
+ A {[*]} field may instead create one Checkmk {host} per element rather than one
+ more service on the polling host: name a field within each element that holds
+ the host name, and every element becomes a piggyback host carrying this service
+ under its plain name. Only characters valid in a Checkmk host name are kept;
+ anything else becomes an underscore. An element whose host field is missing
+ keeps its service on the polling host, and so does everything outside the
+ wildcard - including the endpoint's own service, which describes the request.
+ The hosts must exist in Checkmk, or the piggyback data is stored and never
+ monitored.
+
  A field may also be read as something other than a plain value. Read as a
  {counter}, the check monitors the change per second instead of the absolute
  total; the first check (and any check after the counter went backwards, e.g.

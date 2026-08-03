@@ -63,6 +63,11 @@ class Extraction(BaseModel, frozen=True):
     path: str
     service: str
     label_path: str | None = None
+    # Field within each '[*]' element supplying a PIGGYBACK HOST name: the element
+    # becomes its own Checkmk host carrying this service, instead of one
+    # label-suffixed service on the polling host. Resolved by the agent, which
+    # sanitises it and routes the result into a '<<<<host>>>>' section.
+    piggyback_host: str | None = None
     # Keep only wildcard/count elements matching this predicate (opaque to the
     # server-side call; the agent applies it). Serialized via model_dump below.
     filter: FilterSpec | None = None

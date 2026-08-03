@@ -264,6 +264,29 @@ def _extraction() -> Dictionary:
                     ),
                 ),
             ),
+            "piggyback_host": DictElement(
+                required=False,
+                parameter_form=String(
+                    title=Title("Create one host per element, named by this field"),
+                    help_text=Help(
+                        "When the JSON path contains a '[*]' wildcard, this turns "
+                        "every element into a Checkmk host of its own instead of "
+                        "one more service on this host. Give a path relative to "
+                        "each element that holds the host name, e.g. 'name' or "
+                        "'hostname'. The service then keeps its plain name, "
+                        "because the host already says which element it is. Set "
+                        "the same field on several fields of this endpoint to "
+                        "collect them all on the same hosts. Only characters "
+                        "valid in a Checkmk host name are kept (letters, digits, "
+                        "'-', '_', '.'); anything else becomes '_'. An element "
+                        "whose field is missing keeps its service on this host, "
+                        "so nothing is lost. IMPORTANT: Checkmk holds piggyback "
+                        "data for hosts that do not exist yet - create the hosts "
+                        "(manually or with Dynamic host management) or the data "
+                        "is never monitored."
+                    ),
+                ),
+            ),
             "labels": DictElement(
                 required=False,
                 parameter_form=List(
