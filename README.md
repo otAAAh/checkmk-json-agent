@@ -150,8 +150,10 @@ Each **endpoint** also has an optional **Host labels** list: fields resolved fro
 ### The endpoint's own service
 
 Besides the field services, each endpoint gets one service of its own —
-**`JSON API <name>`**, named by the endpoint's optional **Name** (its URL when
-it has none). It reports the *request* rather than the data in it: the HTTP
+**`JSON API <name>`**, named by the endpoint's optional **Name** (its URL,
+without any query string, when it has none — so a key passed as a query
+parameter never lands in a service description). It reports the *request*
+rather than the data in it: the HTTP
 status code, the response time (measured until the whole body has been read)
 and the response size, with the URL — and the redirect target, when a redirect
 moved the request — in the Details. It needs no field configuration and appears

@@ -28,7 +28,9 @@ description:
  "Disabled services" rule.
 
 item:
- The name configured for the endpoint, or its URL when it has no name.
+ The name configured for the endpoint, or its URL when it has no name. The URL
+ is used without its query string, so a credential passed as a query parameter
+ stays out of the service description; the full URL is in the service details.
 
 discovery:
  One service is created for each endpoint configured in the special agent rule.
