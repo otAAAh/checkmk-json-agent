@@ -93,6 +93,13 @@ Targets **Checkmk 2.4+** and the current stable plugin APIs
   endpoint that reports its problems with a 503 and a JSON body
 - **HTTP proxy** support per endpoint (environment variables, an explicit proxy
   URL, or bypass) — for APIs reachable only through a corporate egress proxy
+- **Retry a failed request**: an optional per-endpoint retry (with a doubling
+  backoff) for the failures a repeat can fix — a connection reset, a timeout, an
+  HTTP 429/5xx — so a load balancer dropping connections for a second during a
+  rolling restart does not become a CRIT and a notification. A 4xx, a non-JSON
+  body and an oversized response are never retried. Nothing is hidden: the
+  endpoint service reports that a retry was needed, and can be told to go WARN
+  when one is. Off by default
 - **Per-endpoint response cache**: an optional TTL reuses the last response
   instead of asking again — for APIs with a request quota, expensive endpoints,
   or one rule shared across many hosts, where the request *rate* is the problem
@@ -141,6 +148,7 @@ Each endpoint has:
 | **Client certificate (mutual TLS)** | Optional; paths on the Checkmk server to the client certificate (PEM) and, if separate, the private key. The key must be unencrypted |
 | **Follow HTTP redirects** | On by default; turn off to harden against redirect-based SSRF |
 | **Re-read at most every (seconds)** | Optional cache TTL. Reuses the last response for this endpoint while it is younger than this, instead of requesting it again — see [Caching responses](#caching-responses). Unset (the default) always fetches fresh |
+| **Retry a failed request** | Optional: a number of retries (1–5) and a backoff in seconds, doubled for each further attempt and capped at 30 s in total. Only a connection error, a timeout, an HTTP 429 or a 5xx is retried — a 4xx, a body that is not JSON and an oversized response answer the same however often they are asked. A cached response makes no request, so nothing is retried. Off by default |
 | **Request timeout (seconds)** | Optional; defaults to 30 |
 | **Additional accepted HTTP status codes** | Optional; by default only 2xx responses are read (any other status → UNKNOWN). List extra codes (e.g. `503`) to parse and extract their body too. 2xx is always accepted |
 | **HTTP proxy** | Optional; route via the environment's `HTTP_PROXY`/`HTTPS_PROXY`, an explicit proxy URL, or bypass. Unset = honour the environment |
@@ -186,8 +194,9 @@ status the rule does not accept, or a response that is not JSON) the service is
 CRIT and reports the error, while the field services of that endpoint go UNKNOWN
 as before.
 
-Response-time levels, certificate-expiry levels and the state for an unreachable
-endpoint are configured in a check-parameters rule of its own:
+Response-time levels, certificate-expiry levels, the state when a retry was
+needed and the state for an unreachable endpoint are configured in a
+check-parameters rule of its own:
 
 > **Setup → Service monitoring rules → Applications → Generic JSON API endpoint**
 > (ruleset `checkgroup_parameters:json_api_endpoint`)

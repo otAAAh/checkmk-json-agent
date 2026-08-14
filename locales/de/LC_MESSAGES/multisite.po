@@ -6,7 +6,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: checkmk-json-agent 0.2.0\n"
 "Report-Msgid-Bugs-To: https://github.com/otAAAh/checkmk-json-agent/issues\n"
-"POT-Creation-Date: 2026-08-14 11:05+0200\n"
+"POT-Creation-Date: 2026-08-14 12:30+0200\n"
 "PO-Revision-Date: 2026-07-03 10:30+0200\n"
 "Last-Translator: Benjamin Knapp\n"
 "Language-Team: German\n"
@@ -254,7 +254,7 @@ msgid "Field to monitor"
 msgstr "Zu überwachendes Feld"
 
 #: cmk_addons/plugins/json_api/rulesets/special_agent.py:373
-#: cmk_addons/plugins/json_api/rulesets/check_parameters.py:117
+#: cmk_addons/plugins/json_api/rulesets/check_parameters.py:132
 msgid "Service name"
 msgstr "Dienstname"
 
@@ -264,7 +264,7 @@ msgstr "Wird zur Checkmk-Dienstbeschreibung für dieses Feld."
 
 #: cmk_addons/plugins/json_api/rulesets/special_agent.py:381
 #: cmk_addons/plugins/json_api/rulesets/special_agent.py:460
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:962
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:1011
 msgid "JSON path"
 msgstr "JSON-Pfad"
 
@@ -378,7 +378,7 @@ msgstr ""
 "ohne Platzhalter, zur Wurzel der Antwort."
 
 #: cmk_addons/plugins/json_api/rulesets/special_agent.py:472
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:974
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:1023
 msgid "Label key (optional)"
 msgstr "Label-Schlüssel (optional)"
 
@@ -667,7 +667,7 @@ msgstr ""
 "Zeile gebracht und gekürzt, wenn er lang wird."
 
 #: cmk_addons/plugins/json_api/rulesets/special_agent.py:722
-#: cmk_addons/plugins/json_api/rulesets/check_parameters.py:125
+#: cmk_addons/plugins/json_api/rulesets/check_parameters.py:140
 msgid "Endpoint"
 msgstr "Endpunkt"
 
@@ -848,10 +848,59 @@ msgstr ""
 "immer neu abzurufen."
 
 #: cmk_addons/plugins/json_api/rulesets/special_agent.py:900
+msgid "Retry a failed request"
+msgstr "Fehlgeschlagene Anfrage wiederholen"
+
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:902
+msgid ""
+"Repeat this endpoint's request when it fails in a way a repeat could fix - a "
+"connection error, a timeout, or an HTTP 429 / 5xx - so a load balancer "
+"dropping connections for a second during a rolling restart does not become a "
+"CRIT and a notification. A 4xx, a body that is not JSON and an oversized "
+"response are never retried: repeating them would only burn time. Nothing is "
+"hidden - the endpoint's own service reports that a retry was needed, and can "
+"be told to go WARN when one is. Every attempt costs wall-clock time inside "
+"the check: the worst case is (1 + retries) times the request timeout, plus "
+"the waiting time between attempts. Off by default."
+msgstr ""
+"Wiederholt die Anfrage an diesen Endpunkt, wenn sie so fehlschlägt, dass "
+"eine Wiederholung helfen kann - Verbindungsfehler, Timeout oder HTTP 429 / "
+"5xx -, damit ein Load Balancer, der während eines rollierenden Neustarts "
+"eine Sekunde lang Verbindungen abbricht, nicht zu einem CRIT samt "
+"Benachrichtigung wird. Ein 4xx, ein Body, der kein JSON ist, und eine zu "
+"große Antwort werden nie wiederholt: Das würde nur Zeit kosten. Es wird "
+"nichts verborgen - der eigene Service des Endpunkts meldet, dass eine "
+"Wiederholung nötig war, und kann dafür auf WARN gesetzt werden. Jeder "
+"Versuch kostet Laufzeit innerhalb des Checks: Im schlechtesten Fall (1 + "
+"Wiederholungen) mal das Anfrage-Timeout plus die Wartezeiten zwischen den "
+"Versuchen. Standardmäßig aus."
+
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:919
+msgid "Number of retries"
+msgstr "Anzahl der Wiederholungen"
+
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:920
+msgid "Extra attempts after the first one failed."
+msgstr "Zusätzliche Versuche, nachdem der erste fehlgeschlagen ist."
+
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:930
+msgid "Wait before retrying (seconds)"
+msgstr "Wartezeit vor der Wiederholung (Sekunden)"
+
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:932
+msgid ""
+"Waiting time before the first retry, doubled for each further one. The total "
+"waiting time is capped at 30 seconds however many retries are configured."
+msgstr ""
+"Wartezeit vor der ersten Wiederholung, für jede weitere verdoppelt. Die "
+"gesamte Wartezeit ist auf 30 Sekunden begrenzt, unabhängig von der Anzahl "
+"der Wiederholungen."
+
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:949
 msgid "Additional accepted HTTP status codes"
 msgstr "Zusätzlich akzeptierte HTTP-Statuscodes"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:902
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:951
 msgid ""
 "By default only 2xx responses are read; any other status makes the "
 "endpoint's services UNKNOWN. Add extra status codes to accept here - for "
@@ -866,15 +915,15 @@ msgstr ""
 "Body einer akzeptierten Antwort wird wie gewohnt geparst und ausgewertet. "
 "2xx wird immer akzeptiert."
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:910
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:959
 msgid "Status code"
 msgstr "Statuscode"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:918
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:967
 msgid "HTTP proxy"
 msgstr "HTTP-Proxy"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:920
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:969
 msgid ""
 "Route this endpoint's request through an HTTP proxy - useful when the "
 "Checkmk server reaches the API only via a corporate egress proxy. Choose the "
@@ -889,11 +938,11 @@ msgstr ""
 "umgehen. Ohne diese Einstellung werden die Proxy-Variablen der Umgebung "
 "berücksichtigt."
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:934
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:983
 msgid "Fields to monitor"
 msgstr "Zu überwachende Felder"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:936
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:985
 msgid ""
 "Each entry becomes one Checkmk service, built from the value found at the "
 "given JSON path."
@@ -901,11 +950,11 @@ msgstr ""
 "Jeder Eintrag wird zu einem Checkmk-Dienst, gebildet aus dem Wert am "
 "angegebenen JSON-Pfad."
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:945
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:994
 msgid "Host labels"
 msgstr "Host-Labels"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:947
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:996
 msgid ""
 "Attach Checkmk host labels to the monitored host, built from fields in this "
 "endpoint's response. Each key is prefixed with 'json_api/' and the value is "
@@ -925,7 +974,7 @@ msgstr ""
 "Service-Erkennung gesetzt; wählen Sie daher stabile Felder mit geringer "
 "Kardinalität."
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:964
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:1013
 msgid ""
 "From the response root, e.g. 'version', 'cluster.region', or a '[*]' "
 "wildcard like 'components[*]' for one label per element."
@@ -933,7 +982,7 @@ msgstr ""
 "Ausgehend von der Wurzel der Antwort, z. B. 'version', 'cluster.region' oder "
 "ein '[*]'-Platzhalter wie 'components[*]' für ein Label pro Element."
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:976
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:1025
 msgid ""
 "Defaults to the path's last segment. For a '[*]' path the element id is "
 "appended ('<key>/<element>'). The 'json_api/' prefix is added automatically."
@@ -942,11 +991,11 @@ msgstr ""
 "Element-ID angehängt ('<key>/<element>'). Das Präfix 'json_api/' wird "
 "automatisch hinzugefügt."
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:986
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:1035
 msgid "Value field (for '[*]' wildcards)"
 msgstr "Wertfeld (bei '[*]'-Platzhaltern)"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:988
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:1037
 msgid ""
 "For a '[*]' path: a path within each element for the label value (e.g. "
 "'status'). Defaults to 'true' (a set-membership tag). Ignored without a "
@@ -956,11 +1005,11 @@ msgstr ""
 "(z. B. 'status'). Standardmäßig 'true' (ein Zugehörigkeits-Tag). Ohne "
 "Platzhalter wird es ignoriert."
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:1021
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:1070
 msgid "Endpoints"
 msgstr "Endpunkte"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:1023
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:1072
 msgid ""
 "One or more HTTP/JSON endpoints. Each is fetched with its own connection "
 "settings and extractions; all results are merged into one section. An "
@@ -971,8 +1020,8 @@ msgstr ""
 "zu einem Abschnitt zusammengeführt. Ein nicht erreichbarer Endpunkt betrifft "
 "nur seine eigenen Dienste."
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:1038
-#: cmk_addons/plugins/json_api/rulesets/check_parameters.py:114
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:1087
+#: cmk_addons/plugins/json_api/rulesets/check_parameters.py:129
 msgid "Generic JSON API"
 msgstr "Generische JSON-API"
 
@@ -1011,10 +1060,29 @@ msgstr ""
 "Restlaufzeit nur als Metrik aufgezeichnet."
 
 #: cmk_addons/plugins/json_api/rulesets/check_parameters.py:99
+msgid "State when the request needed a retry"
+msgstr "Status, wenn die Anfrage eine Wiederholung brauchte"
+
+#: cmk_addons/plugins/json_api/rulesets/check_parameters.py:101
+msgid ""
+"Applies when the endpoint's retry policy absorbed a failed attempt: the "
+"request did succeed, but not on the first try. OK by default - a retry doing "
+"its job is not itself a problem. Raise it for an endpoint whose flakiness is "
+"worth knowing about, so retries never quietly turn a degrading API into a "
+"permanently green service."
+msgstr ""
+"Gilt, wenn die Wiederholungsstrategie des Endpunkts einen fehlgeschlagenen "
+"Versuch aufgefangen hat: Die Anfrage war erfolgreich, aber nicht beim ersten "
+"Mal. Standardmäßig OK - eine Wiederholung, die ihre Arbeit tut, ist noch "
+"kein Problem. Erhöhen Sie ihn für einen Endpunkt, dessen Instabilität von "
+"Interesse ist, damit Wiederholungen eine sich verschlechternde API nicht "
+"stillschweigend dauerhaft grün erscheinen lassen."
+
+#: cmk_addons/plugins/json_api/rulesets/check_parameters.py:114
 msgid "State when the endpoint cannot be read"
 msgstr "Zustand, wenn der Endpunkt nicht gelesen werden kann"
 
-#: cmk_addons/plugins/json_api/rulesets/check_parameters.py:101
+#: cmk_addons/plugins/json_api/rulesets/check_parameters.py:116
 msgid ""
 "Applies when the request fails outright: connection refused, a TLS error, a "
 "timeout, an HTTP status that is not accepted, or a response that is not JSON."
@@ -1023,7 +1091,7 @@ msgstr ""
 "Fehler, Zeitüberschreitung, ein nicht akzeptierter HTTP-Status oder eine "
 "Antwort, die kein JSON ist."
 
-#: cmk_addons/plugins/json_api/rulesets/check_parameters.py:122
+#: cmk_addons/plugins/json_api/rulesets/check_parameters.py:137
 msgid "Generic JSON API endpoint"
 msgstr "Generischer JSON-API-Endpunkt"
 

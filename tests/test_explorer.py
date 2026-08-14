@@ -212,3 +212,9 @@ def test_explorer_emits_the_summary_template(rule_value: dict, explorer_output: 
 
     cli = {x["service"]: x for x in explorer_output["cli"][0]["extractions"]}
     assert cli["Health"]["summary"] == "{message} (leader {leader})"
+
+
+def test_explorer_emits_the_retry_policy(rule_value: dict, explorer_output: dict):
+    endpoint = rule_value["endpoints"][0]
+    assert endpoint["retry"] == {"attempts": 2, "backoff": 0.5}
+    assert explorer_output["cli"][0]["retry"] == {"attempts": 2, "backoff": 0.5}
