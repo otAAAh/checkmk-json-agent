@@ -102,6 +102,10 @@ class Extraction(BaseModel, frozen=True):
     match: object = None
     # Arithmetic expression over 'value', applied to a numeric value by the check.
     calc: str | None = None
+    # Extra text for the service summary, with '{path}' placeholders. The agent
+    # resolves the paths (it has the document and the current '[*]' element); the
+    # check renders the text. Presentation only - never touches the state.
+    summary: str | None = None
     # Collapse the collection at the path into one number: count / sum / avg /
     # min / max (resolved by the agent, which has the document).
     aggregate: Literal["count", "sum", "avg", "min", "max"] | None = None

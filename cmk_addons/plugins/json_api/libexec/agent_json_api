@@ -883,6 +883,7 @@ def _result(
     url: str,
     labels: list[dict] | None = None,
     host: str | None = None,
+    summary_fields: dict[str, str] | None = None,
 ) -> dict:
     # Values that are not JSON scalars (dict/list) are reported as strings.
     if found and isinstance(value, (dict, list)):
@@ -910,6 +911,12 @@ def _result(
         # service's Details.
         "aggregate": _aggregate_mode(spec),
         "labels": labels or [],
+        # Extra summary text: the template as configured, plus the values its
+        # '{path}' placeholders resolved to in THIS element's scope. Split that
+        # way because only the agent can resolve a path and only the check knows
+        # how the value itself is rendered.
+        "summary": spec.get("summary") or None,
+        "summary_fields": summary_fields or {},
     }
 
 
@@ -971,6 +978,9 @@ def _extract(document: object, extractions: list[dict], url: str) -> list[dict]:
     results = []
     for spec in extractions:
         label_specs = spec.get("labels") or []
+        # Resolved in the same scope as the service labels: the current '[*]'
+        # element, or the document root where there is no element.
+        summary = spec.get("summary")
         segments = _split_wildcards(spec["path"])
         aggregate = _aggregate_mode(spec)
         filt = spec.get("filter")
@@ -981,7 +991,18 @@ def _extract(document: object, extractions: list[dict], url: str) -> list[dict]:
             if found and aggregate:
                 found, value, error = _aggregate_container(aggregate, value, filt)
             labels = _resolve_labels(label_specs, document)
-            results.append(_result(spec, spec["service"], found, value, error, url, labels))
+            results.append(
+                _result(
+                    spec,
+                    spec["service"],
+                    found,
+                    value,
+                    error,
+                    url,
+                    labels,
+                    summary_fields=_resolve_summary(summary, document),
+                )
+            )
             continue
 
         leaves = _expand_wildcards(document, segments, spec.get("label_path"))
@@ -993,7 +1014,18 @@ def _extract(document: object, extractions: list[dict], url: str) -> list[dict]:
         if aggregate:
             found, value, error = _aggregate_leaves(aggregate, leaves, filt)
             labels = _resolve_labels(label_specs, document)
-            results.append(_result(spec, spec["service"], found, value, error, url, labels))
+            results.append(
+                _result(
+                    spec,
+                    spec["service"],
+                    found,
+                    value,
+                    error,
+                    url,
+                    labels,
+                    summary_fields=_resolve_summary(summary, document),
+                )
+            )
             continue
 
         # One or more array wildcards: one service per cartesian-product
@@ -1019,7 +1051,19 @@ def _extract(document: object, extractions: list[dict], url: str) -> list[dict]:
             else:
                 service = f"{spec['service']} {label}" if label else spec["service"]
             labels = _resolve_labels(label_specs, element)
-            results.append(_result(spec, service, found, value, error, url, labels, host))
+            results.append(
+                _result(
+                    spec,
+                    service,
+                    found,
+                    value,
+                    error,
+                    url,
+                    labels,
+                    host,
+                    summary_fields=_resolve_summary(summary, element),
+                )
+            )
     return results
 
 
@@ -1060,6 +1104,45 @@ def _label_key_from_path(path: str) -> str:
         if token is not None:
             key = token
     return key or cleaned
+
+
+# One '{path}' placeholder of a summary template. Braces cannot nest, so the
+# body is anything but a brace; the ruleset rejects the shapes this would miss.
+_SUMMARY_PLACEHOLDER = re.compile(r"\{([^{}]+)\}")
+
+# How much of a collection to describe in a summary. Dumping the JSON of a
+# 200-element array into a service summary - which travels into notifications -
+# helps nobody, so a non-scalar is reported by its size instead.
+def _summary_value(value: object) -> str:
+    if isinstance(value, list):
+        return f"[{len(value)} items]"
+    if isinstance(value, dict):
+        return f"{{{len(value)} keys}}"
+    if value is None:
+        return "null"
+    text = _label_value(value)
+    return text if text is not None else str(value)
+
+
+def _resolve_summary(template: object, element: object) -> dict[str, str]:
+    """Resolve a summary template's '{path}' placeholders against ``element``.
+
+    Returns ``{path: rendered}`` for the placeholders that resolved, keyed by the
+    path exactly as written in the template. Unresolvable ones are simply absent:
+    the check marks them '(n/a)', so a typo stays visible instead of quietly
+    rendering as nothing.
+    """
+    if not isinstance(template, str) or not template.strip():
+        return {}
+    fields: dict[str, str] = {}
+    for match in _SUMMARY_PLACEHOLDER.finditer(template):
+        path = match.group(1).strip()
+        if not path or path in fields:
+            continue
+        found, value = _resolve_path(element, path)
+        if found:
+            fields[path] = _summary_value(value)
+    return fields
 
 
 def _resolve_labels(label_specs: list[dict], element: object) -> list[dict]:

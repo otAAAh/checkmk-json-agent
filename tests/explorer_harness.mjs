@@ -53,6 +53,7 @@ const FIXTURE = {
       service: "Health",
       path: "status",
       label_path: "",
+      summary: "{message} (leader {leader})",
       aggregate: "",
       valueAs: "",
       tsFormat: "auto",

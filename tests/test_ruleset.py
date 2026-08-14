@@ -142,6 +142,7 @@ def test_extraction_form_has_the_expected_keys(ruleset):
         "levels_lower",
         "calc",
         "match",
+        "summary",
     }
     assert "count" not in ruleset._extraction().elements
 
@@ -293,3 +294,19 @@ def test_endpoint_validation_ignores_other_auth_modes(ruleset):
         }
     )
     ruleset._validate_endpoint(None)  # must not raise
+
+
+@pytest.mark.parametrize(
+    "template",
+    ["{message}", "{message} (leader {leader})", "plain text", "", "{a.b['c.d']}"],
+)
+def test_valid_summary_templates_pass(ruleset, template):
+    ruleset._validate_summary(template)  # must not raise
+
+
+@pytest.mark.parametrize("bad", ["{unclosed", "closed}", "{}", "{a{b}}", "{ }"])
+def test_invalid_summary_templates_rejected(ruleset, bad):
+    # A stray brace would otherwise become a placeholder that silently never
+    # renders.
+    with pytest.raises(ValidationError):
+        ruleset._validate_summary(bad)

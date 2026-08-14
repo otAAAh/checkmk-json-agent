@@ -201,3 +201,14 @@ def test_explorer_emits_api_key_query_auth(rule_value: dict, explorer_output: di
     assert cli["auth_query"] == "api_key"
     # The URL stays clean - the agent appends the parameter at request time.
     assert "api_key" not in cli["url"]
+
+
+def test_explorer_emits_the_summary_template(rule_value: dict, explorer_output: dict):
+    # Presentation-only extra summary text; it must reach both the rule value and
+    # the agent command line, since the agent resolves its '{path}' placeholders.
+    by_service = {x["service"]: x for x in rule_value["endpoints"][0]["extractions"]}
+    assert by_service["Health"]["summary"] == "{message} (leader {leader})"
+    assert "summary" not in by_service["Node"]
+
+    cli = {x["service"]: x for x in explorer_output["cli"][0]["extractions"]}
+    assert cli["Health"]["summary"] == "{message} (leader {leader})"

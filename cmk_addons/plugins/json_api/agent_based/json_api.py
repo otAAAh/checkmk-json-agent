@@ -176,6 +176,11 @@ class Item:
     # Service labels (key, value) the agent resolved for this service, sans the
     # json_api/ namespace prefix (added when the ServiceLabel is emitted).
     service_labels: tuple[tuple[str, str], ...] = ()
+    # Extra summary text: the configured template ('{path}' placeholders) and the
+    # values those paths resolved to for THIS service's element. Rendering is
+    # left here because only the check knows what the summary already says.
+    summary: str | None = None
+    summary_fields: Mapping[str, str] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -314,6 +319,13 @@ def _service_labels(raw: object) -> tuple[tuple[str, str], ...]:
     return tuple(out)
 
 
+def _summary_fields(raw: object) -> dict[str, str]:
+    """The ``{path: rendered}`` values the agent resolved for a summary template."""
+    if not isinstance(raw, dict):
+        return {}
+    return {k: v for k, v in raw.items() if isinstance(k, str) and k and isinstance(v, str)}
+
+
 def _coerce_host_labels(raw: object) -> dict[str, str]:
     """The endpoint-level ``{key: value}`` host labels, string-validated."""
     if not isinstance(raw, dict):
@@ -400,6 +412,8 @@ def parse_json_api(string_table: StringTable) -> Section | None:
             value_as=_coerce_value_as(result.get("value_as")),
             aggregate=_coerce_aggregate(result.get("aggregate")),
             service_labels=_service_labels(result.get("labels")),
+            summary=_optional_str(result.get("summary")),
+            summary_fields=_summary_fields(result.get("summary_fields")),
         )
     return Section(
         error=payload.get("error"),
@@ -812,6 +826,61 @@ def _value_results(
         yield Result(state=State.OK, summary=f"Value: {_render_value(entry.value)}")
 
 
+# One '{path}' placeholder of a summary template; mirrors the agent's own regex.
+_SUMMARY_PLACEHOLDER = re.compile(r"\{([^{}]+)\}")
+
+# A summary is a single line that travels into notifications and views, so an
+# API returning a paragraph (or a stack trace) must not push the rest of the
+# output out of shape. Newlines would additionally split summary from details.
+_SUMMARY_MAX_LENGTH = 160
+
+
+def _render_summary(entry: Item) -> str | None:
+    """The configured extra summary text with its placeholders filled in.
+
+    A path the agent could not resolve renders as '(n/a)' rather than as nothing:
+    a mistyped path should be visible in the service, not silently absent.
+    """
+    if not entry.summary:
+        return None
+    text = _SUMMARY_PLACEHOLDER.sub(
+        lambda match: entry.summary_fields.get(match.group(1).strip(), "(n/a)"),
+        entry.summary,
+    )
+    text = " ".join(text.split())  # one line, no runs of whitespace
+    if not text:
+        return None
+    if len(text) > _SUMMARY_MAX_LENGTH:
+        text = text[: _SUMMARY_MAX_LENGTH - 1].rstrip() + "…"
+    return text
+
+
+def _with_summary(results: CheckResult, extra: str | None) -> CheckResult:
+    """``results`` with ``extra`` appended to the first summary in the stream.
+
+    Appending - rather than replacing - is what keeps this presentation-only:
+    the value, the levels annotation that check_levels writes and the state all
+    stay exactly as they were. Results carrying only a notice (empty summary)
+    are skipped, so the text lands on the line an operator actually reads.
+    """
+    if not extra:
+        yield from results
+        return
+    appended = False
+    for result in results:
+        if appended or not isinstance(result, Result) or not result.summary:
+            yield result
+            continue
+        appended = True
+        summary = f"{result.summary}, {extra}"
+        if result.details == result.summary:
+            # Details that merely mirror the summary keep mirroring it, so the
+            # context shows up in the service's detail view as well.
+            yield Result(state=result.state, summary=summary)
+        else:
+            yield Result(state=result.state, summary=summary, details=result.details)
+
+
 def check_json_api(item: str, params: Mapping[str, object], section: Section) -> CheckResult:
     if section.error:
         yield Result(state=State.CRIT, summary=f"API error: {section.error}")
@@ -832,12 +901,19 @@ def check_json_api(item: str, params: Mapping[str, object], section: Section) ->
     )
     match = _coerce_match(params["match"]) if "match" in params else entry.match
 
+    # The extra summary text applies to the value line either way: on a missing
+    # path the context ("(n/a)" or whatever the API did return) is arguably the
+    # more useful half of the message.
+    extra = _render_summary(entry)
+
     if not entry.found:
-        yield Result(state=State.UNKNOWN, summary=entry.error or "not found")
+        yield from _with_summary(
+            iter([Result(state=State.UNKNOWN, summary=entry.error or "not found")]), extra
+        )
         yield from _context(entry, match)
         return
 
-    yield from _value_results(entry, levels_upper, levels_lower, match)
+    yield from _with_summary(_value_results(entry, levels_upper, levels_lower, match), extra)
     yield from _context(entry, match)
 
 
