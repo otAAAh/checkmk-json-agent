@@ -137,11 +137,27 @@ const FIXTURE = {
   ],
 };
 
+// The same connection, authenticating with an API key instead - once in a
+// header, once in a query parameter. Only the auth block differs, which is
+// exactly what these two exist to pin down.
+const FIXTURE_KEY_HEADER = {
+  ...FIXTURE,
+  name: "api-key-header",
+  url: "https://app.example.com/v2/health",
+  auth: { type: "header", username: "", pwid: "pw-store-id", field: "X-API-Key" },
+};
+const FIXTURE_KEY_QUERY = {
+  ...FIXTURE,
+  name: "api-key-query",
+  url: "https://app.example.com/v3/health",
+  auth: { type: "query", username: "", pwid: "pw-store-id", field: "api_key" },
+};
+
 // Run the generator code with a known fixture and print the result. This block
 // shares the script's top-level scope, so it can see `state`, `valuePy`, etc.
 src += `
 ;(function () {
-  state.endpoints = [${JSON.stringify(FIXTURE)}];
+  state.endpoints = [${JSON.stringify(FIXTURE)}, ${JSON.stringify(FIXTURE_KEY_HEADER)}, ${JSON.stringify(FIXTURE_KEY_QUERY)}];
   state.active = 0;
   const out = {
     valuePy: valuePy(),

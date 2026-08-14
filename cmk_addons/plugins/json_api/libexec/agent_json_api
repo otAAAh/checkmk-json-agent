@@ -43,7 +43,7 @@ import time
 from collections.abc import Sequence
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from urllib.parse import urlsplit, urlunsplit
+from urllib.parse import quote, quote_plus, urlsplit, urlunsplit
 
 import requests
 from cmk.utils import password_store as _legacy_pwstore
@@ -208,6 +208,33 @@ def _apply_proxy(session: requests.Session, endpoint: dict) -> None:
             session.trust_env = False
 
 
+def _auth_header_name(endpoint: dict) -> str | None:
+    """The header an 'API key in a header' endpoint puts its key into."""
+    if endpoint.get("auth") != "auth_header":
+        return None
+    name = endpoint.get("auth_header")
+    return name if isinstance(name, str) and name.strip() else "X-API-Key"
+
+
+def _auth_query_name(endpoint: dict) -> str | None:
+    """The query parameter an 'API key in a query parameter' endpoint uses."""
+    if endpoint.get("auth") != "auth_query":
+        return None
+    name = endpoint.get("auth_query")
+    return name if isinstance(name, str) and name.strip() else "api_key"
+
+
+def _auth_params(endpoint: dict, secret: str | None) -> dict[str, str] | None:
+    """Query parameters carrying the API key, or ``None``.
+
+    Kept out of ``_build_session`` (and out of the endpoint's URL) so the key is
+    added by requests at send time only: the configured URL - the one that names
+    the service and is printed in debug output - never contains it.
+    """
+    name = _auth_query_name(endpoint)
+    return {name: secret or ""} if name else None
+
+
 def _build_session(endpoint: dict, secret: str | None) -> tuple[requests.Session, dict[str, str]]:
     session = requests.Session()
     _apply_proxy(session, endpoint)
@@ -217,6 +244,10 @@ def _build_session(endpoint: dict, secret: str | None) -> tuple[requests.Session
             session.auth = (endpoint["username"], secret or "")
         case "auth_token":
             headers["Authorization"] = "Bearer " + (secret or "")
+        case "auth_header":
+            # The API names the header ('X-API-Key', 'PRIVATE-TOKEN', ...); the
+            # value comes from the password store, never from the config.
+            headers[_auth_header_name(endpoint) or "X-API-Key"] = secret or ""
     if _effective_body(endpoint) is not None and not any(
         h.lower() == "content-type" for h in headers
     ):
@@ -240,16 +271,43 @@ def _debug(enabled: bool, message: str) -> None:
         sys.stderr.write(f"[json_api debug] {message}\n")
 
 
-def _redacted_headers(headers: dict[str, str]) -> dict[str, str]:
-    """Headers with the Authorization value masked, for safe debug output.
+_REDACTED = "<redacted>"
+
+
+def _redacted_headers(headers: dict[str, str], secret_header: str | None = None) -> dict[str, str]:
+    """Headers with credential values masked, for safe debug output.
 
     Bearer tokens live in the Authorization header; basic-auth credentials live
-    on ``session.auth`` (never in ``headers``), so they cannot leak here.
+    on ``session.auth`` (never in ``headers``), so they cannot leak here. An API
+    key lives in a header the *API* names, which is why the name to mask has to
+    be passed in - masking only 'Authorization' would print the key verbatim.
     """
+    masked = {"authorization"}
+    if secret_header:
+        masked.add(secret_header.lower())
     return {
-        name: ("<redacted>" if name.lower() == "authorization" else value)
-        for name, value in headers.items()
+        name: (_REDACTED if name.lower() in masked else value) for name, value in headers.items()
     }
+
+
+def _redact_secret(text: str, secret: str | None) -> str:
+    """``text`` with every occurrence of ``secret`` masked.
+
+    Used for the 'API key in a query parameter' mode, the one authentication
+    style whose credential ends up inside a URL: it is then echoed back by
+    ``response.url`` (reported as the endpoint's final URL) and quoted in the
+    message of any ``requests`` exception. Both are printed to the terminal and
+    stored in the agent output on disk, so the key is stripped out of them here.
+
+    The percent-encoded forms are masked too, because a key containing reserved
+    characters reaches the wire encoded.
+    """
+    if not secret:
+        return text
+    for form in (secret, quote(secret, safe=""), quote_plus(secret)):
+        if form and form in text:
+            text = text.replace(form, _REDACTED)
+    return text
 
 
 def _accepted_statuses(endpoint: dict) -> set[int]:
@@ -366,6 +424,12 @@ def _cache_key(endpoint: dict) -> str:
             _effective_body(endpoint),
             endpoint.get("headers"),
             endpoint.get("auth"),
+            # The header / query parameter an API key goes into. A name, not a
+            # credential: two endpoints authenticating differently against the
+            # same URL must not share a cache entry, but the key itself still
+            # never reaches the disk.
+            endpoint.get("auth_header"),
+            endpoint.get("auth_query"),
             endpoint.get("verify_cert", True),
             endpoint.get("ca_bundle"),
             endpoint.get("client_cert"),
@@ -492,6 +556,10 @@ def _fetch(
         return meta
 
     session, headers = _build_session(endpoint, secret)
+    params = _auth_params(endpoint, secret)
+    # Only the query-parameter mode can carry the key into a URL, so that is the
+    # only mode whose reported text needs scrubbing.
+    scrub = (lambda text: _redact_secret(text, secret)) if params else (lambda text: text)
     timeout = endpoint.get("timeout")
     method = endpoint.get("method", "GET")
     allow_redirects = endpoint.get("follow_redirects", True)
@@ -499,16 +567,19 @@ def _fetch(
     body = _effective_body(endpoint)
     if debug:
         _debug(debug, f"{method} {endpoint.get('url', '?')}")
-        for name, value in _redacted_headers(headers).items():
+        for name, value in _redacted_headers(headers, _auth_header_name(endpoint)).items():
             _debug(debug, f"  header {name}: {value}")
         if session.auth is not None:
             _debug(debug, "  basic auth: <redacted>")
+        if params:
+            _debug(debug, f"  query parameter {next(iter(params))}: {_REDACTED}")
         if body is not None:
             _debug(debug, f"  body: {body}")
     try:
         response = session.request(
             method,
             endpoint["url"],
+            params=params,
             data=body,
             headers=headers,
             verify=_verify_arg(endpoint),
@@ -520,7 +591,7 @@ def _fetch(
         with response:
             status = response.status_code
             meta["status"] = status
-            meta["final_url"] = response.url
+            meta["final_url"] = scrub(response.url)
             # While the socket is still open and before the body is read. Done
             # here rather than after the status checks so a certificate is still
             # reported for an endpoint answering 503 - the cert is a property of
@@ -530,7 +601,7 @@ def _fetch(
             # is not the JSON we asked for - report it clearly (this is the SSRF
             # hardening path, where a silent "not valid JSON" would mislead).
             if not allow_redirects and 300 <= status < 400:
-                location = response.headers.get("Location", "?")
+                location = scrub(response.headers.get("Location", "?"))
                 _debug(debug, f"  HTTP {response.status_code} redirect to {location} (blocked)")
                 return (
                     None,
@@ -548,8 +619,11 @@ def _fetch(
         _debug(debug, f"  {exc}")
         return None, str(exc), _timed()
     except requests.exceptions.RequestException as exc:
-        _debug(debug, f"  request failed: {exc}")
-        return None, f"Request failed: {exc}", _timed()
+        # The message of a connection/timeout error quotes the URL it was trying
+        # to reach - query string and all.
+        failure = scrub(str(exc))
+        _debug(debug, f"  request failed: {failure}")
+        return None, f"Request failed: {failure}", _timed()
 
     meta["size"] = len(raw)
     if debug:

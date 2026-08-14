@@ -706,3 +706,50 @@ def test_cache_ttl_defaults_to_none(ssc):
     )
     (endpoint,) = _endpoints(ssc, args)
     assert endpoint["cache_ttl"] is None
+
+
+def test_api_key_header_name_travels_in_the_blob_and_the_key_does_not(ssc):
+    args = _command_args(
+        ssc,
+        {
+            "endpoints": [
+                {
+                    "url": "http://x",
+                    "verify_cert": True,
+                    "auth": ("auth_header", {"header": "X-API-Key", "key": Secret(0)}),
+                    "extractions": [],
+                }
+            ]
+        },
+    )
+    (endpoint,) = _endpoints(ssc, args)
+    # The header NAME is not a credential and the agent needs it; the key itself
+    # rides out-of-band, exactly like a bearer token.
+    assert endpoint["auth"] == "auth_header"
+    assert endpoint["auth_header"] == "X-API-Key"
+    assert "key" not in endpoint
+    assert "--secret_0-id" in args
+    assert isinstance(args[args.index("--secret_0-id") + 1], Secret)
+
+
+def test_api_key_query_parameter_name_travels_in_the_blob_and_the_key_does_not(ssc):
+    args = _command_args(
+        ssc,
+        {
+            "endpoints": [
+                {
+                    "url": "http://x",
+                    "verify_cert": True,
+                    "auth": ("auth_query", {"parameter": "api_key", "key": Secret(0)}),
+                    "extractions": [],
+                }
+            ]
+        },
+    )
+    (endpoint,) = _endpoints(ssc, args)
+    assert endpoint["auth"] == "auth_query"
+    assert endpoint["auth_query"] == "api_key"
+    # The configured URL stays clean: the agent appends the parameter itself.
+    assert endpoint["url"] == "http://x"
+    assert "--secret_0-id" in args
+    assert isinstance(args[args.index("--secret_0-id") + 1], Secret)

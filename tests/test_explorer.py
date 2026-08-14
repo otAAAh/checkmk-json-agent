@@ -171,3 +171,33 @@ def test_explorer_emits_the_cache_ttl(rule_value: dict, explorer_output: dict):
     # and the '--endpoint' blob or caching is silently off.
     assert rule_value["endpoints"][0]["cache_ttl"] == 300.0
     assert explorer_output["cli"][0]["cache_ttl"] == 300.0
+
+
+def test_explorer_emits_api_key_header_auth(rule_value: dict, explorer_output: dict):
+    # The rule value carries the header NAME plus a password-store reference;
+    # the CLI blob carries the name and the bare auth kind, never the key (which
+    # travels as --secret_<i>-id).
+    endpoint = rule_value["endpoints"][1]
+    kind, spec = endpoint["auth"]
+    assert kind == "auth_header"
+    assert spec["header"] == "X-API-Key"
+    assert spec["key"] == ("cmk_postprocessed", "stored_password", ("pw-store-id", ""))
+
+    cli = explorer_output["cli"][1]
+    assert cli["auth"] == "auth_header"
+    assert cli["auth_header"] == "X-API-Key"
+    assert "key" not in cli
+
+
+def test_explorer_emits_api_key_query_auth(rule_value: dict, explorer_output: dict):
+    endpoint = rule_value["endpoints"][2]
+    kind, spec = endpoint["auth"]
+    assert kind == "auth_query"
+    assert spec["parameter"] == "api_key"
+    assert spec["key"] == ("cmk_postprocessed", "stored_password", ("pw-store-id", ""))
+
+    cli = explorer_output["cli"][2]
+    assert cli["auth"] == "auth_query"
+    assert cli["auth_query"] == "api_key"
+    # The URL stays clean - the agent appends the parameter at request time.
+    assert "api_key" not in cli["url"]

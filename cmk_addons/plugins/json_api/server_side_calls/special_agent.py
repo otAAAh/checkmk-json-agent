@@ -38,6 +38,22 @@ class AuthToken(BaseModel, frozen=True):
     token: Secret
 
 
+class AuthHeader(BaseModel, frozen=True):
+    # A static API key sent in a header of the API's choosing ('X-API-Key',
+    # 'PRIVATE-TOKEN', ...). Only the header NAME is carried in the endpoint blob;
+    # the key itself travels as '--secret_<i>-id' like every other secret.
+    header: str
+    key: Secret
+
+
+class AuthQuery(BaseModel, frozen=True):
+    # The same key, but in a query parameter. Only the parameter NAME is carried
+    # here; the agent appends the value at request time and redacts it again
+    # before reporting any URL.
+    parameter: str
+    key: Secret
+
+
 class LabelSpec(BaseModel, frozen=True):
     path: str
     # Optional key override; the agent derives it from the path's last segment
@@ -130,7 +146,11 @@ class Endpoint(BaseModel, frozen=True):
     # these before parsing (stored_proxy ids are resolved to a URLProxy).
     proxy: URLProxy | NoProxy | EnvProxy | None = None
     auth: (
-        tuple[Literal["auth_login"], AuthLogin] | tuple[Literal["auth_token"], AuthToken] | None
+        tuple[Literal["auth_login"], AuthLogin]
+        | tuple[Literal["auth_token"], AuthToken]
+        | tuple[Literal["auth_header"], AuthHeader]
+        | tuple[Literal["auth_query"], AuthQuery]
+        | None
     ) = None
     extractions: Sequence[Extraction] = ()
     # Host-wide labels, resolved from the response root by the agent.
@@ -186,8 +206,16 @@ def _endpoint_json(endpoint: Endpoint, macros: Mapping[str, str]) -> str:
         "extractions": [e.model_dump() for e in endpoint.extractions],
         "host_labels": [label.model_dump() for label in endpoint.host_labels],
     }
-    if endpoint.auth and endpoint.auth[0] == "auth_login":
-        spec["username"] = endpoint.auth[1].username
+    # The non-secret half of the chosen authentication: a username, or the name of
+    # the header / query parameter the key goes into. Names are not credentials,
+    # so they belong in the blob; the values never do.
+    match endpoint.auth:
+        case ("auth_login", AuthLogin(username=username)):
+            spec["username"] = username
+        case ("auth_header", AuthHeader(header=header)):
+            spec["auth_header"] = header
+        case ("auth_query", AuthQuery(parameter=parameter)):
+            spec["auth_query"] = parameter
     return json.dumps(spec)
 
 
@@ -205,6 +233,8 @@ def _commands_function(
                 args += [f"--secret_{index}-id", password]
             case ("auth_token", AuthToken(token=token)):
                 args += [f"--secret_{index}-id", token]
+            case ("auth_header", AuthHeader(key=key)) | ("auth_query", AuthQuery(key=key)):
+                args += [f"--secret_{index}-id", key]
     yield SpecialAgentCommand(command_arguments=args)
 
 

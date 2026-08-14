@@ -89,7 +89,10 @@ def connection_form_spec() -> object:
     endpoint = _endpoint()
     step2 = {"extractions", "host_labels"}
     elements = {key: element for key, element in endpoint.elements.items() if key not in step2}
-    return Dictionary(elements=elements)
+    # Rebuilding the Dictionary drops the ruleset's own endpoint validation, so
+    # carry it over: the wizard writes a real rule and must reject what the
+    # ruleset would reject.
+    return Dictionary(elements=elements, custom_validate=endpoint.custom_validate)
 
 
 def connection_list_form_spec() -> object:

@@ -161,7 +161,8 @@ function makeEndpoint(withSample) {
   return {
     name: "", url: "", method: "GET", body: "",
     headers: [],                 // [{name, value}]
-    auth: { type: "none", username: "", pwid: "" },  // none | login | token
+    // 'field' names the header / query parameter for the API-key modes.
+    auth: { type: "none", username: "", pwid: "", field: "" },  // none | login | token | header | query
     verify_cert: true, follow_redirects: true, timeout: "", cache_ttl: "", accept_status: "",
     proxy_mode: "default", proxy_url: "",   // default (env) | url | no_proxy
     ca_bundle: "", client_cert: "", client_key: "",
@@ -293,6 +294,16 @@ function renderConn() {
       ? `<div class="grid2">
            <label>Token (store ID)</label><input type="text" id="c-pwid" value="${escAttr(e.auth.pwid)}" placeholder="ID from Setup → Passwords">
          </div>`
+      : e.auth.type === "header"
+      ? `<div class="grid2">
+           <label>Header name</label><input type="text" id="c-authfield" value="${escAttr(e.auth.field)}" placeholder="X-API-Key">
+           <label>API key (store ID)</label><input type="text" id="c-pwid" value="${escAttr(e.auth.pwid)}" placeholder="ID from Setup → Passwords">
+         </div>`
+      : e.auth.type === "query"
+      ? `<div class="grid2">
+           <label>Parameter name</label><input type="text" id="c-authfield" value="${escAttr(e.auth.field)}" placeholder="api_key">
+           <label>API key (store ID)</label><input type="text" id="c-pwid" value="${escAttr(e.auth.pwid)}" placeholder="ID from Setup → Passwords">
+         </div>`
       : "";
   const bodyRow =
     e.method === "POST"
@@ -311,6 +322,8 @@ function renderConn() {
          <option value="none"${e.auth.type === "none" ? " selected" : ""}>None</option>
          <option value="login"${e.auth.type === "login" ? " selected" : ""}>Basic (username / password)</option>
          <option value="token"${e.auth.type === "token" ? " selected" : ""}>Bearer token</option>
+         <option value="header"${e.auth.type === "header" ? " selected" : ""}>API key in a request header</option>
+         <option value="query"${e.auth.type === "query" ? " selected" : ""}>API key in a query parameter</option>
        </select>
        ${bodyRow}
      </div>
@@ -354,6 +367,7 @@ function renderConn() {
   bind("c-clientkey", () => { e.client_key = $("c-clientkey").value; renderOutputs(); });
   bind("c-user", () => { e.auth.username = $("c-user").value; renderOutputs(); });
   bind("c-pwid", () => { e.auth.pwid = $("c-pwid").value; renderOutputs(); });
+  bind("c-authfield", () => { e.auth.field = $("c-authfield").value; renderOutputs(); });
   if ($("c-body")) $("c-body").oninput = () => { e.body = $("c-body").value; renderOutputs(); };
 
   // structural selects → re-render the form
@@ -652,8 +666,18 @@ function pyAuth(auth) {
   if (auth.type === "login") {
     return `('auth_login', {'username': ${pyStr(auth.username || "")}, 'password': ${ref}})`;
   }
+  if (auth.type === "header") {
+    return `('auth_header', {'header': ${pyStr(auth.field || "X-API-Key")}, 'key': ${ref}})`;
+  }
+  if (auth.type === "query") {
+    return `('auth_query', {'parameter': ${pyStr(auth.field || "api_key")}, 'key': ${ref}})`;
+  }
   return `('auth_token', {'token': ${ref}})`;
 }
+
+// The agent-facing auth type for the CLI blob: a bare string, since the secret
+// travels separately (server_side_calls _endpoint_json).
+const AUTH_KIND = { login: "auth_login", token: "auth_token", header: "auth_header", query: "auth_query" };
 
 function anyAuth() { return state.endpoints.some(e => e.auth.type !== "none"); }
 
@@ -750,10 +774,12 @@ function endpointCliObj(e) {
     cache_ttl: Number.isNaN(parseFloat(e.cache_ttl)) ? null : parseFloat(e.cache_ttl),
     accept_status: parseStatuses(e.accept_status),
     proxy: proxyCli(e),
-    auth: e.auth.type === "none" ? null : (e.auth.type === "login" ? "auth_login" : "auth_token"),
+    auth: AUTH_KIND[e.auth.type] || null,
     extractions: extractionObjs(e),
   };
   if (e.auth.type === "login") o.username = e.auth.username || "";
+  if (e.auth.type === "header") o.auth_header = e.auth.field || "X-API-Key";
+  if (e.auth.type === "query") o.auth_query = e.auth.field || "api_key";
   return o;
 }
 

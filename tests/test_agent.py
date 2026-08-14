@@ -1577,3 +1577,111 @@ def test_endpoint_record_reports_the_cache_state(agent, monkeypatch):
     )
     assert record["from_cache"] is True
     assert record["cache_age"] == 120.0
+
+
+def test_build_session_api_key_header_auth(agent):
+    _session, headers = agent._build_session(
+        {"auth": "auth_header", "auth_header": "X-API-Key"}, "sekret"
+    )
+    assert headers["X-API-Key"] == "sekret"
+
+
+def test_build_session_api_key_header_defaults_when_unnamed(agent):
+    _session, headers = agent._build_session({"auth": "auth_header"}, "sekret")
+    assert headers["X-API-Key"] == "sekret"
+
+
+def test_api_key_query_parameter_is_sent_but_not_in_the_configured_url(agent, monkeypatch):
+    captured = _capture_request(agent, monkeypatch)
+    agent._fetch({"url": "http://x", "auth": "auth_query", "auth_query": "api_key"}, "sekret")
+    # requests appends it at send time; the URL that names the service is clean.
+    assert captured["params"] == {"api_key": "sekret"}
+    assert captured["url"] == "http://x"
+
+
+def test_no_query_parameters_without_query_auth(agent, monkeypatch):
+    captured = _capture_request(agent, monkeypatch)
+    agent._fetch({"url": "http://x", "auth": "auth_token"}, "sekret")
+    assert captured["params"] is None
+
+
+def test_redacted_headers_masks_the_api_key_header(agent):
+    # Masking only 'Authorization' would print an API key verbatim, since the
+    # API names that header - not us.
+    headers = {"X-API-Key": "sekret", "X-Api": "v1"}
+    assert agent._redacted_headers(headers, "X-API-Key") == {
+        "X-API-Key": "<redacted>",
+        "X-Api": "v1",
+    }
+
+
+def test_redacted_headers_matches_the_header_name_case_insensitively(agent):
+    assert agent._redacted_headers({"x-api-key": "sekret"}, "X-API-Key") == {
+        "x-api-key": "<redacted>"
+    }
+
+
+def test_redact_secret_masks_plain_and_encoded_forms(agent):
+    assert agent._redact_secret("http://x?k=a+b%2Fc", "a b/c") == "http://x?k=<redacted>"
+    assert agent._redact_secret("http://x?k=a%20b", "a b") == "http://x?k=<redacted>"
+    assert agent._redact_secret("nothing here", None) == "nothing here"
+
+
+def test_fetch_redacts_the_query_key_from_the_final_url(agent, monkeypatch):
+    # response.url is what the endpoint service reports as its final URL, and it
+    # is stored in the agent output on disk.
+    response = _FakeResponse()
+    response.url = "http://x?api_key=sekret"
+    _capture_request(agent, monkeypatch, response=response)
+    _doc, error, meta = agent._fetch(
+        {"url": "http://x", "auth": "auth_query", "auth_query": "api_key"}, "sekret"
+    )
+    assert error is None
+    assert meta["final_url"] == "http://x?api_key=<redacted>"
+
+
+def test_fetch_redacts_the_query_key_from_a_request_error(agent, monkeypatch):
+    # A connection error quotes the URL it was trying to reach, query string and
+    # all - and that message becomes the service's summary.
+    def explode(_self, _method, _url, **_kwargs):
+        raise agent.requests.exceptions.ConnectionError(
+            "HTTPConnectionPool(host='x'): url: /health?api_key=sekret"
+        )
+
+    monkeypatch.setattr(agent.requests.Session, "request", explode)
+    _doc, error, _meta = agent._fetch(
+        {"url": "http://x/health", "auth": "auth_query", "auth_query": "api_key"}, "sekret"
+    )
+    assert "sekret" not in error
+    assert "<redacted>" in error
+
+
+def test_fetch_debug_never_prints_the_api_key(agent, monkeypatch, capsys):
+    _capture_request(agent, monkeypatch, response=_FakeResponse(body=b'{"ok": 1}'))
+    agent._fetch(
+        {"url": "http://x", "auth": "auth_header", "auth_header": "X-API-Key"},
+        "topsecret",
+        debug=True,
+    )
+    captured = capsys.readouterr()
+    assert "topsecret" not in captured.err
+    assert "header X-API-Key: <redacted>" in captured.err
+
+
+def test_fetch_debug_never_prints_the_query_api_key(agent, monkeypatch, capsys):
+    _capture_request(agent, monkeypatch, response=_FakeResponse(body=b'{"ok": 1}'))
+    agent._fetch(
+        {"url": "http://x", "auth": "auth_query", "auth_query": "api_key"},
+        "topsecret",
+        debug=True,
+    )
+    captured = capsys.readouterr()
+    assert "topsecret" not in captured.err
+    assert "query parameter api_key: <redacted>" in captured.err
+
+
+def test_cache_key_separates_endpoints_by_api_key_location(agent):
+    base = {"url": "http://x", "auth": "auth_header"}
+    assert agent._cache_key({**base, "auth_header": "X-API-Key"}) != agent._cache_key(
+        {**base, "auth_header": "PRIVATE-TOKEN"}
+    )

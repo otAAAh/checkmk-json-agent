@@ -234,3 +234,62 @@ def test_duplicate_endpoint_urls_still_rejected(ruleset):
 def test_unique_endpoints_ignores_a_non_list_value(ruleset):
     ruleset._validate_unique_endpoints(None)  # must not raise
     ruleset._validate_unique_endpoints("not a list")  # must not raise
+
+
+@pytest.mark.parametrize("name", ["X-API-Key", "apikey", "PRIVATE-TOKEN", "X_Api_Key1"])
+def test_valid_api_key_header_names_pass(ruleset, name):
+    ruleset._validate_header_name(name)  # must not raise
+
+
+@pytest.mark.parametrize("bad", ["", "X Api Key", "X-Api-Key:", "Ä-Key", "key\n"])
+def test_invalid_api_key_header_names_rejected(ruleset, bad):
+    # requests would fail deep inside the agent, where the user sees an
+    # unreachable endpoint rather than the field that needs fixing.
+    with pytest.raises(ValidationError):
+        ruleset._validate_header_name(bad)
+
+
+@pytest.mark.parametrize("name", ["api_key", "apikey", "token", "x.key"])
+def test_valid_query_parameter_names_pass(ruleset, name):
+    ruleset._validate_query_parameter(name)  # must not raise
+
+
+@pytest.mark.parametrize("bad", ["", "api key", "a=b", "a&b", "a?b", "a#b"])
+def test_invalid_query_parameter_names_rejected(ruleset, bad):
+    with pytest.raises(ValidationError):
+        ruleset._validate_query_parameter(bad)
+
+
+def test_api_key_header_may_not_be_configured_twice(ruleset):
+    # The clear-text copy this feature exists to remove must not be left behind
+    # next to the password-store one - and which of the two wins is an
+    # implementation detail either way.
+    with pytest.raises(ValidationError, match="X-API-Key"):
+        ruleset._validate_endpoint(
+            {
+                "url": "https://x/health",
+                "auth": ("auth_header", {"header": "X-API-Key", "key": ("password", "s")}),
+                "headers": [{"name": "x-api-key", "value": "leaked"}],
+            }
+        )
+
+
+def test_api_key_header_alongside_an_unrelated_header_is_fine(ruleset):
+    ruleset._validate_endpoint(  # must not raise
+        {
+            "url": "https://x/health",
+            "auth": ("auth_header", {"header": "X-API-Key", "key": ("password", "s")}),
+            "headers": [{"name": "Accept", "value": "application/json"}],
+        }
+    )
+
+
+def test_endpoint_validation_ignores_other_auth_modes(ruleset):
+    ruleset._validate_endpoint(  # must not raise
+        {
+            "url": "https://x/health",
+            "auth": ("auth_token", {"token": ("password", "s")}),
+            "headers": [{"name": "Authorization", "value": "whatever"}],
+        }
+    )
+    ruleset._validate_endpoint(None)  # must not raise
