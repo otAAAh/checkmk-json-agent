@@ -215,9 +215,11 @@ def test_explorer_emits_the_summary_template(rule_value: dict, explorer_output: 
 
 
 def test_explorer_emits_the_retry_policy(rule_value: dict, explorer_output: dict):
+    # The fixture asks for 9 retries with a 99s backoff; both are clamped to the
+    # ruleset's range so the generated rule value actually imports.
     endpoint = rule_value["endpoints"][0]
-    assert endpoint["retry"] == {"attempts": 2, "backoff": 0.5}
-    assert explorer_output["cli"][0]["retry"] == {"attempts": 2, "backoff": 0.5}
+    assert endpoint["retry"] == {"attempts": 5, "backoff": 30.0}
+    assert explorer_output["cli"][0]["retry"] == {"attempts": 5, "backoff": 30.0}
 
 
 def test_explorer_emits_the_inventory_target(rule_value: dict, explorer_output: dict):
@@ -231,3 +233,13 @@ def test_explorer_emits_the_inventory_target(rule_value: dict, explorer_output: 
 
     cli = {x["service"]: x for x in explorer_output["cli"][0]["extractions"]}
     assert cli["Backup"]["inventory"]["node"] == "software.applications.json_api"
+
+
+def test_explorer_clamps_the_retry_policy_to_the_rulesets_range(explorer_output: dict):
+    # The Explorer's contract is that its output imports cleanly, so it must not
+    # emit a retry policy the ruleset's NumberInRange would reject.
+    for endpoint in explorer_output["cli"]:
+        retry = endpoint.get("retry")
+        if retry:
+            assert 1 <= retry["attempts"] <= 5
+            assert 0.0 <= retry["backoff"] <= 30.0

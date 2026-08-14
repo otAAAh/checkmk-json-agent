@@ -1889,3 +1889,123 @@ def test_a_cache_hit_is_never_retried(agent, monkeypatch, tmp_path):
     assert error is None and doc == {"ok": 1}
     assert calls["n"] == 0
     assert meta["from_cache"] is True
+
+
+def test_a_cache_hit_reports_no_retries(agent, monkeypatch, tmp_path):
+    # A cached serve made no request, so it cannot have retried one. Replaying a
+    # stored 'attempts' would hold the endpoint service at the state configured
+    # for "a retry was needed" across checks where nothing was asked - the exact
+    # thing the retry reporting exists to prevent, inverted.
+    monkeypatch.setattr(agent, "_cache_dir", lambda: tmp_path)
+    endpoint = {"url": "http://x", "cache_ttl": 300}
+    agent._cache_write(endpoint, b'{"ok": 1}', {"status": 200, "elapsed": 0.1, "attempts": 3})
+    _doc, error, meta = agent._fetch(endpoint, None)
+    assert error is None
+    assert meta["from_cache"] is True
+    assert meta["attempts"] == 1
+    assert meta["elapsed"] is None
+
+
+def test_a_stale_attempts_count_is_never_stored(agent, monkeypatch, tmp_path):
+    # Belt and braces: the write side drops it too, so an old cache file cannot
+    # resurrect one either.
+    monkeypatch.setattr(agent, "_cache_dir", lambda: tmp_path)
+    endpoint = {"url": "http://x", "cache_ttl": 300}
+    agent._cache_write(endpoint, b"{}", {"status": 200, "attempts": 4})
+    import json as _json
+
+    (path,) = list(tmp_path.glob("*.json"))
+    assert "attempts" not in _json.loads(path.read_text())["meta"]
+
+
+def test_cache_key_separates_endpoints_by_credential(agent):
+    # Several rules can poll the same multi-tenant URL with the same header name
+    # and a different key each; sharing one cache file would serve one tenant's
+    # body for the other for the whole TTL.
+    endpoint = {"url": "http://x", "auth": "auth_header", "auth_header": "X-API-Key"}
+    assert agent._cache_key(endpoint, "key-a") != agent._cache_key(endpoint, "key-b")
+    # The same credential is still the same entry, and the key itself never
+    # appears in the filename.
+    assert agent._cache_key(endpoint, "key-a") == agent._cache_key(endpoint, "key-a")
+    assert "key-a" not in agent._cache_key(endpoint, "key-a")
+
+
+def test_a_cached_body_is_not_served_to_a_different_credential(agent, monkeypatch, tmp_path):
+    monkeypatch.setattr(agent, "_cache_dir", lambda: tmp_path)
+    endpoint = {
+        "url": "http://x",
+        "cache_ttl": 300,
+        "auth": "auth_header",
+        "auth_header": "X-API-Key",
+    }
+    agent._cache_write(endpoint, b'{"tenant": "a"}', {"status": 200}, "key-a")
+    assert agent._cache_read(endpoint, 300, "key-a") is not None
+    assert agent._cache_read(endpoint, 300, "key-b") is None
+
+
+class _FakePrepared:
+    """The bits of a PreparedRequest that rebuild_auth touches."""
+
+    def __init__(self, url, headers=None):
+        from requests.structures import CaseInsensitiveDict
+
+        self.url = url
+        # Real headers are case-insensitive, which is what lets the configured
+        # spelling differ from the one actually sent.
+        self.headers = CaseInsensitiveDict(headers or {})
+
+
+class _FakeRedirectResponse:
+    """A response whose request came from ``url``, i.e. the redirect's source."""
+
+    def __init__(self, url):
+        self.request = _FakePrepared(url)
+
+
+def test_api_key_header_is_stripped_on_a_cross_host_redirect(agent):
+    # requests strips only 'Authorization' by itself, so without this the key
+    # goes to whatever host the endpoint redirects to - and redirects are
+    # followed by default.
+    session = agent._Session("X-API-Key")
+    prepared = _FakePrepared("https://evil.example/", {"X-API-Key": "sekret", "Accept": "*/*"})
+    session.rebuild_auth(prepared, _FakeRedirectResponse("https://api.example/health"))
+    assert "X-API-Key" not in prepared.headers
+    assert prepared.headers["Accept"] == "*/*"
+
+
+def test_api_key_header_survives_a_same_host_redirect(agent):
+    # A redirect within the same host is the ordinary '/health' -> '/health/'
+    # case; stripping there would simply break the request.
+    session = agent._Session("X-API-Key")
+    prepared = _FakePrepared("https://api.example/health/", {"X-API-Key": "sekret"})
+    session.rebuild_auth(prepared, _FakeRedirectResponse("https://api.example/health"))
+    assert prepared.headers["X-API-Key"] == "sekret"
+
+
+def test_header_name_matching_is_case_insensitive_when_stripping(agent):
+    session = agent._Session("x-api-key")
+    prepared = _FakePrepared("https://evil.example/", {"X-Api-Key": "sekret"})
+    session.rebuild_auth(prepared, _FakeRedirectResponse("https://api.example/health"))
+    assert "X-Api-Key" not in prepared.headers
+
+
+def test_a_session_without_an_api_key_header_strips_nothing_extra(agent):
+    session = agent._Session(None)
+    prepared = _FakePrepared("https://evil.example/", {"X-Api": "v1"})
+    session.rebuild_auth(prepared, _FakeRedirectResponse("https://api.example/health"))
+    assert prepared.headers["X-Api"] == "v1"
+
+
+def test_an_empty_wildcard_label_still_gets_an_inventory_row(agent):
+    # Falling back to None would turn this element into a plain attribute of a
+    # node that is otherwise a table, and several such elements would overwrite
+    # each other under one key.
+    document = {"nodes": [{"name": "", "version": "4.2"}, {"name": "n2", "version": "4.1"}]}
+    spec = {
+        "path": "nodes[*].version",
+        "service": "Node",
+        "label_path": "name",
+        "inventory": {"node": "software.applications.json_api.nodes"},
+    }
+    results = agent._extract(document, [spec], "u")
+    assert [r["inventory"]["row_key"] for r in results] == ["0", "n2"]

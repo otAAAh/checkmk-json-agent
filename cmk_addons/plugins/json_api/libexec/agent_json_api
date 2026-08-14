@@ -235,8 +235,36 @@ def _auth_params(endpoint: dict, secret: str | None) -> dict[str, str] | None:
     return {name: secret or ""} if name else None
 
 
+class _Session(requests.Session):
+    """A session that also strips an API-key HEADER on a cross-host redirect.
+
+    ``requests`` already does this for ``Authorization`` - that is what protects
+    the bearer-token mode - but its ``rebuild_auth`` knows only that one header
+    name. An API key lives in a header the *API* names, so without this a
+    monitored endpoint that redirects to another host is handed the key in full,
+    which is precisely what the password-store modes exist to prevent. Redirects
+    are followed by default, so this must be the default too.
+
+    A key in a query parameter needs no equivalent: the redirect's Location
+    replaces the query string rather than carrying it along.
+    """
+
+    def __init__(self, secret_header: str | None = None) -> None:
+        super().__init__()
+        self._secret_header = secret_header
+
+    def rebuild_auth(self, prepared_request: object, response: object) -> None:
+        super().rebuild_auth(prepared_request, response)  # type: ignore[arg-type]
+        if not self._secret_header:
+            return
+        if self.should_strip_auth(response.request.url, prepared_request.url):  # type: ignore[attr-defined]
+            # Headers are a case-insensitive mapping, so the configured spelling
+            # need not match what was actually sent.
+            prepared_request.headers.pop(self._secret_header, None)  # type: ignore[attr-defined]
+
+
 def _build_session(endpoint: dict, secret: str | None) -> tuple[requests.Session, dict[str, str]]:
-    session = requests.Session()
+    session = _Session(_auth_header_name(endpoint))
     _apply_proxy(session, endpoint)
     headers = {name: value for name, value in endpoint.get("headers", [])}
     match endpoint.get("auth"):
@@ -408,14 +436,18 @@ def _cache_dir() -> Path | None:
     return directory
 
 
-def _cache_key(endpoint: dict) -> str:
+def _cache_key(endpoint: dict, secret: str | None = None) -> str:
     """A stable hash over everything that changes this endpoint's response.
 
-    The secret is deliberately NOT part of it and is never stored: it does not
-    reach this blob at all (it travels separately as '--secret_<i>'), and hashing
-    it would put a credential-derived value on disk for no benefit. Two endpoints
-    differing only by credential are a pathological config; the identity below
-    covers the realistic cases.
+    The credential is part of the identity, because for the API-key modes it is
+    the ordinary case rather than a pathological one: several rules can poll the
+    SAME multi-tenant URL with the same header name and a different key each, and
+    the response they get back is per-key. Without it they would share one cache
+    file and serve each other's tenant data for the whole TTL.
+
+    Only a hash of the secret is used, never the secret: the cache key ends up in
+    a filename, and a SHA-256 of a credential is not one. The secret itself still
+    reaches neither the endpoint blob nor the disk.
     """
     identity = json.dumps(
         [
@@ -424,12 +456,11 @@ def _cache_key(endpoint: dict) -> str:
             _effective_body(endpoint),
             endpoint.get("headers"),
             endpoint.get("auth"),
-            # The header / query parameter an API key goes into. A name, not a
-            # credential: two endpoints authenticating differently against the
-            # same URL must not share a cache entry, but the key itself still
-            # never reaches the disk.
+            # The header / query parameter an API key goes into - a name, not a
+            # credential.
             endpoint.get("auth_header"),
             endpoint.get("auth_query"),
+            hashlib.sha256(secret.encode("utf-8")).hexdigest() if secret else None,
             endpoint.get("verify_cert", True),
             endpoint.get("ca_bundle"),
             endpoint.get("client_cert"),
@@ -450,7 +481,7 @@ def _cache_ttl(endpoint: dict) -> float | None:
     return float(ttl) if ttl > 0 else None
 
 
-def _cache_read(endpoint: dict, ttl: float) -> tuple[bytes, dict] | None:
+def _cache_read(endpoint: dict, ttl: float, secret: str | None = None) -> tuple[bytes, dict] | None:
     """A cached ``(body, meta)`` younger than ``ttl``, else ``None``.
 
     Anything unreadable or malformed counts as a miss, so a broken cache file
@@ -459,7 +490,7 @@ def _cache_read(endpoint: dict, ttl: float) -> tuple[bytes, dict] | None:
     directory = _cache_dir()
     if directory is None:
         return None
-    path = directory / f"{_cache_key(endpoint)}.json"
+    path = directory / f"{_cache_key(endpoint, secret)}.json"
     try:
         entry = json.loads(path.read_text(encoding="utf-8"))
         stored = float(entry["stored"])
@@ -474,23 +505,30 @@ def _cache_read(endpoint: dict, ttl: float) -> tuple[bytes, dict] | None:
     # than serving something we cannot reason about.
     if age < 0 or age > ttl:
         return None
-    # 'elapsed' is dropped deliberately: no request was made, so there is no
-    # response time. Replaying the original one would chart a measurement that
-    # never happened, over and over, for the whole TTL. Status, size and the final
-    # URL DO still describe the body being served, so they are kept.
-    return body, {**meta, "elapsed": None, "from_cache": True, "cache_age": age}
+    # 'elapsed' and 'attempts' are dropped deliberately: no request was made, so
+    # there is no response time and nothing was retried. Replaying either would
+    # report a measurement that never happened, over and over, for the whole TTL -
+    # and a stale 'attempts' would hold the endpoint service at the state
+    # configured for "a retry was needed" across checks that made no request at
+    # all. Status, size and the final URL DO still describe the body being
+    # served, so they are kept.
+    return body, {**meta, "elapsed": None, "attempts": 1, "from_cache": True, "cache_age": age}
 
 
-def _cache_write(endpoint: dict, body: bytes, meta: dict) -> None:
+def _cache_write(endpoint: dict, body: bytes, meta: dict, secret: str | None = None) -> None:
     """Store a fresh response. Best effort: a failure must not fail the fetch."""
     directory = _cache_dir()
     if directory is None:
         return
-    path = directory / f"{_cache_key(endpoint)}.json"
+    path = directory / f"{_cache_key(endpoint, secret)}.json"
     entry = {
         "stored": time.time(),
         "body": body.decode("utf-8", "replace"),
-        "meta": {k: v for k, v in meta.items() if k not in ("from_cache", "cache_age")},
+        # Facts about the REQUEST, not about the body: replaying them on a cache
+        # hit would describe a request that never happened.
+        "meta": {
+            k: v for k, v in meta.items() if k not in ("from_cache", "cache_age", "attempts")
+        },
     }
     try:
         # Write-then-rename so a concurrent read never sees a half-written file,
@@ -580,7 +618,7 @@ def _fetch(
     # A cached body younger than the endpoint's TTL is served without touching the
     # network at all - that is the whole point, for an API with a request quota.
     # No request is made, so there is nothing to retry either.
-    if (ttl := _cache_ttl(endpoint)) is not None and (hit := _cache_read(endpoint, ttl)):
+    if (ttl := _cache_ttl(endpoint)) is not None and (hit := _cache_read(endpoint, ttl, secret)):
         cached_body, cached_meta = hit
         _debug(debug, f"  served from cache ({cached_meta['cache_age']:.0f}s old)")
         try:
@@ -722,7 +760,7 @@ def _attempt(
     if ttl is not None:
         # Only a response we could actually parse is worth caching; an error or a
         # non-JSON body would just be replayed for the whole TTL.
-        _cache_write(endpoint, raw, timed)
+        _cache_write(endpoint, raw, timed, secret)
     return document, None, False
 
 
@@ -1139,7 +1177,7 @@ def _extract(document: object, extractions: list[dict], url: str) -> list[dict]:
         # (e.g. only the nodes that are NOT 'ok'); a not-found leaf is kept so
         # the "array or object not found" error still surfaces.
         host_path = spec.get("piggyback_host")
-        for label_segments, found, value, error, element in leaves:
+        for index, (label_segments, found, value, error, element) in enumerate(leaves):
             if found and isinstance(filt, dict) and filt.get("path"):
                 if not _matches_filter(element, filt):
                     continue
@@ -1167,7 +1205,12 @@ def _extract(document: object, extractions: list[dict], url: str) -> list[dict]:
                     labels,
                     host,
                     summary_fields=_resolve_summary(summary, element),
-                    row_key=label,
+                    # An element whose label field resolved to an empty string
+                    # still needs a row of its own: falling back to None would
+                    # quietly turn it into a plain attribute of a node that is
+                    # otherwise a table, and several such elements would then
+                    # overwrite each other under one key.
+                    row_key=label or str(index),
                 )
             )
     return results

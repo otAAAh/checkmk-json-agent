@@ -45,8 +45,10 @@ const FIXTURE = {
   follow_redirects: false,
   timeout: "30",
   cache_ttl: "300",
-  retries: "2",
-  retry_backoff: "0.5",
+  // Deliberately out of the ruleset's range (1-5 retries, 0-30s): the generator
+  // has to clamp, or the rule it prints will not import.
+  retries: "9",
+  retry_backoff: "99",
   json: "",
   parsedRoot: null,
   parseErr: "",
