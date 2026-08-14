@@ -496,7 +496,7 @@ function addExtraction(path) {
     aggregate: "",
     valueAs: "", tsFormat: "auto",
     flPath: "", flOp: "not_equals", flValue: "",
-    unit: "", calc: "", lu_w: "", lu_c: "", ll_w: "", ll_c: "",
+    unit: "", calc: "", summary: "", lu_w: "", lu_c: "", ll_w: "", ll_c: "",
     matchMode: "", mmPattern: "", mmState: "2",
     smOk: "", smWarn: "", smCrit: "", smState: "0",
   });
@@ -549,6 +549,7 @@ function renderFields() {
           `<option value="${u}"${e.unit === u ? " selected" : ""}>${u || "no unit"}</option>`).join("") +
       `</select></div>` +
       `<div class="row"><label>Transform</label><input type="text" data-f="calc" data-i="${i}" value="${escAttr(e.calc)}" placeholder="e.g. value / 1024 / 1024"></div>` +
+      `<div class="row"><label>Summary text</label><input type="text" data-f="summary" data-i="${i}" value="${escAttr(e.summary)}" placeholder="extra text, e.g. {message} (leader {leader})"></div>` +
       `<div class="row"><label>Upper W/C</label><span class="lvls"><input type="text" data-f="lu_w" data-i="${i}" value="${escAttr(e.lu_w)}" placeholder="warn"><input type="text" data-f="lu_c" data-i="${i}" value="${escAttr(e.lu_c)}" placeholder="crit"></span></div>` +
       `<div class="row"><label>Lower W/C</label><span class="lvls"><input type="text" data-f="ll_w" data-i="${i}" value="${escAttr(e.ll_w)}" placeholder="warn"><input type="text" data-f="ll_c" data-i="${i}" value="${escAttr(e.ll_c)}" placeholder="crit"></span></div>` +
       `<div class="row"><label>Match</label><select data-f="matchMode" data-rerender="1" data-i="${i}">` +
@@ -609,6 +610,7 @@ function extractionObjs(e) {
       o.filter = { path: x.flPath.trim(), op: x.flOp || "equals", value: x.flValue || "" };
     if (x.unit) o.unit = x.unit;
     if (x.calc) o.calc = x.calc;
+    if (x.summary && x.summary.trim()) o.summary = x.summary.trim();
     const lu = levelsPair(x.lu_w, x.lu_c); if (lu) o.levels_upper = ["fixed", lu];
     const ll = levelsPair(x.ll_w, x.ll_c); if (ll) o.levels_lower = ["fixed", ll];
     if (x.matchMode === "must_match" && x.mmPattern) {
@@ -641,6 +643,7 @@ function pyExtraction(o) {
   if (o.filter) p.push(`'filter': {'path': ${pyStr(o.filter.path)}, 'op': ${pyStr(o.filter.op)}, 'value': ${pyStr(o.filter.value)}}`);
   if (o.unit) p.push(`'unit': ${pyStr(o.unit)}`);
   if (o.calc) p.push(`'calc': ${pyStr(o.calc)}`);
+  if (o.summary) p.push(`'summary': ${pyStr(o.summary)}`);
   if (o.levels_upper) p.push(`'levels_upper': ('fixed', (${o.levels_upper[1][0]}, ${o.levels_upper[1][1]}))`);
   if (o.levels_lower) p.push(`'levels_lower': ('fixed', (${o.levels_lower[1][0]}, ${o.levels_lower[1][1]}))`);
   if (o.match) {

@@ -1180,3 +1180,118 @@ def test_a_live_serve_is_unchanged(check):
     )
     assert summary == "HTTP 200"
     assert any(isinstance(r, Metric) and r.name == "json_api_response_time" for r in results)
+
+
+def test_summary_template_appends_context_to_the_value(check):
+    section = _section(
+        check,
+        [
+            _entry(
+                "DB",
+                value="DEGRADED",
+                summary="{message} (leader {leader})",
+                summary_fields={"message": "replica lag 42s", "leader": "db-3"},
+            )
+        ],
+    )
+    result = list(check.check_json_api("DB", {}, section))[0]
+    assert result.summary == "Value: DEGRADED, replica lag 42s (leader db-3)"
+
+
+def test_summary_template_keeps_the_state_and_the_levels_line(check):
+    # Presentation only: the state, the levels annotation check_levels writes and
+    # the metric all have to survive untouched.
+    section = _section(
+        check,
+        [
+            _entry(
+                "Load",
+                value=95,
+                levels_upper=["fixed", [80.0, 90.0]],
+                summary="on {host}",
+                summary_fields={"host": "web-1"},
+            )
+        ],
+    )
+    results = list(check.check_json_api("Load", {}, section))
+    first = results[0]
+    assert first.state == State.CRIT
+    assert "warn/crit at" in first.summary
+    assert first.summary.endswith(", on web-1")
+    assert first.details == first.summary
+    assert [m.name for m in results if isinstance(m, Metric)] == ["json_api_value"]
+
+
+def test_summary_template_marks_an_unresolved_path(check):
+    # A mistyped path must be visible in the service, not silently render as
+    # nothing - otherwise the operator never learns the field is wrong.
+    section = _section(check, [_entry("DB", value="UP", summary="{typo}", summary_fields={})])
+    result = list(check.check_json_api("DB", {}, section))[0]
+    assert result.summary == "Value: UP, (n/a)"
+
+
+def test_summary_template_applies_to_a_missing_value(check):
+    section = _section(
+        check,
+        [
+            _entry(
+                "DB",
+                found=False,
+                error="path not found in response",
+                summary="{message}",
+                summary_fields={"message": "still starting"},
+            )
+        ],
+    )
+    result = list(check.check_json_api("DB", {}, section))[0]
+    assert result.state == State.UNKNOWN
+    assert result.summary == "path not found in response, still starting"
+
+
+def test_summary_template_is_forced_onto_one_line(check):
+    # A summary carrying a newline would split into summary + details and break
+    # the service output; an API returning a stack trace must not do that.
+    entry = check.Item(
+        found=True,
+        value="x",
+        error=None,
+        levels_upper=None,
+        levels_lower=None,
+        match=None,
+        calc=None,
+        unit=None,
+        metric_name="json_api_value",
+        render_func=None,
+        path="p",
+        url="u",
+        summary="{msg}",
+        summary_fields={"msg": "line one\nline two   spaced"},
+    )
+    assert check._render_summary(entry) == "line one line two spaced"
+
+
+def test_summary_template_is_truncated(check):
+    entry = check.Item(
+        found=True,
+        value="x",
+        error=None,
+        levels_upper=None,
+        levels_lower=None,
+        match=None,
+        calc=None,
+        unit=None,
+        metric_name="json_api_value",
+        render_func=None,
+        path="p",
+        url="u",
+        summary="{msg}",
+        summary_fields={"msg": "a" * 500},
+    )
+    rendered = check._render_summary(entry)
+    assert len(rendered) == check._SUMMARY_MAX_LENGTH
+    assert rendered.endswith("…")
+
+
+def test_no_summary_template_leaves_the_summary_alone(check):
+    section = _section(check, [_entry("DB", value="UP")])
+    assert list(check.check_json_api("DB", {}, section))[0].summary == "Value: UP"

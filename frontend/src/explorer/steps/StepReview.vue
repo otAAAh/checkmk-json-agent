@@ -374,6 +374,11 @@ function definedSummary(x: ExtractionValue): string[] {
   if (typeof x.calc === 'string' && x.calc) {
     parts.push(_t('calc %{c}', { c: x.calc }))
   }
+  if (typeof x.summary === 'string' && x.summary) {
+    // Shown verbatim: the placeholders are resolved by the agent against the
+    // live response, which this preview does not have per element.
+    parts.push(_t('summary %{s}', { s: x.summary }))
+  }
   const upper = levelsPair(x.levels_upper)
   if (upper) {
     parts.push(_t('WARN ≥ %{w} / CRIT ≥ %{c}', { w: String(upper[0]), c: String(upper[1]) }))

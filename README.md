@@ -73,6 +73,12 @@ Targets **Checkmk 2.4+** and the current stable plugin APIs
   e.g. `value / 1024 / 1024` for bytes→MiB or `(value - 32) * 5 / 9` for °F→°C;
   only numbers, parentheses and `+ - * /` are allowed and it is evaluated safely
   (never `eval`)
+- **Show the context next to the value**: an optional summary text with `{path}`
+  placeholders — `{message} (leader {leader})` — appended to the service summary,
+  resolved within the same `[*]` element (or from the response root). So a
+  service on `status` shows the reason the API already returned alongside the
+  CRIT, instead of that reason needing a second service of its own. Presentation
+  only: it never changes the state, the levels or the metric
 - **Thresholds**: WARN/CRIT upper and lower levels for numeric values, exposed
   as a metric/graph
 - **String matching**: two modes — either a regex the value must fully match
@@ -157,6 +163,7 @@ Each **field to monitor** has:
 | **Interpret the value as** | Optional: *a counter* — monitor the change **per second** rather than the total (the first check, and any check after the counter went backwards, keeps the previous state because no rate can be computed yet); or *a timestamp* — monitor its **age in seconds** (format `auto` / epoch seconds / epoch milliseconds / ISO 8601; no time zone means UTC). The derived number is what the transform, levels and metric use; string matching does not apply to it |
 | **Unit** | Optional: `count` / `bytes` / `seconds` / `percent` — renders the value in the summary/details *and* the metric and graph with that unit (numeric values only) |
 | **Transform the numeric value** | Optional arithmetic expression on the variable `value` (e.g. `value / 1024 / 1024`), applied to a numeric value before levels and the metric; only numbers, parentheses and `+ - * /` are allowed |
+| **Extra text in the service summary** | Optional text appended to the summary, after the value. `{path}` inserts another field of the same response — resolved *within the current element* for a `[*]` wildcard, from the response root otherwise — e.g. `{message} (leader {leader})`. A path that is not in the response renders as `(n/a)`; a value that is an object or array renders as its size. Presentation only: it never changes the state, the levels or the metric. Put on one line and truncated if long |
 | **Upper / lower levels** | WARN/CRIT for numeric values |
 | **String matching** | Either *must match a regex* (choose the state when it does **not** match, default CRIT) or *map the value to a state* (separate OK / WARN / CRIT regexes, first full match wins; choose the state when nothing matches, default OK) |
 

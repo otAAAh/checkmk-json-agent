@@ -1685,3 +1685,58 @@ def test_cache_key_separates_endpoints_by_api_key_location(agent):
     assert agent._cache_key({**base, "auth_header": "X-API-Key"}) != agent._cache_key(
         {**base, "auth_header": "PRIVATE-TOKEN"}
     )
+
+
+def test_resolve_summary_reads_paths_in_the_element_scope(agent):
+    element = {"message": "replica lag", "meta": {"leader": "db-3"}}
+    assert agent._resolve_summary("{message} on {meta.leader}", element) == {
+        "message": "replica lag",
+        "meta.leader": "db-3",
+    }
+
+
+def test_resolve_summary_omits_what_it_cannot_resolve(agent):
+    # Absent, not empty: the check turns a missing key into '(n/a)', which is how
+    # a mistyped path stays visible.
+    assert agent._resolve_summary("{nope}", {"message": "x"}) == {}
+
+
+def test_resolve_summary_without_a_template(agent):
+    assert agent._resolve_summary(None, {"a": 1}) == {}
+    assert agent._resolve_summary("   ", {"a": 1}) == {}
+
+
+def test_summary_value_describes_collections_by_size(agent):
+    # Dumping a 200-element array into a summary that travels into notifications
+    # helps nobody.
+    assert agent._summary_value([1, 2, 3]) == "[3 items]"
+    assert agent._summary_value({"a": 1, "b": 2}) == "{2 keys}"
+    assert agent._summary_value(None) == "null"
+    assert agent._summary_value(True) == "true"
+    assert agent._summary_value(1.5) == "1.5"
+    assert agent._summary_value("text") == "text"
+
+
+def test_extract_resolves_the_summary_per_wildcard_element(agent):
+    document = {
+        "nodes": [
+            {"name": "n1", "health": "UP", "note": "fine"},
+            {"name": "n2", "health": "DOWN", "note": "disk full"},
+        ]
+    }
+    spec = {
+        "path": "nodes[*].health",
+        "service": "Node",
+        "label_path": "name",
+        "summary": "{note}",
+    }
+    results = agent._extract(document, [spec], "u")
+    assert [r["summary_fields"] for r in results] == [{"note": "fine"}, {"note": "disk full"}]
+    assert all(r["summary"] == "{note}" for r in results)
+
+
+def test_extract_resolves_the_summary_from_the_root_without_a_wildcard(agent):
+    document = {"status": "DEGRADED", "message": "replica lag"}
+    spec = {"path": "status", "service": "Health", "summary": "{message}"}
+    (result,) = agent._extract(document, [spec], "u")
+    assert result["summary_fields"] == {"message": "replica lag"}

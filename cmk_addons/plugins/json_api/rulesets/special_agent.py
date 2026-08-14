@@ -193,6 +193,27 @@ def _validate_endpoint(value: object) -> None:
             )
 
 
+# A summary template: literal text with '{path}' placeholders, no nesting. The
+# same shape the agent's _SUMMARY_PLACEHOLDER resolves, checked here so a stray
+# brace is a form error rather than a placeholder that silently never renders.
+_SUMMARY_TEMPLATE_PATTERN = re.compile(r"[^{}]*(\{[^{}]+\}[^{}]*)*\Z")
+
+
+def _validate_summary(value: str) -> None:
+    if not value.strip():
+        return
+    # A blank placeholder resolves to nothing and would silently disappear, so it
+    # is rejected alongside the malformed shapes.
+    blank = any(not path.strip() for path in re.findall(r"\{([^{}]*)\}", value))
+    if blank or not _SUMMARY_TEMPLATE_PATTERN.match(value):
+        raise validators.ValidationError(
+            Message(
+                "Use '{path}' to insert a field, e.g. '{message} (leader {leader})'. "
+                "Braces must be paired and cannot be nested or empty."
+            )
+        )
+
+
 def _authentication() -> CascadingSingleChoice:
     return CascadingSingleChoice(
         title=Title("Authentication"),
@@ -671,6 +692,26 @@ def _extraction() -> Dictionary:
             "match": DictElement(
                 required=False,
                 parameter_form=string_match(),
+            ),
+            "summary": DictElement(
+                required=False,
+                parameter_form=String(
+                    title=Title("Extra text in the service summary"),
+                    help_text=Help(
+                        "Appended to the summary, after the value. Write '{path}' "
+                        "to insert another field of the same response - resolved "
+                        "within the current element for a '[*]' wildcard, from the "
+                        "response root otherwise. So a service on 'status' can show "
+                        "the reason the API gave next to it, e.g. "
+                        "'{message} (leader {leader})', instead of needing a second "
+                        "service for it. A path that is not in the response renders "
+                        "as '(n/a)'. This is presentation only: it never changes the "
+                        "state, the levels or the metric. The text is put on one "
+                        "line and truncated if it gets long."
+                    ),
+                    prefill=InputHint("{message}"),
+                    custom_validate=(_validate_summary,),
+                ),
             ),
         },
     )
