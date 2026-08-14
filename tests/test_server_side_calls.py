@@ -67,6 +67,7 @@ def test_basic_command_line(ssc):
             # The CascadingSingleChoice tuple survives the JSON round-trip as a list.
             "match": ["must_match", {"pattern": "UP"}],
             "calc": None,
+            "inventory": None,
             "summary": None,
             "aggregate": None,
             # Superseded by 'aggregate', still passed on for unmigrated rules.
@@ -781,3 +782,33 @@ def test_no_retry_policy_means_a_single_attempt(ssc):
     )
     (endpoint,) = _endpoints(ssc, args)
     assert endpoint["retry"] is None
+
+
+def test_inventory_spec_passed_through(ssc):
+    args = _command_args(
+        ssc,
+        {
+            "endpoints": [
+                {
+                    "url": "http://x",
+                    "verify_cert": True,
+                    "extractions": [
+                        {
+                            "path": "version",
+                            "service": "Version",
+                            "inventory": {
+                                "node": "software.applications.json_api",
+                                "keep_service": False,
+                            },
+                        }
+                    ],
+                }
+            ]
+        },
+    )
+    (endpoint,) = _endpoints(ssc, args)
+    assert endpoint["extractions"][0]["inventory"] == {
+        "node": "software.applications.json_api",
+        "key": None,
+        "keep_service": False,
+    }

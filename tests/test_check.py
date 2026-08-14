@@ -1351,3 +1351,113 @@ def test_an_old_section_without_attempts_defaults_to_one(check):
     # A section written by an agent from before retries existed.
     section = _section(check, [], endpoints=[_endpoint_record(name="api")])
     assert section.endpoints["api"].attempts == 1
+
+
+def _inv(node, key, **kw):
+    base = {"node": node, "key": key, "row_key": None, "keep_service": False}
+    base.update(kw)
+    return base
+
+
+def test_inventory_writes_a_plain_attribute(check):
+    from cmk.agent_based.v2 import Attributes
+
+    section = _section(
+        check,
+        [
+            _entry(
+                "Version",
+                value="4.2.1",
+                inventory=_inv("software.applications.json_api", "version"),
+            )
+        ],
+    )
+    (result,) = list(check.inventory_json_api(section))
+    assert isinstance(result, Attributes)
+    assert result.path == ["software", "applications", "json_api"]
+    assert result.inventory_attributes == {"version": "4.2.1"}
+
+
+def test_inventory_field_creates_no_service(check):
+    # The whole point: a fact does not consume a service slot and a check
+    # interval to report something that changes twice a year.
+    section = _section(
+        check,
+        [_entry("Version", value="4.2.1", inventory=_inv("software.x", "version"))],
+    )
+    assert list(check.discover_json_api(section)) == []
+
+
+def test_inventory_field_can_also_keep_its_service(check):
+    section = _section(
+        check,
+        [
+            _entry(
+                "Version",
+                value="4.2.1",
+                inventory=_inv("software.x", "version", keep_service=True),
+            )
+        ],
+    )
+    assert [s.item for s in check.discover_json_api(section)] == ["Version"]
+
+
+def test_inventory_writes_one_table_row_per_wildcard_element(check):
+    from cmk.agent_based.v2 import TableRow
+
+    section = _section(
+        check,
+        [
+            _entry(
+                "Node version n1",
+                value="4.2",
+                inventory=_inv("software.applications.json_api.nodes", "version", row_key="n1"),
+            ),
+            _entry(
+                "Node version n2",
+                value="4.1",
+                inventory=_inv("software.applications.json_api.nodes", "version", row_key="n2"),
+            ),
+        ],
+    )
+    rows = list(check.inventory_json_api(section))
+    assert all(isinstance(row, TableRow) for row in rows)
+    assert [row.key_columns for row in rows] == [{"name": "n1"}, {"name": "n2"}]
+    assert [row.inventory_columns for row in rows] == [{"version": "4.2"}, {"version": "4.1"}]
+
+
+def test_inventory_skips_a_field_that_was_not_found(check):
+    # The tree keeps what it learned last time rather than recording a hole.
+    section = _section(
+        check,
+        [
+            _entry(
+                "Version", found=False, error="not found", inventory=_inv("software.x", "version")
+            )
+        ],
+    )
+    assert list(check.inventory_json_api(section)) == []
+
+
+def test_inventory_skips_a_null_value(check):
+    section = _section(check, [_entry("Version", value=None, inventory=_inv("software.x", "v"))])
+    assert list(check.inventory_json_api(section)) == []
+
+
+def test_inventory_keeps_numbers_and_booleans(check):
+    section = _section(
+        check,
+        [
+            _entry("Seats", value=500, inventory=_inv("software.x", "seats")),
+            _entry("Trial", value=False, inventory=_inv("software.x", "trial")),
+        ],
+    )
+    attributes = {}
+    for result in check.inventory_json_api(section):
+        attributes.update(result.inventory_attributes)
+    assert attributes == {"seats": 500, "trial": False}
+
+
+def test_a_section_without_inventory_config_writes_nothing(check):
+    section = _section(check, [_entry("Health", value="UP")])
+    assert list(check.inventory_json_api(section)) == []

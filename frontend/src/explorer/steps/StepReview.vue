@@ -357,6 +357,16 @@ function definedSummary(x: ExtractionValue): string[] {
   if (typeof x.piggyback_host === 'string' && x.piggyback_host.trim()) {
     parts.push(_t('one host per element, named by %{f}', { f: x.piggyback_host.trim() }))
   }
+  // Also leads: an inventory field with `keep_service` off creates NO service at
+  // all, so saying it here is what stops a "my field vanished" report.
+  const inventory = x.inventory as { node?: unknown; keep_service?: unknown } | undefined
+  if (inventory && typeof inventory === 'object' && typeof inventory.node === 'string') {
+    parts.push(
+      inventory.keep_service
+        ? _t('inventory %{n}, and a service', { n: inventory.node })
+        : _t('inventory %{n} — no service', { n: inventory.node })
+    )
+  }
   const unit = titleOf(x.unit)
   if (unit) {
     parts.push(_t('unit %{u}', { u: unit }))

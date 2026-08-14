@@ -75,6 +75,15 @@ class FilterSpec(BaseModel, frozen=True):
     value: str = ""
 
 
+class InventorySpec(BaseModel, frozen=True):
+    # Write the value into the host's HW/SW inventory tree instead of (or as well
+    # as) creating a service. The agent resolves the attribute name and, for a
+    # '[*]' wildcard, the row key; the check writes the tree.
+    node: str
+    key: str | None = None
+    keep_service: bool = False
+
+
 class Extraction(BaseModel, frozen=True):
     path: str
     service: str
@@ -106,6 +115,8 @@ class Extraction(BaseModel, frozen=True):
     # resolves the paths (it has the document and the current '[*]' element); the
     # check renders the text. Presentation only - never touches the state.
     summary: str | None = None
+    # Where this field goes in the inventory tree, if anywhere.
+    inventory: InventorySpec | None = None
     # Collapse the collection at the path into one number: count / sum / avg /
     # min / max (resolved by the agent, which has the document).
     aggregate: Literal["count", "sum", "avg", "min", "max"] | None = None

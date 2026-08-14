@@ -956,6 +956,25 @@ def _piggyback_host(element: object, host_path: object) -> str | None:
     return cleaned or None
 
 
+def _inventory_spec(spec: dict, row_key: str | None) -> dict | None:
+    """This field's place in the inventory tree, resolved for one result.
+
+    The attribute name defaults to the JSON path's last segment - the same rule
+    the service labels use - so the common case needs no extra typing. ``row_key``
+    is the '[*]' element's label, which becomes the table row's key column;
+    without a wildcard the value is a plain attribute of the node.
+    """
+    inventory = spec.get("inventory")
+    if not isinstance(inventory, dict) or not inventory.get("node"):
+        return None
+    return {
+        "node": str(inventory["node"]).strip(),
+        "key": (inventory.get("key") or "").strip() or _label_key_from_path(spec["path"]),
+        "row_key": row_key,
+        "keep_service": bool(inventory.get("keep_service")),
+    }
+
+
 def _result(
     spec: dict,
     service: str,
@@ -966,6 +985,7 @@ def _result(
     labels: list[dict] | None = None,
     host: str | None = None,
     summary_fields: dict[str, str] | None = None,
+    row_key: str | None = None,
 ) -> dict:
     # Values that are not JSON scalars (dict/list) are reported as strings.
     if found and isinstance(value, (dict, list)):
@@ -999,6 +1019,9 @@ def _result(
         # how the value itself is rendered.
         "summary": spec.get("summary") or None,
         "summary_fields": summary_fields or {},
+        # Where this value goes in the HW/SW inventory tree, if anywhere. None
+        # for the ordinary "this is a service" case.
+        "inventory": _inventory_spec(spec, row_key),
     }
 
 
@@ -1144,6 +1167,7 @@ def _extract(document: object, extractions: list[dict], url: str) -> list[dict]:
                     labels,
                     host,
                     summary_fields=_resolve_summary(summary, element),
+                    row_key=label,
                 )
             )
     return results

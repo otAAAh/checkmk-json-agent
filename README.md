@@ -79,6 +79,12 @@ Targets **Checkmk 2.4+** and the current stable plugin APIs
   service on `status` shows the reason the API already returned alongside the
   CRIT, instead of that reason needing a second service of its own. Presentation
   only: it never changes the state, the levels or the metric
+- **Facts into the HW/SW inventory**: point a field at an inventory tree node
+  instead of a service — a version, a build, a region, a licence tier. These are
+  not states worth a service that is OK forever, and the inventory does what
+  services cannot: it is searchable *across* hosts ("which hosts still run a
+  version below 4.2?") and keeps a change history. A `[*]` wildcard becomes one
+  table row per element. No service is created unless you ask for one
 - **Thresholds**: WARN/CRIT upper and lower levels for numeric values, exposed
   as a metric/graph
 - **String matching**: two modes — either a regex the value must fully match
@@ -172,6 +178,7 @@ Each **field to monitor** has:
 | **Unit** | Optional: `count` / `bytes` / `seconds` / `percent` — renders the value in the summary/details *and* the metric and graph with that unit (numeric values only) |
 | **Transform the numeric value** | Optional arithmetic expression on the variable `value` (e.g. `value / 1024 / 1024`), applied to a numeric value before levels and the metric; only numbers, parentheses and `+ - * /` are allowed |
 | **Extra text in the service summary** | Optional text appended to the summary, after the value. `{path}` inserts another field of the same response — resolved *within the current element* for a `[*]` wildcard, from the response root otherwise — e.g. `{message} (leader {leader})`. A path that is not in the response renders as `(n/a)`; a value that is an object or array renders as its size. Presentation only: it never changes the state, the levels or the metric. Put on one line and truncated if long |
+| **Write into the HW/SW inventory** | Optional: a tree node (e.g. `software.applications.json_api`, starting with `hardware`, `software` or `networking`) and an attribute name (defaults to the JSON path's last segment). The value goes into the host's inventory tree and, by default, creates **no service** — tick *Also create a service* if you want both. A `[*]` wildcard writes one **table row** per element, keyed by the element's label, so several fields over the same collection fill in columns of the same row. Use it for values that rarely change: every change is recorded in the inventory history. Inventory runs on its own, slower schedule |
 | **Upper / lower levels** | WARN/CRIT for numeric values |
 | **String matching** | Either *must match a regex* (choose the state when it does **not** match, default CRIT) or *map the value to a state* (separate OK / WARN / CRIT regexes, first full match wins; choose the state when nothing matches, default OK) |
 
