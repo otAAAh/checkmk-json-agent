@@ -218,3 +218,16 @@ def test_explorer_emits_the_retry_policy(rule_value: dict, explorer_output: dict
     endpoint = rule_value["endpoints"][0]
     assert endpoint["retry"] == {"attempts": 2, "backoff": 0.5}
     assert explorer_output["cli"][0]["retry"] == {"attempts": 2, "backoff": 0.5}
+
+
+def test_explorer_emits_the_inventory_target(rule_value: dict, explorer_output: dict):
+    by_service = {x["service"]: x for x in rule_value["endpoints"][0]["extractions"]}
+    assert by_service["Backup"]["inventory"] == {
+        "node": "software.applications.json_api",
+        "keep_service": True,
+    }
+    # A field without one must not carry the key at all (it is optional).
+    assert "inventory" not in by_service["Health"]
+
+    cli = {x["service"]: x for x in explorer_output["cli"][0]["extractions"]}
+    assert cli["Backup"]["inventory"]["node"] == "software.applications.json_api"

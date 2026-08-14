@@ -136,6 +136,21 @@ function hasFilter(x: ExtractionValue): boolean {
   return typeof path === 'string' && path.trim() !== ''
 }
 
+/** The inventory target of an extraction, if it has one. */
+function inventoryTarget(x: ExtractionValue): { node: string; keepService: boolean } | null {
+  const inventory = x.inventory as { node?: unknown; keep_service?: unknown } | undefined
+  if (!inventory || typeof inventory !== 'object' || typeof inventory.node !== 'string') {
+    return null
+  }
+  return { node: inventory.node, keepService: Boolean(inventory.keep_service) }
+}
+
+/** Whether this field is written to the inventory INSTEAD of creating a service. */
+function inventoryOnly(x: ExtractionValue): boolean {
+  const target = inventoryTarget(x)
+  return target !== null && !target.keepService
+}
+
 /** Infer the match mode from the cfg keys (the mode string is a hashed ident, so
  * we key off the non-hashed sub-fields instead). */
 function matchMode(cfg: Record<string, unknown>): 'must_match' | 'state_map' | null {
@@ -357,6 +372,16 @@ function definedSummary(x: ExtractionValue): string[] {
   if (typeof x.piggyback_host === 'string' && x.piggyback_host.trim()) {
     parts.push(_t('one host per element, named by %{f}', { f: x.piggyback_host.trim() }))
   }
+  // Also leads: an inventory field with `keep_service` off creates NO service at
+  // all, so saying it here is what stops a "my field vanished" report.
+  const inventory = inventoryTarget(x)
+  if (inventory) {
+    parts.push(
+      inventory.keepService
+        ? _t('inventory %{n}, and a service', { n: inventory.node })
+        : _t('inventory %{n} — no service', { n: inventory.node })
+    )
+  }
   const unit = titleOf(x.unit)
   if (unit) {
     parts.push(_t('unit %{u}', { u: unit }))
@@ -444,10 +469,16 @@ interface Row {
   defined: string[]
   state: StateKind
   labels: string[]
+  // The field goes into the inventory tree and creates no service. Still shown -
+  // it IS configured - but it must not be counted as a service that will appear.
+  inventoryOnly?: boolean
 }
 interface EndpointReview {
   url: string
   rows: Row[]
+  // Split because an inventory-only field produces a row but no service.
+  serviceCount: number
+  inventoryCount: number
   hostLabels: Array<{ label: string; value: string }>
 }
 
@@ -505,7 +536,12 @@ const reviews = computed<EndpointReview[]>(() =>
     }
     const rows: Row[] = (services?.extractions ?? [])
       .filter((x) => extractionPath(x))
-      .flatMap((x) => {
+      .flatMap((x): Row[] => {
+        // Tagged on every row this extraction produces, so the header can count
+        // the services that will actually be created - not the fields.
+        const noService = inventoryOnly(x)
+        const tag = (produced: Row[]): Row[] =>
+          noService ? produced.map((row) => ({ ...row, inventoryOnly: true })) : produced
         const name = extractionService(x) || _t('(unnamed)')
         const path = extractionPath(x)
         const defined = definedSummary(x)
@@ -524,9 +560,9 @@ const reviews = computed<EndpointReview[]>(() =>
         const readAs = valueAsKind(x.value_as)
         const matches = sample !== null ? resolvePath(sample, path) : []
         if (!matches.length) {
-          return [
+          return tag([
             { service: name, path, value: undefined, defined, state: 'none' as StateKind, labels },
-          ]
+          ])
         }
         if (aggregate) {
           const elements = elementCount(matches, path)
@@ -542,7 +578,7 @@ const reviews = computed<EndpointReview[]>(() =>
           } else {
             note = _t('%{n} element(s), aggregated on the site', { n: String(elements) })
           }
-          return [
+          return tag([
             {
               service: name,
               path,
@@ -552,7 +588,7 @@ const reviews = computed<EndpointReview[]>(() =>
               state: 'none' as StateKind,
               labels,
             },
-          ]
+          ])
         }
         // With a host field, every element's service keeps the PLAIN name and lands
         // on a host of its own, so the label suffix the preview would otherwise
@@ -560,41 +596,48 @@ const reviews = computed<EndpointReview[]>(() =>
         const perElementHost = piggybackField(x)
         const serviceName = (label: string | undefined): string =>
           perElementHost === null && matches.length > 1 && label ? `${name} ${label}` : name
-        return matches.map((m): Row => {
-          if (readAs !== null) {
+        return tag(
+          matches.map((m): Row => {
+            if (readAs !== null) {
+              const service = serviceName(m.label)
+              return {
+                service,
+                path,
+                value: m.value,
+                note:
+                  readAs === 'counter'
+                    ? _t('%{v} → the rate is computed on the site', { v: fmtValue(m.value) })
+                    : _t('%{v} → the age is computed on the site', { v: fmtValue(m.value) }),
+                defined,
+                state: 'none' as StateKind,
+                labels,
+              }
+            }
             const service = serviceName(m.label)
-            return {
-              service,
-              path,
-              value: m.value,
-              note:
-                readAs === 'counter'
-                  ? _t('%{v} → the rate is computed on the site', { v: fmtValue(m.value) })
-                  : _t('%{v} → the age is computed on the site', { v: fmtValue(m.value) }),
-              defined,
-              state: 'none' as StateKind,
-              labels,
+            let value: Json = m.value
+            // Transform the value when `calc` is set and it is numeric. On a bad
+            // expression evalCalc returns null: leave the value shown and mark the
+            // preview unresolved rather than crashing.
+            if (calc !== null && typeof value === 'number') {
+              const transformed = evalCalc(calc, value)
+              if (transformed === null) {
+                return { service, path, value, defined, state: 'none' as StateKind, labels }
+              }
+              value = transformed
             }
-          }
-          const service = serviceName(m.label)
-          let value: Json = m.value
-          // Transform the value when `calc` is set and it is numeric. On a bad
-          // expression evalCalc returns null: leave the value shown and mark the
-          // preview unresolved rather than crashing.
-          if (calc !== null && typeof value === 'number') {
-            const transformed = evalCalc(calc, value)
-            if (transformed === null) {
-              return { service, path, value, defined, state: 'none' as StateKind, labels }
-            }
-            value = transformed
-          }
-          return { service, path, value, defined, state: evalState(value, x), labels }
-        })
+            return { service, path, value, defined, state: evalState(value, x), labels }
+          }),
+        )
       })
     return {
       url: endpointUrl(connection) || _t('Endpoint %{n}', { n: ei + 1 }),
       rows,
       hostLabels,
+      // An inventory-only field is configured and shown, but it becomes a tree
+      // entry, not a service - counting it as one would promise a service that
+      // never appears.
+      serviceCount: rows.filter((row) => !row.inventoryOnly).length,
+      inventoryCount: rows.filter((row) => row.inventoryOnly).length,
     }
   }),
 )
@@ -616,7 +659,11 @@ const reviews = computed<EndpointReview[]>(() =>
         >
           <template #header>
             <CmkHeading type="h3" class="je-step-review__title">{{ review.url }}</CmkHeading>
-            <span class="je-step-review__count">{{ _t('%{n} services, %{h} host labels', { n: review.rows.length, h: review.hostLabels.length }) }}</span>
+            <span class="je-step-review__count">{{
+              review.inventoryCount
+                ? _t('%{n} services, %{i} inventory, %{h} host labels', { n: review.serviceCount, i: review.inventoryCount, h: review.hostLabels.length })
+                : _t('%{n} services, %{h} host labels', { n: review.serviceCount, h: review.hostLabels.length })
+            }}</span>
           </template>
           <template #content>
             <p v-if="!review.rows.length" class="je-step-review__empty">{{ _t('No services selected.') }}</p>

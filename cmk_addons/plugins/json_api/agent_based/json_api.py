@@ -24,6 +24,7 @@ from datetime import UTC, datetime
 
 from cmk.agent_based.v2 import (
     AgentSection,
+    Attributes,
     CheckPlugin,
     CheckResult,
     DiscoveryResult,
@@ -31,12 +32,15 @@ from cmk.agent_based.v2 import (
     HostLabel,
     HostLabelGenerator,
     IgnoreResults,
+    InventoryPlugin,
+    InventoryResult,
     Metric,
     Result,
     Service,
     ServiceLabel,
     State,
     StringTable,
+    TableRow,
     check_levels,
     get_rate,
     get_value_store,
@@ -156,6 +160,19 @@ def _fmt_rate(number: float) -> str:
 
 
 @dataclass(frozen=True)
+class InventoryTarget:
+    """Where one field's value goes in the HW/SW inventory tree."""
+
+    path: tuple[str, ...]
+    key: str
+    # The '[*]' element's label. Set means "one table row per element, keyed by
+    # this"; None means a plain attribute of the node.
+    row_key: str | None = None
+    # Whether the field ALSO gets a service. Off is the point of the feature.
+    keep_service: bool = False
+
+
+@dataclass(frozen=True)
 class Item:
     found: bool
     value: object
@@ -181,6 +198,9 @@ class Item:
     # left here because only the check knows what the summary already says.
     summary: str | None = None
     summary_fields: Mapping[str, str] = field(default_factory=dict)
+    # Set when this field belongs in the inventory tree rather than (or as well
+    # as) in a service.
+    inventory: "InventoryTarget | None" = None
 
 
 @dataclass(frozen=True)
@@ -330,6 +350,22 @@ def _summary_fields(raw: object) -> dict[str, str]:
     return {k: v for k, v in raw.items() if isinstance(k, str) and k and isinstance(v, str)}
 
 
+def _inventory_target(raw: object) -> InventoryTarget | None:
+    """The agent's inventory placement for one result, string-validated."""
+    if not isinstance(raw, dict):
+        return None
+    node, key = raw.get("node"), raw.get("key")
+    if not isinstance(node, str) or not isinstance(key, str) or not node or not key:
+        return None
+    row_key = raw.get("row_key")
+    return InventoryTarget(
+        path=tuple(segment for segment in node.split(".") if segment),
+        key=key,
+        row_key=row_key if isinstance(row_key, str) and row_key else None,
+        keep_service=bool(raw.get("keep_service")),
+    )
+
+
 def _coerce_host_labels(raw: object) -> dict[str, str]:
     """The endpoint-level ``{key: value}`` host labels, string-validated."""
     if not isinstance(raw, dict):
@@ -419,6 +455,7 @@ def parse_json_api(string_table: StringTable) -> Section | None:
             service_labels=_service_labels(result.get("labels")),
             summary=_optional_str(result.get("summary")),
             summary_fields=_summary_fields(result.get("summary_fields")),
+            inventory=_inventory_target(result.get("inventory")),
         )
     return Section(
         error=payload.get("error"),
@@ -441,6 +478,12 @@ def host_label_json_api(section: Section) -> HostLabelGenerator:
 
 def discover_json_api(section: Section) -> DiscoveryResult:
     for name, entry in section.items.items():
+        # A field written to the inventory is a fact, not a state: by default it
+        # creates NO service, which is the whole point - it must not consume a
+        # service slot and a check interval to report something that changes
+        # twice a year.
+        if entry.inventory is not None and not entry.inventory.keep_service:
+            continue
         # Seed each service's discovered parameters with the thresholds / match
         # configured in the special-agent rule. These become the service's
         # defaults; a "Generic JSON API" check-parameters rule then overrides
@@ -1008,10 +1051,67 @@ def check_json_api_endpoint(
         )
 
 
+def _inventory_value(value: object) -> int | float | str | bool | None:
+    """A JSON value as an inventory attribute/column value.
+
+    The tree holds scalars. The agent already renders an object or array as its
+    JSON text, and a non-finite number is not representable, so anything left
+    that is not a scalar is dropped rather than written as a Python repr.
+    """
+    if isinstance(value, (bool, str)):
+        return value
+    if isinstance(value, (int, float)):
+        return value if math.isfinite(value) else None
+    return None
+
+
+def inventory_json_api(section: Section) -> InventoryResult:
+    """Write the fields configured as inventory into the host's tree.
+
+    Two shapes, decided by whether the extraction had a '[*]' wildcard:
+
+    * no wildcard - a plain attribute of the node ('version', 'region', ...);
+    * a wildcard - one table ROW per element, keyed by the element's own label,
+      which is what turns 'nodes[*].version' into a table of nodes with a
+      version column. Checkmk merges rows sharing a key column, so several
+      extractions over the same collection fill in columns of the same row.
+
+    A field whose path was not in the response contributes nothing: the tree
+    keeps what it learned last time rather than recording a hole.
+    """
+    for entry in section.items.values():
+        target = entry.inventory
+        if target is None or not entry.found:
+            continue
+        value = _inventory_value(entry.value)
+        if value is None:
+            continue
+        if target.row_key is None:
+            yield Attributes(
+                path=list(target.path),
+                inventory_attributes={target.key: value},
+            )
+        else:
+            yield TableRow(
+                path=list(target.path),
+                key_columns={"name": target.row_key},
+                inventory_columns={target.key: value},
+            )
+
+
 agent_section_json_api = AgentSection(
     name="json_api",
     parse_function=parse_json_api,
     host_label_function=host_label_json_api,
+)
+
+# Facts, not states: a version, a build, a licence tier. They belong in the
+# inventory tree - searchable across hosts, with a history of its own - rather
+# than in a service that is OK forever.
+inventory_plugin_json_api = InventoryPlugin(
+    name="json_api",
+    sections=["json_api"],
+    inventory_function=inventory_json_api,
 )
 
 check_plugin_json_api = CheckPlugin(

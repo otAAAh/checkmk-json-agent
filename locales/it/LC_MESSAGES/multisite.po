@@ -6,7 +6,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: checkmk-json-agent\n"
 "Report-Msgid-Bugs-To: https://github.com/otAAAh/checkmk-json-agent/issues\n"
-"POT-Creation-Date: 2026-08-14 12:30+0200\n"
+"POT-Creation-Date: 2026-08-14 12:48+0200\n"
 "PO-Revision-Date: 2026-07-06 12:00+0000\n"
 "Last-Translator: checkmk-json-agent contributors\n"
 "Language-Team: Italian\n"
@@ -151,44 +151,138 @@ msgstr ""
 "parentesi graffe devono essere accoppiate e non possono essere annidate o "
 "vuote."
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:219
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:232
+msgid ""
+"Enter a dotted inventory path of at least two segments, using lower-case "
+"letters, digits and '_' - e.g. 'software.applications.json_api'."
+msgstr ""
+"Inserisci un percorso di inventario con punti e almeno due segmenti, usando "
+"minuscole, cifre e '_' - ad es. 'software.applications.json_api'."
+
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:239
+msgid ""
+"The inventory path must start with 'hardware', 'software' or 'networking'."
+msgstr ""
+"Il percorso di inventario deve iniziare con 'hardware', 'software' o "
+"'networking'."
+
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:247
+msgid ""
+"Use lower-case letters, digits and '_' for the attribute name, e.g. "
+"'version'."
+msgstr ""
+"Usa minuscole, cifre e '_' per il nome dell'attributo, ad es. 'version'."
+
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:254
+msgid "Write into the HW/SW inventory"
+msgstr "Scrivi nell'inventario HW/SW"
+
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:256
+msgid ""
+"Put this field into the host's inventory tree instead of making it a "
+"service. Meant for facts rather than states - a version, a build, a region, "
+"a licence tier - which are not worth a service that is OK forever, and which "
+"the inventory can do something with that services cannot: it is searchable "
+"ACROSS hosts ('which hosts still run a version below 4.2?') and keeps a "
+"history of its own. For a '[*]' wildcard the elements become one table row "
+"each, keyed by the element's name. Point this at values that rarely change: "
+"every change is recorded in the inventory history, so a counter here grows "
+"those files without bound. Inventory runs on its own (slower) schedule, not "
+"at every check interval."
+msgstr ""
+"Inserisce questo campo nell'albero di inventario dell'host invece di "
+"renderlo un servizio. Pensato per fatti più che per stati - una versione, "
+"una build, una regione, un livello di licenza - che non meritano un servizio "
+"sempre OK e con cui l'inventario può fare qualcosa che i servizi non "
+"possono: è ricercabile TRA gli host ('quali host usano ancora una versione "
+"inferiore alla 4.2?') e mantiene una cronologia propria. Con un carattere "
+"jolly '[*]' ogni elemento diventa una riga di tabella, identificata dal nome "
+"dell'elemento. Usalo per valori che cambiano di rado: ogni modifica viene "
+"registrata nella cronologia dell'inventario, quindi un contatore qui fa "
+"crescere quei file senza limiti. L'inventario segue una propria "
+"pianificazione (più lenta), non ogni intervallo di controllo."
+
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:272
+msgid "Inventory tree node"
+msgstr "Nodo dell'albero di inventario"
+
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:274
+msgid ""
+"Dotted path of the node the value is written to, e.g. 'software.applications."
+"json_api'. Must start with 'hardware', 'software' or 'networking'."
+msgstr ""
+"Percorso con punti del nodo in cui viene scritto il valore, ad es. 'software."
+"applications.json_api'. Deve iniziare con 'hardware', 'software' o "
+"'networking'."
+
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:285
+msgid "Attribute name"
+msgstr "Nome dell'attributo"
+
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:287
+msgid ""
+"Name of the attribute (or, for a '[*]' wildcard, the column). Defaults to "
+"the JSON path's last segment."
+msgstr ""
+"Nome dell'attributo (o della colonna, con un carattere jolly '[*]'). Per "
+"impostazione predefinita l'ultimo segmento del percorso JSON."
+
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:296
+msgid "Also create a service for this field"
+msgstr "Crea anche un servizio per questo campo"
+
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:298
+msgid ""
+"Off by default: an inventory field creates NO service, which is the point - "
+"it does not consume a service slot or a check interval to report something "
+"that changes twice a year. Turn it on for a value you want in the inventory "
+"AND want to alert on, e.g. a version you also match against a regex."
+msgstr ""
+"Disattivato per impostazione predefinita: un campo di inventario NON crea "
+"alcun servizio, ed è proprio questo il punto - non consuma né uno spazio "
+"servizio né un intervallo di controllo per riportare qualcosa che cambia due "
+"volte l'anno. Attivalo per un valore che vuoi nell'inventario E su cui vuoi "
+"ricevere allarmi, ad es. una versione che confronti anche con un'espressione "
+"regolare."
+
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:314
 msgid "Authentication"
 msgstr "Autenticazione"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:224
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:319
 msgid "Basic authentication (username / password)"
 msgstr "Autenticazione di base (nome utente / password)"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:230
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:325
 msgid "Username"
 msgstr "Nome utente"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:237
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:332
 msgid "Password"
 msgstr "Password"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:246
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:341
 msgid "Bearer token"
 msgstr "Token Bearer"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:252
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:347
 msgid "Token"
 msgstr "Token"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:253
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:348
 msgid "Sent as 'Authorization: Bearer <token>'."
 msgstr "Inviato come 'Authorization: Bearer <token>'."
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:262
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:357
 msgid "API key in a request header"
 msgstr "Chiave API in un'intestazione della richiesta"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:268
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:780
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:363
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:879
 msgid "Header name"
 msgstr "Nome dell'intestazione"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:270
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:365
 msgid ""
 "Name of the header carrying the key, e.g. 'X-API-Key', 'apikey' or 'PRIVATE-"
 "TOKEN'. For 'Authorization: Bearer <token>' use the bearer token choice "
@@ -198,12 +292,12 @@ msgstr ""
 "o 'PRIVATE-TOKEN'. Per 'Authorization: Bearer <token>' usa invece la scelta "
 "token Bearer."
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:282
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:321
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:377
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:416
 msgid "API key"
 msgstr "Chiave API"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:284
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:379
 msgid ""
 "Kept in the Checkmk password store. Unlike a key typed into 'Additional "
 "request headers' it is never written to the configuration or to the agent's "
@@ -214,15 +308,15 @@ msgstr ""
 "in chiaro nella configurazione o nella riga di comando dell'agente e può "
 "essere ruotata in un unico punto."
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:298
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:393
 msgid "API key in a query parameter"
 msgstr "Chiave API in un parametro di query"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:304
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:399
 msgid "Parameter name"
 msgstr "Nome del parametro"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:306
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:401
 msgid ""
 "Name of the query parameter carrying the key, e.g. 'api_key'. It is appended "
 "to the URL for the request only: the key is redacted wherever the agent "
@@ -236,7 +330,7 @@ msgstr ""
 "un'intestazione se l'API ne offre una: una chiave nell'URL è visibile ai "
 "proxy e ai log dei server lungo il percorso."
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:323
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:418
 msgid ""
 "Kept in the Checkmk password store, so it is not written to the "
 "configuration or to the agent's command line in clear text - unlike a key "
@@ -246,26 +340,26 @@ msgstr ""
 "chiaro nella configurazione o nella riga di comando dell'agente, a "
 "differenza di una chiave digitata nell'URL."
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:367
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:462
 msgid "Field to monitor"
 msgstr "Campo da monitorare"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:373
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:468
 #: cmk_addons/plugins/json_api/rulesets/check_parameters.py:132
 msgid "Service name"
 msgstr "Nome del servizio"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:374
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:469
 msgid "Becomes the Checkmk service description for this field."
 msgstr "Diventa la descrizione del servizio Checkmk per questo campo."
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:381
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:460
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:1011
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:476
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:555
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:1110
 msgid "JSON path"
 msgstr "Percorso JSON"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:383
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:478
 msgid ""
 "Dotted path into the JSON response, e.g. 'status', 'components.db.status' or "
 "'items[0].count'. Use a '[*]' wildcard (e.g. 'nodes[*].health') to create "
@@ -289,11 +383,11 @@ msgstr ""
 "indirizzate con segmenti tra parentesi quadre e virgolette, ad es. "
 "\"data['foo.bar'].value\"."
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:403
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:498
 msgid "Per-element name suffix (for '[*]' wildcards)"
 msgstr "Suffisso del nome per elemento (per i caratteri jolly '[*]')"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:405
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:500
 msgid ""
 "When the JSON path contains a '[*]' wildcard, one service is created per "
 "element. This optional path - relative to each element, e.g. 'name' or 'id' "
@@ -312,11 +406,11 @@ msgstr ""
 "parti vengono unite con ' / ' (ad es. '<pod> / <container>'). Scegli un "
 "campo univoco e stabile tra le esecuzioni."
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:420
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:515
 msgid "Create one host per element, named by this field"
 msgstr "Crea un host per elemento, denominato in base a questo campo"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:422
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:517
 msgid ""
 "When the JSON path contains a '[*]' wildcard, this turns every element into "
 "a Checkmk host of its own instead of one more service on this host. Give a "
@@ -344,11 +438,11 @@ msgstr ""
 "con la gestione dinamica degli host), altrimenti i dati non verranno mai "
 "monitorati."
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:443
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:538
 msgid "Service labels"
 msgstr "Etichette del servizio"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:445
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:540
 msgid ""
 "Attach Checkmk service labels to THIS service, built from fields in the "
 "response. Each key is prefixed with 'json_api/'. For a '[*]' path the value "
@@ -368,7 +462,7 @@ msgstr ""
 "scegli campi stabili e a bassa cardinalità: un valore che cambia fa variare "
 "continuamente l'etichetta."
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:462
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:557
 msgid ""
 "Relative to each '[*]' element (like the name suffix), or the response root "
 "for a non-wildcard path."
@@ -376,12 +470,12 @@ msgstr ""
 "Relativo a ciascun elemento '[*]' (come il suffisso del nome), oppure alla "
 "radice della risposta per un percorso senza caratteri jolly."
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:472
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:1023
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:567
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:1122
 msgid "Label key (optional)"
 msgstr "Chiave dell'etichetta (facoltativa)"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:474
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:569
 msgid ""
 "Defaults to the path's last segment. The 'json_api/' prefix is added "
 "automatically."
@@ -389,11 +483,11 @@ msgstr ""
 "Per impostazione predefinita, l'ultimo segmento del percorso. Il prefisso "
 "'json_api/' viene aggiunto automaticamente."
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:486
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:581
 msgid "Aggregate a collection into one value"
 msgstr "Aggregare una raccolta in un unico valore"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:488
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:583
 msgid ""
 "Collapse a collection of elements into a single number instead of monitoring "
 "one value (or, with a '[*]' wildcard, one service per element). Point the "
@@ -414,31 +508,31 @@ msgstr ""
 "vengono aggregati solo gli elementi corrispondenti. Un percorso che non "
 "contiene né un array né un oggetto rende il servizio UNKNOWN."
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:501
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:596
 msgid "Number of elements"
 msgstr "Numero di elementi"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:502
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:597
 msgid "Sum of the values"
 msgstr "Somma dei valori"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:503
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:598
 msgid "Average of the values"
 msgstr "Media dei valori"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:504
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:599
 msgid "Smallest of the values"
 msgstr "Il minore dei valori"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:505
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:600
 msgid "Largest of the values"
 msgstr "Il maggiore dei valori"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:513
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:608
 msgid "Only elements matching a condition"
 msgstr "Solo elementi che soddisfano una condizione"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:515
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:610
 msgid ""
 "For a '[*]' wildcard or an aggregated path: keep only the elements whose sub-"
 "field matches this condition - e.g. one service per node whose 'status' is "
@@ -455,40 +549,40 @@ msgstr ""
 "scartato. Senza un carattere jolly '[*]' o un'aggregazione questo non ha "
 "effetto."
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:527
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:622
 msgid "Field path (within each element)"
 msgstr "Percorso del campo (all'interno di ciascun elemento)"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:529
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:624
 msgid "Resolved within each element, e.g. 'status' or 'metadata.phase'."
 msgstr ""
 "Risolto all'interno di ciascun elemento, ad es. 'status' o 'metadata.phase'."
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:538
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:633
 msgid "Condition"
 msgstr "Condizione"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:540
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:635
 msgid "equals"
 msgstr "è uguale a"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:541
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:636
 msgid "does not equal"
 msgstr "è diverso da"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:542
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:637
 msgid "matches regex"
 msgstr "corrisponde alla regex"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:543
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:638
 msgid "does not match regex"
 msgstr "non corrisponde alla regex"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:551
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:646
 msgid "Comparison value / pattern"
 msgstr "Valore di confronto / pattern"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:553
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:648
 msgid ""
 "The value to compare against, or the regular expression for the regex "
 "conditions."
@@ -496,11 +590,11 @@ msgstr ""
 "Il valore con cui confrontare, o l'espressione regolare per le condizioni "
 "regex."
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:564
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:659
 msgid "Interpret the value as"
 msgstr "Interpretare il valore come"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:566
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:661
 msgid ""
 "By default the extracted value is monitored as it stands. Two common API "
 "values are worth deriving something else from: a counter that only ever "
@@ -514,21 +608,21 @@ msgstr ""
 "timestamp (conta la sua età, non la data). Il numero derivato è quello che "
 "poi usano trasformazione, livelli, metrica e riepilogo."
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:578
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:673
 msgid "A counter - monitor its per-second rate"
 msgstr "Un contatore: monitorare il suo tasso al secondo"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:581
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:676
 msgid "Per-second rate"
 msgstr "Tasso al secondo"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:583
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:678
 msgid "The difference to the previous check is divided by the elapsed time"
 msgstr ""
 "La differenza rispetto al controllo precedente è divisa per il tempo "
 "trascorso"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:587
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:682
 msgid ""
 "For monotonically growing counters such as 'requests_total' or 'bytes_sent': "
 "the check monitors the change per second instead of the absolute total. The "
@@ -540,11 +634,11 @@ msgstr ""
 "totale assoluto. Il primo controllo dopo un riavvio del contatore non può "
 "ancora calcolare un tasso e mantiene lo stato precedente del servizio."
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:598
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:693
 msgid "A timestamp - monitor its age"
 msgstr "Un timestamp: monitorare la sua età"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:601
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:696
 msgid ""
 "For values such as 'last_backup' or 'updated_at': the check monitors the "
 "number of seconds since that point in time, so upper levels alert on stale "
@@ -559,11 +653,11 @@ msgstr ""
 "scegli un'unità qui sotto solo per sovrascriverla (ad es. dopo una "
 "trasformazione in ore)."
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:614
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:709
 msgid "Timestamp format"
 msgstr "Formato del timestamp"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:616
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:711
 msgid ""
 "'Detect automatically' reads a number as Unix epoch seconds (milliseconds "
 "when it is far too large for seconds) and anything else as ISO 8601. A "
@@ -573,27 +667,27 @@ msgstr ""
 "(millisecondi se è troppo grande per essere in secondi) e tutto il resto "
 "come ISO 8601. Un timestamp senza fuso orario viene letto come UTC."
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:625
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:720
 msgid "Detect automatically"
 msgstr "Rileva automaticamente"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:628
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:723
 msgid "Unix epoch seconds"
 msgstr "Secondi epoch Unix"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:632
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:727
 msgid "Unix epoch milliseconds"
 msgstr "Millisecondi epoch Unix"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:637
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:732
 msgid "ISO 8601 / RFC 3339, e.g. '2026-07-28T02:00:00Z'"
 msgstr "ISO 8601 / RFC 3339, ad es. '2026-07-28T02:00:00Z'"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:654
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:749
 msgid "Unit (for numeric values)"
 msgstr "Unità (per valori numerici)"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:656
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:751
 msgid ""
 "Renders the metric and graph with this unit. Leave unset for a plain, unit-"
 "less value. Only affects numeric values."
@@ -601,31 +695,31 @@ msgstr ""
 "Visualizza la metrica e il grafico con questa unità. Lascia vuoto per un "
 "valore semplice, senza unità. Riguarda solo i valori numerici."
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:660
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:755
 msgid "Count (integer)"
 msgstr "Conteggio (intero)"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:661
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:756
 msgid "Bytes (IEC: KiB, MiB, ...)"
 msgstr "Byte (IEC: KiB, MiB, ...)"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:662
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:757
 msgid "Seconds (duration)"
 msgstr "Secondi (durata)"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:663
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:758
 msgid "Percent"
 msgstr "Percentuale"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:665
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:760
 msgid "No unit"
 msgstr "Nessuna unità"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:679
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:774
 msgid "Transform the numeric value"
 msgstr "Trasforma il valore numerico"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:681
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:776
 msgid ""
 "An arithmetic expression applied to a numeric value before the levels and "
 "the metric, using the variable 'value'. Only numbers, parentheses and + - "
@@ -639,11 +733,11 @@ msgstr ""
 "'value * 1000' (secondi in millisecondi), '(value - 32) * 5 / 9' (Fahrenheit "
 "in Celsius)."
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:699
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:794
 msgid "Extra text in the service summary"
 msgstr "Testo aggiuntivo nel riepilogo del servizio"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:701
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:796
 #, python-brace-format
 msgid ""
 "Appended to the summary, after the value. Write '{path}' to insert another "
@@ -665,16 +759,16 @@ msgstr ""
 "le soglie o la metrica. Il testo viene messo su una riga e troncato se "
 "diventa lungo."
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:722
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:821
 #: cmk_addons/plugins/json_api/rulesets/check_parameters.py:140
 msgid "Endpoint"
 msgstr "Endpoint"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:728
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:827
 msgid "Endpoint name"
 msgstr "Nome dell'endpoint"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:730
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:829
 msgid ""
 "Optional short name for this endpoint, e.g. 'frontend'. It names the "
 "endpoint's own service - 'JSON API <name>', which reports the HTTP status "
@@ -686,11 +780,11 @@ msgstr ""
 "e il tempo di risposta della richiesta. Senza nome viene usato l'URL. Non "
 "cambia i nomi dei servizi dei campi."
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:742
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:841
 msgid "URL"
 msgstr "URL"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:744
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:843
 msgid ""
 "Full URL of the JSON endpoint, including scheme, e.g. 'https://app.example."
 "com/actuator/health'."
@@ -698,27 +792,27 @@ msgstr ""
 "URL completo dell'endpoint JSON, incluso lo schema, ad es. 'https://app."
 "example.com/actuator/health'."
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:753
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:852
 msgid "HTTP method"
 msgstr "Metodo HTTP"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:755
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:854
 msgid "GET"
 msgstr "GET"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:756
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:855
 msgid "POST"
 msgstr "POST"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:764
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:863
 msgid "Request body (for POST)"
 msgstr "Corpo della richiesta (per POST)"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:770
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:869
 msgid "Additional request headers"
 msgstr "Intestazioni della richiesta aggiuntive"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:772
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:871
 msgid ""
 "Sent with every request to this endpoint. Values are stored in clear text "
 "and travel on the agent's command line, so an API key belongs under "
@@ -728,23 +822,23 @@ msgstr ""
 "chiaro e viaggiano nella riga di comando dell'agente, quindi una chiave API "
 "va in 'Autenticazione', non qui."
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:784
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:883
 msgid "Header value"
 msgstr "Valore dell'intestazione"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:797
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:896
 msgid "Verify the TLS certificate"
 msgstr "Verifica il certificato TLS"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:798
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:897
 msgid "Disabling certificate verification is insecure."
 msgstr "Disattivare la verifica del certificato non è sicuro."
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:805
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:904
 msgid "Custom CA bundle file"
 msgstr "File del bundle CA personalizzato"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:807
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:906
 msgid ""
 "Path on the Checkmk server to a PEM file holding the CA certificate(s) to "
 "verify the server's certificate against. Use this to trust an internal or "
@@ -756,11 +850,11 @@ msgstr ""
 "interna o privata senza disattivare la verifica. Ignorato quando la verifica "
 "TLS è disattivata."
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:818
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:917
 msgid "Client certificate (mutual TLS)"
 msgstr "Certificato client (TLS reciproco)"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:820
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:919
 msgid ""
 "Present a client certificate to the server (mutual TLS). The files must "
 "exist on the Checkmk server. The private key must be unencrypted."
@@ -768,11 +862,11 @@ msgstr ""
 "Presenta un certificato client al server (TLS reciproco). I file devono "
 "esistere sul server Checkmk. La chiave privata deve essere non cifrata."
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:828
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:927
 msgid "Client certificate file"
 msgstr "File del certificato client"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:830
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:929
 msgid ""
 "Path to the client certificate (PEM). If the file also contains the private "
 "key, leave the key field empty."
@@ -780,11 +874,11 @@ msgstr ""
 "Percorso del certificato client (PEM). Se il file contiene anche la chiave "
 "privata, lascia vuoto il campo della chiave."
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:840
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:939
 msgid "Private key file"
 msgstr "File della chiave privata"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:842
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:941
 msgid ""
 "Path to the client private key (PEM), if it is not bundled with the "
 "certificate."
@@ -792,11 +886,11 @@ msgstr ""
 "Percorso della chiave privata del client (PEM), se non è inclusa nel "
 "certificato."
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:854
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:953
 msgid "Follow HTTP redirects"
 msgstr "Segui i reindirizzamenti HTTP"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:856
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:955
 msgid ""
 "On by default. Disable in locked-down environments to harden against SSRF: a "
 "target that redirects (e.g. 3xx to an internal address) will then fail "
@@ -807,19 +901,19 @@ msgstr ""
 "es. 3xx verso un indirizzo interno) fallirà invece di essere seguita fino "
 "alla posizione di reindirizzamento."
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:867
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:966
 msgid "Request timeout (seconds)"
 msgstr "Timeout della richiesta (secondi)"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:868
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:967
 msgid "Per-request timeout. Defaults to 30 seconds."
 msgstr "Timeout per singola richiesta. Il valore predefinito è 30 secondi."
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:876
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:975
 msgid "Re-read at most every (seconds)"
 msgstr "Rileggi al massimo ogni (secondi)"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:878
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:977
 msgid ""
 "Reuse the last response for this endpoint instead of requesting it again, as "
 "long as it is younger than this. For APIs with a request quota, expensive "
@@ -846,11 +940,11 @@ msgstr ""
 "tempo di risposta, perché non è stata fatta alcuna richiesta. Lasciare non "
 "impostato per interrogare sempre in tempo reale."
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:900
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:999
 msgid "Retry a failed request"
 msgstr "Riprova una richiesta fallita"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:902
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:1001
 msgid ""
 "Repeat this endpoint's request when it fails in a way a repeat could fix - a "
 "connection error, a timeout, or an HTTP 429 / 5xx - so a load balancer "
@@ -874,19 +968,19 @@ msgstr ""
 "timeout della richiesta, più le attese tra i tentativi. Disattivato per "
 "impostazione predefinita."
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:919
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:1018
 msgid "Number of retries"
 msgstr "Numero di tentativi"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:920
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:1019
 msgid "Extra attempts after the first one failed."
 msgstr "Tentativi aggiuntivi dopo il fallimento del primo."
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:930
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:1029
 msgid "Wait before retrying (seconds)"
 msgstr "Attesa prima di riprovare (secondi)"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:932
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:1031
 msgid ""
 "Waiting time before the first retry, doubled for each further one. The total "
 "waiting time is capped at 30 seconds however many retries are configured."
@@ -895,11 +989,11 @@ msgstr ""
 "successivo. L'attesa complessiva è limitata a 30 secondi, indipendentemente "
 "dal numero di tentativi configurati."
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:949
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:1048
 msgid "Additional accepted HTTP status codes"
 msgstr "Codici di stato HTTP aggiuntivi accettati"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:951
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:1050
 msgid ""
 "By default only 2xx responses are read; any other status makes the "
 "endpoint's services UNKNOWN. Add extra status codes to accept here - for "
@@ -914,15 +1008,15 @@ msgstr ""
 "accettata viene analizzato ed estratto come di consueto. 2xx è sempre "
 "accettato."
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:959
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:1058
 msgid "Status code"
 msgstr "Codice di stato"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:967
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:1066
 msgid "HTTP proxy"
 msgstr "Proxy HTTP"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:969
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:1068
 msgid ""
 "Route this endpoint's request through an HTTP proxy - useful when the "
 "Checkmk server reaches the API only via a corporate egress proxy. Choose the "
@@ -937,11 +1031,11 @@ msgstr ""
 "impostato nell'ambiente. Senza questa impostazione vengono rispettate le "
 "variabili di proxy dell'ambiente."
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:983
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:1082
 msgid "Fields to monitor"
 msgstr "Campi da monitorare"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:985
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:1084
 msgid ""
 "Each entry becomes one Checkmk service, built from the value found at the "
 "given JSON path."
@@ -949,11 +1043,11 @@ msgstr ""
 "Ogni voce diventa un servizio Checkmk, costruito a partire dal valore "
 "trovato nel percorso JSON indicato."
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:994
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:1093
 msgid "Host labels"
 msgstr "Etichette dell'host"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:996
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:1095
 msgid ""
 "Attach Checkmk host labels to the monitored host, built from fields in this "
 "endpoint's response. Each key is prefixed with 'json_api/' and the value is "
@@ -973,7 +1067,7 @@ msgstr ""
 "univoche. Impostate durante il rilevamento, quindi scegli campi stabili e a "
 "bassa cardinalità."
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:1013
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:1112
 msgid ""
 "From the response root, e.g. 'version', 'cluster.region', or a '[*]' "
 "wildcard like 'components[*]' for one label per element."
@@ -981,7 +1075,7 @@ msgstr ""
 "Dalla radice della risposta, ad es. 'version', 'cluster.region', o un "
 "carattere jolly '[*]' come 'components[*]' per un'etichetta per elemento."
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:1025
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:1124
 msgid ""
 "Defaults to the path's last segment. For a '[*]' path the element id is "
 "appended ('<key>/<element>'). The 'json_api/' prefix is added automatically."
@@ -990,11 +1084,11 @@ msgstr ""
 "percorso '[*]' viene aggiunto l'id dell'elemento ('<key>/<element>'). Il "
 "prefisso 'json_api/' viene aggiunto automaticamente."
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:1035
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:1134
 msgid "Value field (for '[*]' wildcards)"
 msgstr "Campo del valore (per i caratteri jolly '[*]')"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:1037
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:1136
 msgid ""
 "For a '[*]' path: a path within each element for the label value (e.g. "
 "'status'). Defaults to 'true' (a set-membership tag). Ignored without a "
@@ -1004,11 +1098,11 @@ msgstr ""
 "valore dell'etichetta (ad es. 'status'). Per impostazione predefinita "
 "'true' (un'etichetta di appartenenza). Ignorato senza carattere jolly."
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:1070
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:1169
 msgid "Endpoints"
 msgstr "Endpoint"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:1072
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:1171
 msgid ""
 "One or more HTTP/JSON endpoints. Each is fetched with its own connection "
 "settings and extractions; all results are merged into one section. An "
@@ -1019,7 +1113,7 @@ msgstr ""
 "in un'unica sezione. Un endpoint non raggiungibile influisce solo sui propri "
 "servizi."
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:1087
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:1186
 #: cmk_addons/plugins/json_api/rulesets/check_parameters.py:129
 msgid "Generic JSON API"
 msgstr "API JSON generica"

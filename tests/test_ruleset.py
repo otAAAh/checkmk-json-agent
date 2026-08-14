@@ -142,6 +142,7 @@ def test_extraction_form_has_the_expected_keys(ruleset):
         "levels_lower",
         "calc",
         "match",
+        "inventory",
         "summary",
     }
     assert "count" not in ruleset._extraction().elements
@@ -310,3 +311,41 @@ def test_invalid_summary_templates_rejected(ruleset, bad):
     # renders.
     with pytest.raises(ValidationError):
         ruleset._validate_summary(bad)
+
+
+@pytest.mark.parametrize(
+    "node",
+    ["software.applications.json_api", "hardware.system", "networking.interfaces.by_name"],
+)
+def test_valid_inventory_nodes_pass(ruleset, node):
+    ruleset._validate_inventory_node(node)  # must not raise
+
+
+@pytest.mark.parametrize(
+    "bad",
+    [
+        "software",  # a single segment is not a node
+        "Software.Apps",  # the tree is lower-case
+        "software..apps",  # empty segment
+        "software.apps-1",  # '-' is not allowed in a segment
+        "custom.stuff",  # not one of the three tree roots
+        "",
+    ],
+)
+def test_invalid_inventory_nodes_rejected(ruleset, bad):
+    # A typo produces a malformed tree node that is awkward to clean up per host,
+    # so it has to fail in Setup.
+    with pytest.raises(ValidationError):
+        ruleset._validate_inventory_node(bad)
+
+
+def test_inventory_key_is_optional_but_validated(ruleset):
+    ruleset._validate_inventory_key("")  # must not raise - defaults from the path
+    ruleset._validate_inventory_key("build_id")  # must not raise
+    with pytest.raises(ValidationError):
+        ruleset._validate_inventory_key("Build Id")
+
+
+def test_inventory_form_has_the_expected_keys(ruleset):
+    form = ruleset._extraction().elements["inventory"].parameter_form
+    assert set(form.elements) == {"node", "key", "keep_service"}
