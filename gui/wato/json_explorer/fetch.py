@@ -14,6 +14,11 @@ will actually see (authenticated / self-signed endpoints work in the wizard).
 Input (POST): ``connection`` = the connection FormEdit value (JSON); falls back
 to a bare ``url`` query var. Output: ``{ok, status, json}`` or ``{ok:false, error}``.
 
+The endpoint's RETRY policy is deliberately not applied here: this fetch runs
+with a person waiting on the wizard, where reporting "connection refused" in one
+second beats retrying for half a minute before saying the same thing. Resilience
+is the agent's job; this is a preview.
+
 SECURITY: this performs an HTTP request from the Checkmk server to an
 operator-supplied URL — an SSRF vector, exactly like the agent itself. It is
 gated on Setup access (``wato.use``) so read-only monitoring users can't use it
