@@ -519,16 +519,53 @@ def _prune_cache(directory: Path) -> None:
             continue
 
 
+# Whatever the retry count, the agent never waits longer than this in total. A
+# check that sleeps for minutes is a worse failure than the one it is papering
+# over: Checkmk kills a special agent that overruns.
+_MAX_RETRY_SLEEP = 30.0
+
+
+def _retry_policy(endpoint: dict) -> tuple[int, float]:
+    """``(retries, backoff)`` for this endpoint; ``(0, 0.0)`` when off."""
+    retry = endpoint.get("retry")
+    if not isinstance(retry, dict):
+        return 0, 0.0
+    attempts = retry.get("attempts")
+    if isinstance(attempts, bool) or not isinstance(attempts, int) or attempts < 1:
+        return 0, 0.0
+    backoff = retry.get("backoff")
+    if isinstance(backoff, bool) or not isinstance(backoff, (int, float)) or backoff < 0:
+        backoff = 0.0
+    return attempts, float(backoff)
+
+
+def _retryable_status(status: int) -> bool:
+    """Whether repeating a request that answered ``status`` could help.
+
+    A 5xx is the server saying it failed, and a 429 is it saying "later" - both
+    can differ on the next attempt. Everything else (a 4xx, a blocked redirect)
+    is a decision about the request itself and would answer exactly the same,
+    so retrying it only burns the budget.
+    """
+    return status == 429 or 500 <= status < 600
+
+
 def _fetch(
     endpoint: dict, secret: str | None, debug: bool = False
 ) -> tuple[object | None, str | None, dict]:
-    """Fetch one endpoint: ``(document, error, meta)``.
+    """Fetch one endpoint, retrying a transient failure: ``(document, error, meta)``.
 
     ``meta`` describes the request itself - HTTP status, wall-clock duration,
     body size and the final URL after any redirects - and is filled in on every
     exit path (a failed request still took time). It feeds the endpoint's own
     service, so 'the API answered, but slowly' is visible without configuring a
     field for it.
+
+    With a retry policy configured, a failure a repeat could fix is tried again
+    after a doubling wait. ``meta["attempts"]`` counts what it took, so an API
+    that only answers on the second attempt is reported rather than quietly
+    smoothed over - and the response time stays the successful attempt's, not
+    the sum, so the metric keeps meaning what it says.
     """
     meta: dict[str, object] = {
         "status": None,
@@ -538,9 +575,11 @@ def _fetch(
         "cert_expiry": None,
         "from_cache": False,
         "cache_age": None,
+        "attempts": 1,
     }
     # A cached body younger than the endpoint's TTL is served without touching the
     # network at all - that is the whole point, for an API with a request quota.
+    # No request is made, so there is nothing to retry either.
     if (ttl := _cache_ttl(endpoint)) is not None and (hit := _cache_read(endpoint, ttl)):
         cached_body, cached_meta = hit
         _debug(debug, f"  served from cache ({cached_meta['cache_age']:.0f}s old)")
@@ -549,6 +588,35 @@ def _fetch(
         except ValueError as exc:
             # Cached something unparseable: fall through and fetch fresh.
             _debug(debug, f"  cached body is not valid JSON ({exc}), fetching")
+
+    retries, backoff = _retry_policy(endpoint)
+    slept = 0.0
+    for attempt in range(retries + 1):
+        meta["attempts"] = attempt + 1
+        document, error, retryable = _attempt(endpoint, secret, meta, ttl, debug)
+        if error is None or not retryable or attempt == retries:
+            return document, error, meta
+        delay = min(backoff * (2**attempt), _MAX_RETRY_SLEEP - slept)
+        if delay <= 0 and slept >= _MAX_RETRY_SLEEP:
+            _debug(debug, "  retry budget exhausted, giving up")
+            return document, error, meta
+        _debug(debug, f"  {error} - retrying in {max(delay, 0.0):.1f}s")
+        if delay > 0:
+            time.sleep(delay)
+            slept += delay
+    # Unreachable: the loop always returns (range is never empty).
+    return None, "Request failed", meta
+
+
+def _attempt(
+    endpoint: dict, secret: str | None, meta: dict, ttl: float | None, debug: bool
+) -> tuple[object | None, str | None, bool]:
+    """One request: ``(document, error, retryable)``, updating ``meta`` in place.
+
+    ``retryable`` says whether repeating this exact request could plausibly
+    succeed. A parse failure, an oversized body and a 4xx are deterministic, so
+    they are reported as final however many retries are configured.
+    """
     started = time.monotonic()
 
     def _timed() -> dict:
@@ -603,27 +671,38 @@ def _fetch(
             if not allow_redirects and 300 <= status < 400:
                 location = scrub(response.headers.get("Location", "?"))
                 _debug(debug, f"  HTTP {response.status_code} redirect to {location} (blocked)")
+                _timed()
+                # A blocked redirect is a property of the request, not a hiccup.
                 return (
                     None,
                     f"Unexpected {status} redirect to {location} (redirects disabled)",
-                    _timed(),
+                    False,
                 )
             # 2xx is always fine; extra codes can be opted in per endpoint so an
             # API that signals via the status code (e.g. 503 + a JSON health
             # body) can still be read. Anything else fails, carrying the code.
             if not (200 <= status < 300 or status in accepted):
                 reason = getattr(response, "reason", "") or ""
-                return None, f"HTTP {status}{f' {reason}' if reason else ''}", _timed()
+                _timed()
+                return (
+                    None,
+                    f"HTTP {status}{f' {reason}' if reason else ''}",
+                    _retryable_status(status),
+                )
             raw = _read_capped(response, _MAX_RESPONSE_BYTES)
     except _ResponseTooLarge as exc:
+        # The API really does answer with that much; asking again changes nothing.
         _debug(debug, f"  {exc}")
-        return None, str(exc), _timed()
+        _timed()
+        return None, str(exc), False
     except requests.exceptions.RequestException as exc:
-        # The message of a connection/timeout error quotes the URL it was trying
-        # to reach - query string and all.
+        # Connection reset, DNS hiccup, TLS handshake, timeout: the transient
+        # class this whole feature exists for. The message quotes the URL it was
+        # trying to reach - query string and all - so it is scrubbed first.
         failure = scrub(str(exc))
         _debug(debug, f"  request failed: {failure}")
-        return None, f"Request failed: {failure}", _timed()
+        _timed()
+        return None, f"Request failed: {failure}", True
 
     meta["size"] = len(raw)
     if debug:
@@ -635,13 +714,16 @@ def _fetch(
     try:
         document = json.loads(raw)
     except ValueError as exc:
-        return None, f"Response is not valid JSON: {exc}", _timed()
+        # The endpoint answered, just not with JSON - a configuration problem,
+        # not a blip.
+        _timed()
+        return None, f"Response is not valid JSON: {exc}", False
     timed = _timed()
     if ttl is not None:
         # Only a response we could actually parse is worth caching; an error or a
         # non-JSON body would just be replayed for the whole TTL.
         _cache_write(endpoint, raw, timed)
-    return document, None, timed
+    return document, None, False
 
 
 _WILDCARD = "[*]"
@@ -1283,6 +1365,9 @@ def _endpoint_record(
         "cert_expiry": meta.get("cert_expiry"),
         "from_cache": bool(meta.get("from_cache")),
         "cache_age": meta.get("cache_age"),
+        # How many attempts the request took (1 = no retry was needed). Reported
+        # so a retry policy cannot silently hide an API that is degrading.
+        "attempts": meta.get("attempts", 1),
     }
 
 

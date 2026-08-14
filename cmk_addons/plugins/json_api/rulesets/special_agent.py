@@ -894,6 +894,55 @@ def _endpoint() -> Dictionary:
                     custom_validate=(validators.NumberInRange(min_value=1.0),),
                 ),
             ),
+            "retry": DictElement(
+                required=False,
+                parameter_form=Dictionary(
+                    title=Title("Retry a failed request"),
+                    help_text=Help(
+                        "Repeat this endpoint's request when it fails in a way a "
+                        "repeat could fix - a connection error, a timeout, or an "
+                        "HTTP 429 / 5xx - so a load balancer dropping connections "
+                        "for a second during a rolling restart does not become a "
+                        "CRIT and a notification. A 4xx, a body that is not JSON "
+                        "and an oversized response are never retried: repeating "
+                        "them would only burn time. Nothing is hidden - the "
+                        "endpoint's own service reports that a retry was needed, "
+                        "and can be told to go WARN when one is. Every attempt "
+                        "costs wall-clock time inside the check: the worst case is "
+                        "(1 + retries) times the request timeout, plus the waiting "
+                        "time between attempts. Off by default."
+                    ),
+                    elements={
+                        "attempts": DictElement(
+                            required=True,
+                            parameter_form=Integer(
+                                title=Title("Number of retries"),
+                                help_text=Help("Extra attempts after the first one failed."),
+                                prefill=DefaultValue(2),
+                                custom_validate=(
+                                    validators.NumberInRange(min_value=1, max_value=5),
+                                ),
+                            ),
+                        ),
+                        "backoff": DictElement(
+                            required=True,
+                            parameter_form=Float(
+                                title=Title("Wait before retrying (seconds)"),
+                                help_text=Help(
+                                    "Waiting time before the first retry, doubled "
+                                    "for each further one. The total waiting time "
+                                    "is capped at 30 seconds however many retries "
+                                    "are configured."
+                                ),
+                                prefill=DefaultValue(0.5),
+                                custom_validate=(
+                                    validators.NumberInRange(min_value=0.0, max_value=30.0),
+                                ),
+                            ),
+                        ),
+                    },
+                ),
+            ),
             "accept_status": DictElement(
                 required=False,
                 parameter_form=List(

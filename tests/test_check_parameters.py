@@ -32,6 +32,7 @@ def test_endpoint_parameter_form_has_expected_keys(check_ruleset):
     assert set(form.elements) == {
         "response_time_levels",
         "cert_expiry_levels",
+        "state_retried",
         "state_unreachable",
     }
 

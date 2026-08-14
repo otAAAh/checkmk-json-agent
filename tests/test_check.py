@@ -1295,3 +1295,59 @@ def test_summary_template_is_truncated(check):
 def test_no_summary_template_leaves_the_summary_alone(check):
     section = _section(check, [_entry("DB", value="UP")])
     assert list(check.check_json_api("DB", {}, section))[0].summary == "Value: UP"
+
+
+def test_endpoint_reports_that_a_retry_was_needed(check):
+    # A retry policy must not turn a degrading API into a permanently green
+    # service: the request succeeded, but not on the first try, and that shows.
+    section = _section(check, [], endpoints=[_endpoint_record(name="api", attempts=3)])
+    results = list(check.check_json_api_endpoint("api", {}, section))
+    notes = [r.summary for r in results if isinstance(r, Result) and r.summary]
+    assert "succeeded after 2 retries" in notes
+    assert all(r.state == State.OK for r in results if isinstance(r, Result))
+
+
+def test_endpoint_retry_note_is_singular_for_one_retry(check):
+    section = _section(check, [], endpoints=[_endpoint_record(name="api", attempts=2)])
+    notes = [
+        r.summary
+        for r in check.check_json_api_endpoint("api", {}, section)
+        if isinstance(r, Result) and r.summary
+    ]
+    assert "succeeded after 1 retry" in notes
+
+
+def test_endpoint_retry_state_is_configurable(check):
+    section = _section(check, [], endpoints=[_endpoint_record(name="api", attempts=2)])
+    results = list(check.check_json_api_endpoint("api", {"state_retried": 1}, section))
+    retried = [r for r in results if isinstance(r, Result) and "retr" in (r.summary or "")]
+    assert retried and retried[0].state == State.WARN
+
+
+def test_endpoint_without_retries_says_nothing_about_them(check):
+    section = _section(check, [], endpoints=[_endpoint_record(name="api", attempts=1)])
+    summaries = [
+        r.summary
+        for r in check.check_json_api_endpoint("api", {}, section)
+        if isinstance(r, Result) and r.summary
+    ]
+    assert not any("retr" in s for s in summaries)
+
+
+def test_a_failed_endpoint_reports_how_many_attempts_it_took(check):
+    section = _section(
+        check,
+        [],
+        endpoints=[
+            _endpoint_record(name="api", ok=False, error="Request failed: reset", attempts=3)
+        ],
+    )
+    result = list(check.check_json_api_endpoint("api", {}, section))[0]
+    assert result.state == State.CRIT
+    assert "after 3 attempts" in result.summary
+
+
+def test_an_old_section_without_attempts_defaults_to_one(check):
+    # A section written by an agent from before retries existed.
+    section = _section(check, [], endpoints=[_endpoint_record(name="api")])
+    assert section.endpoints["api"].attempts == 1

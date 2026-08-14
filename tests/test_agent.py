@@ -1134,6 +1134,7 @@ def test_process_endpoint_returns_a_record(agent, monkeypatch):
         "cert_expiry": None,
         "from_cache": False,
         "cache_age": None,
+        "attempts": 1,
     }
 
 
@@ -1740,3 +1741,151 @@ def test_extract_resolves_the_summary_from_the_root_without_a_wildcard(agent):
     spec = {"path": "status", "service": "Health", "summary": "{message}"}
     (result,) = agent._extract(document, [spec], "u")
     assert result["summary_fields"] == {"message": "replica lag"}
+
+
+def test_retry_policy_reads_the_endpoint(agent):
+    assert agent._retry_policy({}) == (0, 0.0)
+    assert agent._retry_policy({"retry": {"attempts": 3, "backoff": 1.5}}) == (3, 1.5)
+    # Junk is off, not a crash.
+    assert agent._retry_policy({"retry": {"attempts": 0}}) == (0, 0.0)
+    assert agent._retry_policy({"retry": {"attempts": True}}) == (0, 0.0)
+    assert agent._retry_policy({"retry": "yes"}) == (0, 0.0)
+    # A missing/negative backoff means "retry immediately", not "do not retry".
+    assert agent._retry_policy({"retry": {"attempts": 2}}) == (2, 0.0)
+    assert agent._retry_policy({"retry": {"attempts": 2, "backoff": -1}}) == (2, 0.0)
+
+
+def test_retryable_status_only_for_429_and_5xx(agent):
+    assert agent._retryable_status(429) is True
+    assert agent._retryable_status(500) is True
+    assert agent._retryable_status(503) is True
+    # A 4xx is a decision about the request; repeating it changes nothing.
+    assert agent._retryable_status(401) is False
+    assert agent._retryable_status(404) is False
+    assert agent._retryable_status(200) is False
+
+
+def _flaky_request(agent, monkeypatch, outcomes):
+    """Patch Session.request to walk `outcomes`, counting the calls.
+
+    Each outcome is either an exception to raise or a response to return.
+    """
+    calls = {"n": 0}
+
+    def fake_request(_self, _method, _url, **_kwargs):
+        outcome = outcomes[min(calls["n"], len(outcomes) - 1)]
+        calls["n"] += 1
+        if isinstance(outcome, Exception):
+            raise outcome
+        return outcome
+
+    monkeypatch.setattr(agent.requests.Session, "request", fake_request)
+    monkeypatch.setattr(agent.time, "sleep", lambda _seconds: None)
+    return calls
+
+
+def test_fetch_retries_a_connection_error_then_succeeds(agent, monkeypatch):
+    calls = _flaky_request(
+        agent,
+        monkeypatch,
+        [agent.requests.exceptions.ConnectionError("reset"), _FakeResponse(body=b'{"ok": 1}')],
+    )
+    doc, error, meta = agent._fetch(
+        {"url": "http://x", "retry": {"attempts": 2, "backoff": 0}}, None
+    )
+    assert error is None and doc == {"ok": 1}
+    assert calls["n"] == 2
+    # The service must be able to say a retry was needed.
+    assert meta["attempts"] == 2
+
+
+def test_fetch_gives_up_after_the_configured_retries(agent, monkeypatch):
+    calls = _flaky_request(agent, monkeypatch, [agent.requests.exceptions.ConnectionError("reset")])
+    _doc, error, meta = agent._fetch(
+        {"url": "http://x", "retry": {"attempts": 2, "backoff": 0}}, None
+    )
+    assert "Request failed" in error
+    assert calls["n"] == 3  # the first attempt plus two retries
+    assert meta["attempts"] == 3
+
+
+def test_fetch_without_a_retry_policy_attempts_once(agent, monkeypatch):
+    calls = _flaky_request(agent, monkeypatch, [agent.requests.exceptions.ConnectionError("reset")])
+    _doc, error, meta = agent._fetch({"url": "http://x"}, None)
+    assert error is not None
+    assert calls["n"] == 1
+    assert meta["attempts"] == 1
+
+
+def test_fetch_retries_a_503_but_not_a_404(agent, monkeypatch):
+    calls = _flaky_request(
+        agent,
+        monkeypatch,
+        [_FakeResponse(status_code=503), _FakeResponse(body=b'{"ok": 1}')],
+    )
+    doc, error, _meta = agent._fetch(
+        {"url": "http://x", "retry": {"attempts": 2, "backoff": 0}}, None
+    )
+    assert error is None and doc == {"ok": 1}
+    assert calls["n"] == 2
+
+    calls = _flaky_request(agent, monkeypatch, [_FakeResponse(status_code=404)])
+    _doc, error, _meta = agent._fetch(
+        {"url": "http://x", "retry": {"attempts": 2, "backoff": 0}}, None
+    )
+    assert "HTTP 404" in error
+    assert calls["n"] == 1  # a 404 answers the same however often it is asked
+
+
+def test_fetch_does_not_retry_a_non_json_body(agent, monkeypatch):
+    # The endpoint answered; it just isn't JSON. That is a configuration problem,
+    # not a blip, so retrying only burns the check's time budget.
+    calls = _flaky_request(agent, monkeypatch, [_FakeResponse(body=b"<html>")])
+    _doc, error, _meta = agent._fetch(
+        {"url": "http://x", "retry": {"attempts": 3, "backoff": 0}}, None
+    )
+    assert "not valid JSON" in error
+    assert calls["n"] == 1
+
+
+def test_fetch_does_not_retry_an_accepted_status(agent, monkeypatch):
+    # 503 opted in via accept_status is a SUCCESS - reading the health body is
+    # the whole point - so it must not be retried away.
+    calls = _flaky_request(agent, monkeypatch, [_FakeResponse(status_code=503, body=b'{"a": 1}')])
+    doc, error, meta = agent._fetch(
+        {
+            "url": "http://x",
+            "accept_status": [503],
+            "retry": {"attempts": 3, "backoff": 0},
+        },
+        None,
+    )
+    assert error is None and doc == {"a": 1}
+    assert calls["n"] == 1 and meta["attempts"] == 1
+
+
+def test_fetch_backoff_doubles_and_is_capped(agent, monkeypatch):
+    slept = []
+    monkeypatch.setattr(agent.time, "sleep", slept.append)
+
+    def always_fail(_self, _method, _url, **_kwargs):
+        raise agent.requests.exceptions.ConnectionError("reset")
+
+    monkeypatch.setattr(agent.requests.Session, "request", always_fail)
+    agent._fetch({"url": "http://x", "retry": {"attempts": 5, "backoff": 4}}, None)
+    # 4, 8, 16 then capped: a check that sleeps for minutes is a worse failure
+    # than the one it is papering over.
+    assert sum(slept) <= agent._MAX_RETRY_SLEEP
+    assert slept[:3] == [4.0, 8.0, 16.0]
+
+
+def test_a_cache_hit_is_never_retried(agent, monkeypatch, tmp_path):
+    # No request is made at all, so there is nothing to retry.
+    monkeypatch.setattr(agent, "_cache_dir", lambda: tmp_path)
+    endpoint = {"url": "http://x", "cache_ttl": 300, "retry": {"attempts": 3, "backoff": 0}}
+    agent._cache_write(endpoint, b'{"ok": 1}', {"status": 200, "elapsed": 0.1})
+    calls = _flaky_request(agent, monkeypatch, [agent.requests.exceptions.ConnectionError("x")])
+    doc, error, meta = agent._fetch(endpoint, None)
+    assert error is None and doc == {"ok": 1}
+    assert calls["n"] == 0
+    assert meta["from_cache"] is True

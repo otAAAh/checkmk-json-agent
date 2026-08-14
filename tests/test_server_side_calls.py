@@ -754,3 +754,30 @@ def test_api_key_query_parameter_name_travels_in_the_blob_and_the_key_does_not(s
     assert endpoint["url"] == "http://x"
     assert "--secret_0-id" in args
     assert isinstance(args[args.index("--secret_0-id") + 1], Secret)
+
+
+def test_retry_policy_passed_through(ssc):
+    args = _command_args(
+        ssc,
+        {
+            "endpoints": [
+                {
+                    "url": "http://x",
+                    "verify_cert": True,
+                    "retry": {"attempts": 3, "backoff": 1.0},
+                    "extractions": [],
+                }
+            ]
+        },
+    )
+    (endpoint,) = _endpoints(ssc, args)
+    assert endpoint["retry"] == {"attempts": 3, "backoff": 1.0}
+
+
+def test_no_retry_policy_means_a_single_attempt(ssc):
+    args = _command_args(
+        ssc,
+        {"endpoints": [{"url": "http://x", "verify_cert": True, "extractions": []}]},
+    )
+    (endpoint,) = _endpoints(ssc, args)
+    assert endpoint["retry"] is None

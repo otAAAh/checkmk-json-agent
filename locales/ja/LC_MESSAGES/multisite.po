@@ -6,7 +6,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: checkmk-json-agent\n"
 "Report-Msgid-Bugs-To: https://github.com/otAAAh/checkmk-json-agent/issues\n"
-"POT-Creation-Date: 2026-08-14 11:05+0200\n"
+"POT-Creation-Date: 2026-08-14 12:30+0200\n"
 "PO-Revision-Date: 2026-07-06 12:00+0000\n"
 "Last-Translator: checkmk-json-agent contributors\n"
 "Language-Team: Japanese\n"
@@ -246,7 +246,7 @@ msgid "Field to monitor"
 msgstr "監視するフィールド"
 
 #: cmk_addons/plugins/json_api/rulesets/special_agent.py:373
-#: cmk_addons/plugins/json_api/rulesets/check_parameters.py:117
+#: cmk_addons/plugins/json_api/rulesets/check_parameters.py:132
 msgid "Service name"
 msgstr "サービス名"
 
@@ -256,7 +256,7 @@ msgstr "このフィールドの Checkmk サービス説明になります。"
 
 #: cmk_addons/plugins/json_api/rulesets/special_agent.py:381
 #: cmk_addons/plugins/json_api/rulesets/special_agent.py:460
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:962
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:1011
 msgid "JSON path"
 msgstr "JSON パス"
 
@@ -365,7 +365,7 @@ msgstr ""
 "のないパスの場合は応答のルート。"
 
 #: cmk_addons/plugins/json_api/rulesets/special_agent.py:472
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:974
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:1023
 msgid "Label key (optional)"
 msgstr "ラベルキー (省略可能)"
 
@@ -641,7 +641,7 @@ msgstr ""
 "れ、長い場合は切り詰められます。"
 
 #: cmk_addons/plugins/json_api/rulesets/special_agent.py:722
-#: cmk_addons/plugins/json_api/rulesets/check_parameters.py:125
+#: cmk_addons/plugins/json_api/rulesets/check_parameters.py:140
 msgid "Endpoint"
 msgstr "エンドポイント"
 
@@ -815,10 +815,56 @@ msgstr ""
 "ん。常に新しく取得するには未設定にしてください。"
 
 #: cmk_addons/plugins/json_api/rulesets/special_agent.py:900
+msgid "Retry a failed request"
+msgstr "失敗したリクエストを再試行する"
+
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:902
+msgid ""
+"Repeat this endpoint's request when it fails in a way a repeat could fix - a "
+"connection error, a timeout, or an HTTP 429 / 5xx - so a load balancer "
+"dropping connections for a second during a rolling restart does not become a "
+"CRIT and a notification. A 4xx, a body that is not JSON and an oversized "
+"response are never retried: repeating them would only burn time. Nothing is "
+"hidden - the endpoint's own service reports that a retry was needed, and can "
+"be told to go WARN when one is. Every attempt costs wall-clock time inside "
+"the check: the worst case is (1 + retries) times the request timeout, plus "
+"the waiting time between attempts. Off by default."
+msgstr ""
+"再試行で解決できる種類の失敗 (接続エラー、タイムアウト、HTTP 429 / 5xx) が起"
+"きたときに、このエンドポイントへのリクエストを繰り返します。ローリング再起動"
+"中にロードバランサーが 1 秒ほど接続を切っただけで CRIT と通知になる、という事"
+"態を防ぎます。4xx、JSON でないボディ、サイズ超過のレスポンスは決して再試行し"
+"ません。繰り返しても時間を浪費するだけだからです。何も隠しません。エンドポイ"
+"ント自身のサービスが再試行を要したことを報告し、その場合に WARN にすることも"
+"できます。試行のたびにチェック内の実時間を消費します。最悪の場合、(1 + 再試行"
+"回数) × リクエストタイムアウトに、試行間の待ち時間が加わります。既定ではオフ"
+"です。"
+
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:919
+msgid "Number of retries"
+msgstr "再試行の回数"
+
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:920
+msgid "Extra attempts after the first one failed."
+msgstr "最初の試行が失敗した後の追加の試行回数です。"
+
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:930
+msgid "Wait before retrying (seconds)"
+msgstr "再試行までの待ち時間 (秒)"
+
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:932
+msgid ""
+"Waiting time before the first retry, doubled for each further one. The total "
+"waiting time is capped at 30 seconds however many retries are configured."
+msgstr ""
+"最初の再試行までの待ち時間で、以降は 1 回ごとに 2 倍になります。設定した再試"
+"行回数にかかわらず、待ち時間の合計は 30 秒が上限です。"
+
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:949
 msgid "Additional accepted HTTP status codes"
 msgstr "追加で許可する HTTP ステータスコード"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:902
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:951
 msgid ""
 "By default only 2xx responses are read; any other status makes the "
 "endpoint's services UNKNOWN. Add extra status codes to accept here - for "
@@ -832,15 +878,15 @@ msgstr ""
 "503 を指定します。許可された応答の本文は通常どおり解析・抽出されます。2xx は"
 "常に許可されます。"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:910
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:959
 msgid "Status code"
 msgstr "ステータスコード"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:918
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:967
 msgid "HTTP proxy"
 msgstr "HTTP プロキシ"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:920
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:969
 msgid ""
 "Route this endpoint's request through an HTTP proxy - useful when the "
 "Checkmk server reaches the API only via a corporate egress proxy. Choose the "
@@ -854,11 +900,11 @@ msgstr ""
 "されたプロキシを回避する「プロキシなし」から選択します。この設定がない場合"
 "は、環境のプロキシ変数が使用されます。"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:934
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:983
 msgid "Fields to monitor"
 msgstr "監視するフィールド"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:936
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:985
 msgid ""
 "Each entry becomes one Checkmk service, built from the value found at the "
 "given JSON path."
@@ -866,11 +912,11 @@ msgstr ""
 "各エントリは、指定した JSON パスで見つかった値から構築される 1 つの Checkmk "
 "サービスになります。"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:945
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:994
 msgid "Host labels"
 msgstr "ホストラベル"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:947
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:996
 msgid ""
 "Attach Checkmk host labels to the monitored host, built from fields in this "
 "endpoint's response. Each key is prefixed with 'json_api/' and the value is "
@@ -889,7 +935,7 @@ msgstr ""
 "に設定されるため、安定していてカーディナリティの低いフィールドを選んでくださ"
 "い。"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:964
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:1013
 msgid ""
 "From the response root, e.g. 'version', 'cluster.region', or a '[*]' "
 "wildcard like 'components[*]' for one label per element."
@@ -897,7 +943,7 @@ msgstr ""
 "応答のルートから。例: 'version'、'cluster.region'、または要素ごとに 1 つのラ"
 "ベルを付ける 'components[*]' のような '[*]' ワイルドカード。"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:976
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:1025
 msgid ""
 "Defaults to the path's last segment. For a '[*]' path the element id is "
 "appended ('<key>/<element>'). The 'json_api/' prefix is added automatically."
@@ -905,11 +951,11 @@ msgstr ""
 "既定ではパスの最後のセグメント。'[*]' パスの場合は要素 ID が付加されます "
 "('<key>/<element>')。接頭辞 'json_api/' は自動的に付加されます。"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:986
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:1035
 msgid "Value field (for '[*]' wildcards)"
 msgstr "値フィールド ('[*]' ワイルドカード用)"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:988
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:1037
 msgid ""
 "For a '[*]' path: a path within each element for the label value (e.g. "
 "'status'). Defaults to 'true' (a set-membership tag). Ignored without a "
@@ -918,11 +964,11 @@ msgstr ""
 "'[*]' パスの場合: 各要素内のラベル値へのパス (例: 'status')。既定は "
 "'true' (所属を示すタグ) です。ワイルドカードがない場合は無視されます。"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:1021
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:1070
 msgid "Endpoints"
 msgstr "エンドポイント"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:1023
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:1072
 msgid ""
 "One or more HTTP/JSON endpoints. Each is fetched with its own connection "
 "settings and extractions; all results are merged into one section. An "
@@ -932,8 +978,8 @@ msgstr ""
 "定で取得され、すべての結果は 1 つのセクションにマージされます。到達できないエ"
 "ンドポイントは、それ自身のサービスにのみ影響します。"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:1038
-#: cmk_addons/plugins/json_api/rulesets/check_parameters.py:114
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:1087
+#: cmk_addons/plugins/json_api/rulesets/check_parameters.py:129
 msgid "Generic JSON API"
 msgstr "汎用 JSON API"
 
@@ -971,10 +1017,28 @@ msgstr ""
 "設定しない場合、残りの有効期間はメトリックとしてのみ記録されます。"
 
 #: cmk_addons/plugins/json_api/rulesets/check_parameters.py:99
+msgid "State when the request needed a retry"
+msgstr "リクエストに再試行が必要だったときのステータス"
+
+#: cmk_addons/plugins/json_api/rulesets/check_parameters.py:101
+msgid ""
+"Applies when the endpoint's retry policy absorbed a failed attempt: the "
+"request did succeed, but not on the first try. OK by default - a retry doing "
+"its job is not itself a problem. Raise it for an endpoint whose flakiness is "
+"worth knowing about, so retries never quietly turn a degrading API into a "
+"permanently green service."
+msgstr ""
+"エンドポイントの再試行設定が失敗した試行を吸収したときに適用されます。リクエ"
+"ストは成功しましたが、1 回目ではありませんでした。既定は OK です。再試行が役"
+"目を果たしているだけなら、それ自体は問題ではありません。不安定さを把握したい"
+"エンドポイントでは引き上げてください。再試行によって、劣化しつつある API が常"
+"時グリーンのサービスに見えてしまうことを防げます。"
+
+#: cmk_addons/plugins/json_api/rulesets/check_parameters.py:114
 msgid "State when the endpoint cannot be read"
 msgstr "エンドポイントを読み取れない場合の状態"
 
-#: cmk_addons/plugins/json_api/rulesets/check_parameters.py:101
+#: cmk_addons/plugins/json_api/rulesets/check_parameters.py:116
 msgid ""
 "Applies when the request fails outright: connection refused, a TLS error, a "
 "timeout, an HTTP status that is not accepted, or a response that is not JSON."
@@ -982,7 +1046,7 @@ msgstr ""
 "リクエストがまったく成功しない場合に適用されます: 接続拒否、TLS エラー、 タイ"
 "ムアウト、許可されていない HTTP ステータス、または JSON ではない応答。"
 
-#: cmk_addons/plugins/json_api/rulesets/check_parameters.py:122
+#: cmk_addons/plugins/json_api/rulesets/check_parameters.py:137
 msgid "Generic JSON API endpoint"
 msgstr "汎用 JSON API エンドポイント"
 

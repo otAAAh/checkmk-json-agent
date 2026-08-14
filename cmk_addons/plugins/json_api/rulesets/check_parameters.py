@@ -93,6 +93,21 @@ def _endpoint_parameter_form() -> Dictionary:
                     prefill_fixed_levels=InputHint((30.0, 7.0)),
                 ),
             ),
+            "state_retried": DictElement(
+                required=False,
+                parameter_form=ServiceState(
+                    title=Title("State when the request needed a retry"),
+                    help_text=Help(
+                        "Applies when the endpoint's retry policy absorbed a failed "
+                        "attempt: the request did succeed, but not on the first try. "
+                        "OK by default - a retry doing its job is not itself a "
+                        "problem. Raise it for an endpoint whose flakiness is worth "
+                        "knowing about, so retries never quietly turn a degrading "
+                        "API into a permanently green service."
+                    ),
+                    prefill=DefaultValue(ServiceState.OK),
+                ),
+            ),
             "state_unreachable": DictElement(
                 required=False,
                 parameter_form=ServiceState(

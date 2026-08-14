@@ -203,6 +203,10 @@ class EndpointStatus:
     # how old that cached body was. A cached serve has no response time.
     from_cache: bool = False
     cache_age: float | None = None
+    # How many attempts the request took. 1 means it worked first time; more
+    # means a retry policy absorbed a failure, which the service reports rather
+    # than hides.
+    attempts: int = 1
 
 
 @dataclass(frozen=True)
@@ -376,6 +380,7 @@ def _endpoint_statuses(raw: object) -> dict[str, EndpointStatus]:
             size=_optional_int(record.get("size")),
             final_url=_optional_str(record.get("final_url")),
             cert_expiry=_optional_number(record.get("cert_expiry")),
+            attempts=_optional_int(record.get("attempts")) or 1,
             from_cache=bool(record.get("from_cache")),
             cache_age=_optional_number(record.get("cache_age")),
         )
@@ -941,15 +946,24 @@ def check_json_api_endpoint(
     if endpoint.final_url and endpoint.final_url != endpoint.url:
         details.append(f"Final URL: {endpoint.final_url}")
 
+    # Every attempt after the first one absorbed a failure. Reporting it is what
+    # keeps a retry policy from quietly turning a degrading API into a green
+    # service: the request succeeded, but not on the first try.
+    retried = max(endpoint.attempts - 1, 0)
+    retry_note = f"succeeded after {retried} retr{'y' if retried == 1 else 'ies'}"
+
     if not endpoint.ok:
         # The request itself failed (unreachable, TLS, timeout, unexpected status,
         # not JSON). CRIT by default; a rule can soften it to WARN for an endpoint
         # that is allowed to be down.
         state = State(_coerce_state(params.get("state_unreachable"), 2))
+        failure = endpoint.error or "Request failed"
+        if retried:
+            failure = f"{failure} (after {endpoint.attempts} attempts)"
         yield Result(
             state=state,
-            summary=endpoint.error or "Request failed",
-            details="\n".join([endpoint.error or "Request failed", *details]),
+            summary=failure,
+            details="\n".join([failure, *details]),
         )
         return
 
@@ -960,6 +974,14 @@ def check_json_api_endpoint(
         age = f" ({_render_seconds(endpoint.cache_age)} old)" if endpoint.cache_age else ""
         status = f"{status}, from cache{age}"
     yield Result(state=State.OK, summary=status, details="\n".join([status, *details]))
+
+    if retried:
+        # Default OK: a retry doing its job is not itself a problem. A rule can
+        # raise it for an endpoint whose flakiness IS worth knowing about.
+        yield Result(
+            state=State(_coerce_state(params.get("state_retried"), 0)),
+            summary=retry_note,
+        )
 
     if endpoint.elapsed is not None:
         yield from check_levels(

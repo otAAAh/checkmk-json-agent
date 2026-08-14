@@ -164,6 +164,7 @@ function makeEndpoint(withSample) {
     // 'field' names the header / query parameter for the API-key modes.
     auth: { type: "none", username: "", pwid: "", field: "" },  // none | login | token | header | query
     verify_cert: true, follow_redirects: true, timeout: "", cache_ttl: "", accept_status: "",
+    retries: "", retry_backoff: "0.5",
     proxy_mode: "default", proxy_url: "",   // default (env) | url | no_proxy
     ca_bundle: "", client_cert: "", client_key: "",
     json: withSample ? JSON.stringify(SAMPLE, null, 2) : "",
@@ -335,6 +336,8 @@ function renderConn() {
        <label>Timeout (s)</label><input type="text" id="c-timeout" value="${escAttr(e.timeout)}" placeholder="30">
        <label>Cache TTL (s)</label><input type="text" id="c-cachettl" value="${escAttr(e.cache_ttl)}" placeholder="(optional) reuse the last response for N seconds">
        <label>Accept status codes</label><input type="text" id="c-accept" value="${escAttr(e.accept_status)}" placeholder="e.g. 503, 202">
+       <label>Retries</label><input type="text" id="c-retries" value="${escAttr(e.retries)}" placeholder="(optional) retry a connection error / 429 / 5xx, e.g. 2">
+       <label>Retry backoff (s)</label><input type="text" id="c-retrybackoff" value="${escAttr(e.retry_backoff)}" placeholder="wait before the first retry, doubled each time">
        <label>HTTP proxy</label>
        <select id="c-proxymode">
          <option value="default" ${e.proxy_mode === "default" ? "selected" : ""}>From environment</option>
@@ -361,6 +364,8 @@ function renderConn() {
   bind("c-timeout", () => { e.timeout = $("c-timeout").value; renderOutputs(); });
   bind("c-cachettl", () => { e.cache_ttl = $("c-cachettl").value; renderOutputs(); });
   bind("c-accept", () => { e.accept_status = $("c-accept").value; renderOutputs(); });
+  bind("c-retries", () => { e.retries = $("c-retries").value; renderOutputs(); });
+  bind("c-retrybackoff", () => { e.retry_backoff = $("c-retrybackoff").value; renderOutputs(); });
   bind("c-proxyurl", () => { e.proxy_url = $("c-proxyurl").value; renderOutputs(); });
   bind("c-cabundle", () => { e.ca_bundle = $("c-cabundle").value; renderOutputs(); });
   bind("c-clientcert", () => { e.client_cert = $("c-clientcert").value; renderOutputs(); });
@@ -684,6 +689,15 @@ const AUTH_KIND = { login: "auth_login", token: "auth_token", header: "auth_head
 
 function anyAuth() { return state.endpoints.some(e => e.auth.type !== "none"); }
 
+// The retry policy, or null when off. A blank/zero retry count means a single
+// attempt, which is the default the ruleset expresses by omitting the key.
+function retryObj(e) {
+  const attempts = parseInt(e.retries, 10);
+  if (Number.isNaN(attempts) || attempts < 1) return null;
+  const backoff = parseFloat(e.retry_backoff);
+  return { attempts, backoff: Number.isNaN(backoff) ? 0.5 : backoff };
+}
+
 // Parse the "accept status codes" text field into a de-duplicated int array,
 // mirroring the ruleset's List(Integer) and the agent's _accepted_statuses.
 function parseStatuses(s) {
@@ -747,6 +761,8 @@ function pyEndpoint(e, indent) {
   if (!Number.isNaN(ttl)) lines.push(`${i}'cache_ttl': ${floatPy(ttl)},`);
   const acc = parseStatuses(e.accept_status);
   if (acc.length) lines.push(`${i}'accept_status': [${acc.join(", ")}],`);
+  const rt = retryObj(e);
+  if (rt) lines.push(`${i}'retry': {'attempts': ${rt.attempts}, 'backoff': ${floatPy(rt.backoff)}},`);
   const px = proxyPy(e);
   if (px) lines.push(`${i}'proxy': ${px},`);
   const exLines = extractionObjs(e).map(o => `${ei}${pyExtraction(o)},`).join("\n");
@@ -776,6 +792,7 @@ function endpointCliObj(e) {
     timeout: Number.isNaN(parseFloat(e.timeout)) ? null : parseFloat(e.timeout),
     cache_ttl: Number.isNaN(parseFloat(e.cache_ttl)) ? null : parseFloat(e.cache_ttl),
     accept_status: parseStatuses(e.accept_status),
+    retry: retryObj(e),
     proxy: proxyCli(e),
     auth: AUTH_KIND[e.auth.type] || null,
     extractions: extractionObjs(e),
