@@ -12,6 +12,36 @@ this list needs none.
 `scripts/gen_changelog.py --version X.Y.Z` appends the matching section to the
 GitHub Release body, so these notes travel with the release people actually read.
 
+## [0.13.0]
+
+### Sending a field to the inventory takes its service away
+
+Purely additive — nothing changes unless you set the new **Write into the HW/SW
+inventory** on a field. But it defaults to creating **no service**, which is the
+point of the feature: a version or a licence tier is a fact, not a state, and it
+should not cost a service slot and a check interval to report something that
+changes twice a year.
+
+**Effect:** turning it on for a field that is *already* a service removes that
+service on the next discovery, and its metric history goes with it. If you want
+both — a value in the tree *and* an alert on it — tick **Also create a service
+for this field** in the same edit.
+
+Inventory also runs on its own, slower schedule, so a newly configured field
+appears in the tree at the next inventory run rather than at the next check.
+
+### Cached endpoints refetch once after upgrading
+
+The response cache now keys entries on the credential as well as the URL, method,
+body, headers and TLS settings. Without that, several rules polling the same
+multi-tenant URL with a different API key each shared one cache entry and served
+each other's data for the whole TTL. Only a hash of the credential is used; the
+credential itself still reaches neither the agent's command line nor the disk.
+
+**Effect:** the identity of every *authenticated* cached endpoint changes, so the
+first check after upgrading fetches fresh instead of serving a cache hit. One
+extra request per endpoint, once. The superseded files are pruned automatically.
+
 ## [0.12.0]
 
 ### The response cache is opt-in, and deliberately fails loudly
