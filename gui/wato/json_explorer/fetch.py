@@ -6,8 +6,9 @@ The JSON field picker needs the endpoint's response to build its tree, but the
 browser can't fetch operator endpoints (CORS, and they're typically only
 reachable from the Checkmk server). So we fetch it here — the same place the
 special agent does — using the SAME connection the wizard configured: method,
-body, request headers, TLS verification and authentication (basic / bearer,
-resolved from the password store). That way the preview matches what the agent
+body, request headers, TLS verification and authentication (basic / bearer / an
+API key in a header or query parameter, all resolved from the password store).
+That way the preview matches what the agent
 will actually see (authenticated / self-signed endpoints work in the wizard).
 
 Input (POST): ``connection`` = the connection FormEdit value (JSON); falls back
@@ -24,6 +25,7 @@ from __future__ import annotations
 
 import json
 from typing import Any
+from urllib.parse import quote, quote_plus
 
 import requests
 from cmk.gui.http import request
@@ -79,6 +81,7 @@ def _perform_request(conn: dict[str, Any]) -> requests.Response:
     headers = {h["name"]: h["value"] for h in conn.get("headers", []) if isinstance(h, dict)}
 
     auth = conn.get("auth")
+    query: dict[str, str] | None = None
     if isinstance(auth, (list, tuple)) and len(auth) == 2:
         kind, params = auth
         params = params if isinstance(params, dict) else {}
@@ -86,6 +89,10 @@ def _perform_request(conn: dict[str, Any]) -> requests.Response:
             session.auth = (params.get("username", ""), _resolve_password(params.get("password")))
         elif kind == "auth_token":
             headers["Authorization"] = "Bearer " + _resolve_password(params.get("token"))
+        elif kind == "auth_header":
+            headers[params.get("header") or "X-API-Key"] = _resolve_password(params.get("key"))
+        elif kind == "auth_query":
+            query = {params.get("parameter") or "api_key": _resolve_password(params.get("key"))}
 
     method = str(conn.get("method", "GET")).upper()
     body = conn.get("body") if method == "POST" else None
@@ -95,12 +102,26 @@ def _perform_request(conn: dict[str, Any]) -> requests.Response:
     return session.request(
         method,
         conn["url"],
+        params=query,
         data=body,
         headers=headers,
         timeout=conn.get("timeout") or _TIMEOUT,
         verify=conn.get("verify_cert", True),
         allow_redirects=conn.get("follow_redirects", True),
     )
+
+
+def _redacted(text: str, conn: dict[str, Any]) -> str:
+    """``text`` with an API key configured as a query parameter masked out."""
+    auth = conn.get("auth")
+    if not (isinstance(auth, (list, tuple)) and len(auth) == 2 and auth[0] == "auth_query"):
+        return text
+    params = auth[1] if isinstance(auth[1], dict) else {}
+    secret = _resolve_password(params.get("key"))
+    for form in (secret, quote(secret, safe=""), quote_plus(secret)):
+        if form:
+            text = text.replace(form, "<redacted>")
+    return text
 
 
 class JsonExplorerFetchPage(AjaxPage):
@@ -115,7 +136,9 @@ class JsonExplorerFetchPage(AjaxPage):
         try:
             resp = _perform_request(conn)
         except requests.RequestException as exc:
-            return {"ok": False, "error": _("Request failed: %s") % exc}
+            # The message of a connection error quotes the URL it tried to
+            # reach - including an API key placed in a query parameter.
+            return {"ok": False, "error": _("Request failed: %s") % _redacted(str(exc), conn)}
 
         try:
             data: Any = resp.json()

@@ -22,8 +22,10 @@ Targets **Checkmk 2.4+** and the current stable plugin APIs
 - **Multiple endpoints per rule**: each with its own method/headers/auth/
   timeout/fields; their results merge into one section, and an unreachable
   endpoint only affects its own services
-- **Auth**: none, HTTP basic (username/password), or bearer token — secrets go
-  through the Checkmk password store, never onto the command line in clear text
+- **Auth**: none, HTTP basic (username/password), bearer token, or an **API key**
+  in a header of the API's choosing (`X-API-Key`, `PRIVATE-TOKEN`, ...) or in a
+  query parameter — every secret goes through the Checkmk password store, never
+  onto the command line, into the configuration or into a log in clear text
 - **Path extraction** with a dotted syntax: `status`, `components.db.status`,
   `items[0].count` (leading `$.` optional); keys containing `.` or `[` can be
   bracket-quoted, e.g. `data['foo.bar'].value`
@@ -126,8 +128,8 @@ Each endpoint has:
 | **URL** | Full endpoint URL incl. scheme, e.g. `https://app.example.com/actuator/health`. Checkmk macros (`$HOSTNAME$`, `$HOSTADDRESS$`, custom host macros, ...) are resolved against the monitored host, so one rule can be shared across many hosts. |
 | **HTTP method** | `GET` or `POST` |
 | **Request body** | Optional body for `POST` (defaults `Content-Type: application/json` unless you set one). Macros are resolved here too. |
-| **Additional request headers** | Name/value pairs; macros are resolved in the values |
-| **Authentication** | None, basic, or bearer token |
+| **Additional request headers** | Name/value pairs; macros are resolved in the values. Stored in clear text — an API key belongs under *Authentication* instead |
+| **Authentication** | None, basic (username/password), bearer token, an API key in a request header (you name the header, e.g. `X-API-Key`), or an API key in a query parameter. All secrets come from the password store; the query-parameter key is appended for the request only and is redacted from every URL the agent reports |
 | **Verify the TLS certificate** | On by default |
 | **Custom CA bundle file** | Optional; path on the Checkmk server to a PEM file with the CA(s) to verify the server against — trust a private CA without disabling verification. Ignored when verification is off |
 | **Client certificate (mutual TLS)** | Optional; paths on the Checkmk server to the client certificate (PEM) and, if separate, the private key. The key must be unencrypted |
@@ -489,7 +491,15 @@ unexpected response shape obvious without reproducing the request elsewhere.
   environments, turn it off per endpoint so a redirect to an internal address fails
   instead of being followed — closing the redirect-based SSRF amplification path.
 - Credentials are stored in the Checkmk **password store** and passed to the agent as
-  a store reference, not in clear text on the command line.
+  a store reference, not in clear text on the command line. That includes an API key:
+  use the *Authentication* choices for it rather than typing it into *Additional
+  request headers* or into the URL, where it would be stored in clear text, appear in
+  the agent's command line and be printed by a `--debug` run.
+- An API key placed in a **query parameter** is appended by the agent for the request
+  only. It is redacted from the endpoint's reported final URL, from request-error
+  messages and from debug output — but it still travels inside the URL, so it can
+  reach proxy and server access logs along the way. Prefer a header where the API
+  offers one.
 - TLS verification is **on by default**; disabling it is insecure and opt-in per rule.
 
 ## Building from source
