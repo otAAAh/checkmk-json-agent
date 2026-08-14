@@ -245,12 +245,16 @@ What the cache deliberately does *not* do:
 - **It never reports a response time it did not measure.** While a cached body is
   served, the `JSON API <name>` service says `from cache (N old)` and records no
   response-time metric — replaying the original measurement would chart a request
-  that never happened.
+  that never happened. For the same reason a cached serve never reports a retry:
+  no request was made, so nothing was retried.
 
 The cache lives in the site's `tmp` (so it is cleared with the site), one
-owner-only file per endpoint identity — URL, method, body, headers and TLS
-settings — and **never** the credential, which does not reach the agent's endpoint
-blob at all. Stale files from edited rules are pruned automatically.
+owner-only file per endpoint identity: URL, method, body, headers, TLS settings
+and a **hash** of the credential. The hash matters when several rules poll the
+same multi-tenant URL with a different API key each — without it they would share
+one entry and serve each other's data for the whole TTL. The credential itself
+reaches neither the agent's endpoint blob nor the disk. Stale files from edited
+rules are pruned automatically.
 
 ### Overriding thresholds per folder / host / service
 
@@ -518,6 +522,10 @@ unexpected response shape obvious without reproducing the request elsewhere.
   use the *Authentication* choices for it rather than typing it into *Additional
   request headers* or into the URL, where it would be stored in clear text, appear in
   the agent's command line and be printed by a `--debug` run.
+- Credentials do not survive a redirect to a **different host**: an API key in a
+  header is stripped there, exactly as Checkmk's HTTP layer already does for
+  `Authorization`. A same-host redirect (`/health` → `/health/`) keeps it, so
+  ordinary endpoints still work.
 - An API key placed in a **query parameter** is appended by the agent for the request
   only. It is redacted from the endpoint's reported final URL, from request-error
   messages and from debug output — but it still travels inside the URL, so it can

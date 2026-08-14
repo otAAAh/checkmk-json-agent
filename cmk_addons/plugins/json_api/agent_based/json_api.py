@@ -359,7 +359,11 @@ def _inventory_target(raw: object) -> InventoryTarget | None:
         return None
     row_key = raw.get("row_key")
     return InventoryTarget(
-        path=tuple(segment for segment in node.split(".") if segment),
+        # Stripped to match the ruleset validator, which strips before checking:
+        # otherwise 'software . applications' passes Setup and then writes to a
+        # node distinct from 'software.applications' - invisible in the views and
+        # awkward to clean up per host.
+        path=tuple(stripped for segment in node.split(".") if (stripped := segment.strip())),
         key=key,
         row_key=row_key if isinstance(row_key, str) and row_key else None,
         keep_service=bool(raw.get("keep_service")),

@@ -1461,3 +1461,13 @@ def test_inventory_keeps_numbers_and_booleans(check):
 def test_a_section_without_inventory_config_writes_nothing(check):
     section = _section(check, [_entry("Health", value="UP")])
     assert list(check.inventory_json_api(section)) == []
+
+
+def test_inventory_node_segments_are_stripped(check):
+    # The ruleset validator strips each segment before checking, so
+    # 'software . applications' passes Setup - it must not then land on a node
+    # distinct from 'software.applications', invisible in the standard views.
+    target = check._inventory_target(
+        {"node": "software . applications . json_api", "key": "version"}
+    )
+    assert target.path == ("software", "applications", "json_api")

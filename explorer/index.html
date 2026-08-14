@@ -709,7 +709,13 @@ function retryObj(e) {
   const attempts = parseInt(e.retries, 10);
   if (Number.isNaN(attempts) || attempts < 1) return null;
   const backoff = parseFloat(e.retry_backoff);
-  return { attempts, backoff: Number.isNaN(backoff) ? 0.5 : backoff };
+  // Clamped to the ruleset's own ranges (1-5 retries, 0-30s backoff). The
+  // Explorer's whole contract is that what it prints imports cleanly, so it must
+  // not emit a value Setup would reject.
+  return {
+    attempts: Math.min(attempts, 5),
+    backoff: Math.min(Math.max(Number.isNaN(backoff) ? 0.5 : backoff, 0), 30),
+  };
 }
 
 // Parse the "accept status codes" text field into a de-duplicated int array,
