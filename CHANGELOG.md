@@ -3,6 +3,28 @@
 All notable changes to this project, one section per released version.
 Generated from the git history by `scripts/gen_changelog.py`.
 
+## [0.13.0] - 2026-08-14
+
+### Features
+
+- Write a field into the HW/SW inventory ([#146](https://github.com/otAAAh/checkmk-json-agent/pull/146)) ([`cae4e0e`](https://github.com/otAAAh/checkmk-json-agent/commit/cae4e0e))
+- Retry a failed request per endpoint, with backoff ([#145](https://github.com/otAAAh/checkmk-json-agent/pull/145)) ([`7e9d0ed`](https://github.com/otAAAh/checkmk-json-agent/commit/7e9d0ed))
+- Extra summary text with '{path}' placeholders (closes #140) ([#144](https://github.com/otAAAh/checkmk-json-agent/pull/144)) ([`43df229`](https://github.com/otAAAh/checkmk-json-agent/commit/43df229))
+- API key authentication from the password store (closes #139) ([#143](https://github.com/otAAAh/checkmk-json-agent/pull/143)) ([`92b1942`](https://github.com/otAAAh/checkmk-json-agent/commit/92b1942))
+
+### Fixes
+
+- Six defects found reviewing the four merged features ([#147](https://github.com/otAAAh/checkmk-json-agent/pull/147)) ([`68d9a3b`](https://github.com/otAAAh/checkmk-json-agent/commit/68d9a3b))
+
+### Other
+
+- Upgrade notes for the inventory target and the cache-key change ([#148](https://github.com/otAAAh/checkmk-json-agent/pull/148)) ([`6a32f4b`](https://github.com/otAAAh/checkmk-json-agent/commit/6a32f4b))
+- CI fix: Dependabot Updates on main ([#138](https://github.com/otAAAh/checkmk-json-agent/pull/138)) ([`d59fa0d`](https://github.com/otAAAh/checkmk-json-agent/commit/d59fa0d))
+- Bump js-yaml from 4.3.0 to 4.3.1 in /frontend ([#136](https://github.com/otAAAh/checkmk-json-agent/pull/136)) ([`7768f83`](https://github.com/otAAAh/checkmk-json-agent/commit/7768f83))
+- Bump the actions group with 3 updates ([#135](https://github.com/otAAAh/checkmk-json-agent/pull/135)) ([`8bc1880`](https://github.com/otAAAh/checkmk-json-agent/commit/8bc1880))
+- Bump fast-uri from 3.1.4 to 3.1.5 in /frontend ([#134](https://github.com/otAAAh/checkmk-json-agent/pull/134)) ([`edba561`](https://github.com/otAAAh/checkmk-json-agent/commit/edba561))
+- Add the 0.12.0 forum announcement and an announce step ([#133](https://github.com/otAAAh/checkmk-json-agent/pull/133)) ([`d055ed4`](https://github.com/otAAAh/checkmk-json-agent/commit/d055ed4))
+
 ## [0.12.0] - 2026-08-03
 
 ### Features
