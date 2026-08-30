@@ -129,6 +129,21 @@ def test_migrate_extraction_leaves_a_plain_extraction_alone(ruleset):
     assert ruleset._migrate_extraction(plain) == {"service": "S", "path": "p"}
 
 
+def test_migrate_extraction_degrades_instead_of_crashing_the_form(ruleset):
+    """Regression for #161: emptying a required field and saving hands the
+    migrate a None on the RE-RENDER. Raising there takes out the whole Setup
+    page (TypeError: Unexpected extraction value: None) instead of highlighting
+    the offending box, so a non-dict must degrade to an empty extraction."""
+    for broken in (None, "", [], 0, "service"):
+        assert ruleset._migrate_extraction(broken) == {}
+
+
+def test_migrate_to_endpoints_degrades_instead_of_crashing_the_form(ruleset):
+    """The top-level migrate runs on the same render path, so it degrades too."""
+    for broken in (None, "", [], 0):
+        assert ruleset._migrate_to_endpoints(broken) == {"endpoints": []}
+
+
 def test_migrate_extraction_count_becomes_aggregate(ruleset):
     # The 'count' boolean is now the 'count' choice of the aggregate dropdown.
     migrated = ruleset._migrate_extraction({"service": "S", "path": "p", "count": True})
