@@ -12,7 +12,11 @@ That way the preview matches what the agent
 will actually see (authenticated / self-signed endpoints work in the wizard).
 
 Input (POST): ``connection`` = the connection FormEdit value (JSON); falls back
-to a bare ``url`` query var. Output: ``{ok, status, json}`` or ``{ok:false, error}``.
+to a bare ``url`` query var. Output: ``{ok, status, json, headers}`` or
+``{ok:false, error}``. The headers are returned so the field picker can offer
+them: the agent can monitor one with an '@header.' path (an API quota, a
+Last-Modified age), and the browser cannot see them for itself because this
+request is made server-side.
 
 The endpoint's RETRY policy is deliberately not applied here: this fetch runs
 with a person waiting on the wizard, where reporting "connection refused" in one
@@ -152,7 +156,14 @@ class JsonExplorerFetchPage(AjaxPage):
                 "ok": False,
                 "error": _("HTTP %d: response body is not JSON") % resp.status_code,
             }
-        return {"ok": True, "status": resp.status_code, "json": data}
+        return {
+            "ok": True,
+            "status": resp.status_code,
+            "json": data,
+            # A plain dict: requests' CaseInsensitiveDict does not survive the
+            # JSON round trip, and the picker matches case-insensitively anyway.
+            "headers": dict(resp.headers),
+        }
 
 
 page_registry.register(PageEndpoint("json_explorer_fetch", JsonExplorerFetchPage()))

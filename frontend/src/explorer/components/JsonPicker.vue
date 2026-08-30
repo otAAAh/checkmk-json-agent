@@ -26,6 +26,8 @@ const props = defineProps<{
   loading?: boolean
   error?: string
   canRefetch?: boolean
+  /** Response headers of the last successful fetch, for the Headers tab. */
+  headers?: Record<string, string>
 }>()
 const emit = defineEmits<{
   'update:modelValue': [value: string]
@@ -60,11 +62,29 @@ const tree = computed(() => {
 
 const { _t } = usei18n()
 
-const view = ref<'picker' | 'raw'>('picker')
+const view = ref<'picker' | 'headers' | 'raw'>('picker')
 const viewOptions = [
-  { label: _t('Picker'), value: 'picker' },
+  { label: _t('Body'), value: 'picker' },
+  { label: _t('Headers'), value: 'headers' },
   { label: _t('Raw JSON'), value: 'raw' },
 ]
+
+// The response headers as sorted rows. A header is monitored with an '@header.'
+// path, which the agent answers from the response headers rather than the body -
+// so it is offered here rather than in the JSON tree, which has no place for it.
+const headerRows = computed(() =>
+  Object.entries(props.headers ?? {})
+    .map(([name, value]) => ({ name, value, path: `@header.${name}` }))
+    .sort((a, b) => a.name.localeCompare(b.name)),
+)
+
+function headerSelected(path: string): boolean {
+  // Case-insensitively, because the agent looks a header up that way: a path
+  // already added as 'X-Ratelimit-Remaining' must not offer to add it again
+  // just because the server spells it 'x-ratelimit-remaining' this time.
+  const wanted = path.toLowerCase()
+  return props.selectedPaths.some((p) => p.toLowerCase() === wanted)
+}
 </script>
 
 <template>
@@ -98,6 +118,26 @@ const viewOptions = [
               @toggle="(p, t, v) => emit('toggle', p, t, v)"
               @hostlabel="(p) => emit('hostlabel', p)"
             />
+          </ul>
+        </CmkScrollContainer>
+      </template>
+      <template v-else-if="view === 'headers'">
+        <p v-if="!headerRows.length" class="je-json-picker__hint">
+          {{ _t('No headers yet — they come from fetching the endpoint, so a hand-pasted sample has none.') }}
+        </p>
+        <CmkScrollContainer v-else height="clamp(160px, 55vh, 640px)" class="je-json-picker__tree">
+          <ul class="je-json-picker__headers">
+            <li v-for="row in headerRows" :key="row.name" class="je-json-picker__header-row">
+              <span class="je-json-picker__header-name">{{ row.name }}</span>
+              <span class="je-json-picker__header-value">{{ row.value }}</span>
+              <CmkButton
+                variant="optional"
+                :disabled="headerSelected(row.path)"
+                @click="emit('toggle', row.path, 'string', row.value)"
+              >
+                {{ headerSelected(row.path) ? _t('Monitored') : _t('Monitor') }}
+              </CmkButton>
+            </li>
           </ul>
         </CmkScrollContainer>
       </template>
@@ -187,6 +227,39 @@ const viewOptions = [
   padding: 0;
   margin: 0;
   list-style: none;
+}
+
+.je-json-picker__headers {
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+
+.je-json-picker__header-row {
+  display: flex;
+  gap: var(--dimension-4, 8px);
+  align-items: center;
+  padding: 1px var(--dimension-3, 6px);
+  font-size: 12px;
+  line-height: 1.6;
+  border-radius: 4px;
+}
+
+.je-json-picker__header-row:hover {
+  background: var(--default-form-element-bg-color);
+}
+
+.je-json-picker__header-name {
+  font-family: ui-monospace, monospace;
+  white-space: nowrap;
+}
+
+.je-json-picker__header-value {
+  flex: 1;
+  overflow: hidden;
+  color: var(--font-color-dimmed);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .je-json-picker__error {

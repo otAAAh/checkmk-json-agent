@@ -32,6 +32,7 @@ const {
   hostLabelsSpec,
   sampleLoading,
   sampleErrors,
+  sampleHeaders,
   fetchSample,
   togglePath,
   addHostLabel,
@@ -93,6 +94,7 @@ const recap = computed(() => {
                   :selected-paths="state.services[ei]!.extractions.map(extractionPath)"
                   :loading="Boolean(sampleLoading[ei])"
                   :error="sampleErrors[ei]"
+                  :headers="sampleHeaders[ei]"
                   :can-refetch="Boolean(endpointUrl(connection).trim())"
                   @refetch="() => fetchSample(ei)"
                   @toggle="(path, valueType, sampleValue) => togglePath(ei, path, valueType, sampleValue)"
