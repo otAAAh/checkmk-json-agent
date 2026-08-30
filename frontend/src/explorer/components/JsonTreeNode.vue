@@ -4,13 +4,14 @@
      a single "+ Add" dropdown on hover/focus (Monitor / Host label) to keep a
      large tree uncluttered; a green dot marks already-monitored rows. -->
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 
 import usei18n from '@/lib/i18n'
+import { getKeyShortcutServiceInstance } from '@/lib/keyShortcuts'
+import useClickOutside from '@/lib/useClickOutside'
 
 import CmkIcon from '@/components/CmkIcon'
 
-import { useClickOutside } from '../../composables/useClickOutside'
 import type { Json, TreeNode } from '../../lib/jsonpaths'
 
 const props = defineProps<{ node: TreeNode; selectedPaths: string[] }>()
@@ -26,19 +27,45 @@ const monitorLabel = computed(() =>
   selected.value ? _t('Do not monitor') : props.node.wildcard ? _t('Monitor each [*]') : _t('Monitor'),
 )
 
-// Native <details> dropdown for the "+ Add" menu — no custom open/close JS,
-// plus dismiss on Escape / outside click while it is open.
+// Native <details> dropdown for the "+ Add" menu — no custom open/close JS.
+// Dismissal uses Checkmk's own helpers rather than our own listeners: the
+// v-click-outside directive for an outside press, and the shared
+// KeyShortcutService for Escape.
 const menuOpen = ref(false)
-const actionsEl = ref<HTMLElement | null>(null)
-useClickOutside(menuOpen, actionsEl, () => {
+const vClickOutside = useClickOutside()
+
+function closeMenu(): void {
   menuOpen.value = false
+}
+
+// The KeyShortcutService keeps ONE window listener and scans its handler list on
+// every keystroke, so the Escape handler is registered only while this row's menu
+// is open — a large tree would otherwise leave one handler per row to be walked
+// on every key the user types anywhere in the wizard.
+const keyShortcuts = getKeyShortcutServiceInstance()
+let escapeId: string | null = null
+watch(menuOpen, (open) => {
+  if (open) {
+    if (escapeId === null) {
+      escapeId = keyShortcuts.on({ key: ['Escape'] }, closeMenu)
+    }
+  } else if (escapeId !== null) {
+    keyShortcuts.remove([escapeId])
+    escapeId = null
+  }
 })
+onBeforeUnmount(() => {
+  if (escapeId !== null) {
+    keyShortcuts.remove([escapeId])
+  }
+})
+
 function monitor(): void {
-  menuOpen.value = false
+  closeMenu()
   emit('toggle', props.node.path, props.node.valueType, props.node.sampleValue)
 }
 function hostLabel(): void {
-  menuOpen.value = false
+  closeMenu()
   emit('hostlabel', props.node.path)
 }
 </script>
@@ -59,7 +86,7 @@ function hostLabel(): void {
       <span class="je-json-tree-node__type">{{ node.valueType }}</span>
       <span class="je-json-tree-node__value">{{ node.valuePreview }}</span>
       <details
-        ref="actionsEl"
+        v-click-outside="closeMenu"
         class="je-json-tree-node__actions"
         :open="menuOpen"
         @toggle="menuOpen = ($event.target as HTMLDetailsElement).open"
