@@ -5,6 +5,7 @@
 import json
 from types import SimpleNamespace
 
+import pytest
 from cmk.agent_based.v2 import IgnoreResults, Metric, Result, State
 
 
@@ -449,6 +450,37 @@ def test_check_calc_transforms_value_and_metric(check):
     assert summary == "Value: 1 B"
 
 
+def test_check_calc_computes_a_ratio_from_a_second_path(check):
+    """The headline case: an API reports used/total, the service reports a %."""
+    section = _section(
+        check,
+        [
+            _entry(
+                "Disk",
+                value=25,
+                unit="percent",
+                calc="value / other * 100",
+                calc_other=100,
+                levels_upper=["fixed", [80, 90]],
+            )
+        ],
+    )
+    results = list(check.check_json_api("Disk", {}, section))
+    (metric,) = [r for r in results if isinstance(r, Metric)]
+    assert metric.value == 25.0
+    assert all(r.state == State.OK for r in results if isinstance(r, Result))
+
+
+def test_check_calc_reports_an_unresolved_second_path(check):
+    """A missing 'total' must not silently become a plausible ratio."""
+    section = _section(
+        check, [_entry("Disk", value=25, calc="value / other * 100", calc_other=None)]
+    )
+    results = list(check.check_json_api("Disk", {}, section))
+    (bad,) = [r for r in results if isinstance(r, Result) and r.state == State.UNKNOWN]
+    assert "second path" in bad.summary
+
+
 def test_check_calc_applies_before_levels(check):
     # 90000 ms -> 90 s, which trips the upper levels set in seconds.
     section = _section(
@@ -707,6 +739,25 @@ def test_counter_going_backwards_does_not_produce_a_negative_rate(check, monkeyp
 
 
 # --- Timestamp -> age ---------------------------------------------------------
+
+
+def test_apply_calc_binds_the_second_operand(check):
+    assert check._apply_calc(25.0, "value / other * 100", 100.0) == 25.0
+    assert check._apply_calc(3.0, "(value + other) * 2", 1.0) == 8.0
+    # 'value' alone still works with no second operand at all.
+    assert check._apply_calc(1024.0, "value / 1024") == 1.0
+
+
+def test_apply_calc_rejects_other_when_it_did_not_resolve(check):
+    """Substituting 0 or 1 would turn a missing field into a plausible-looking
+    ratio, so an unresolved 'other' fails the expression instead."""
+    with pytest.raises(ValueError, match="second path"):
+        check._apply_calc(25.0, "value / other * 100", None)
+
+
+def test_apply_calc_still_rejects_unknown_names(check):
+    with pytest.raises(ValueError):
+        check._apply_calc(1.0, "value + elsewhere", 2.0)
 
 
 def test_parse_timestamp_formats(check):
