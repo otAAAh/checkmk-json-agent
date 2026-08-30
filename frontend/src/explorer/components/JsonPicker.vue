@@ -64,7 +64,7 @@ const { _t } = usei18n()
 
 const view = ref<'picker' | 'headers' | 'raw'>('picker')
 const viewOptions = [
-  { label: _t('Picker'), value: 'picker' },
+  { label: _t('Body'), value: 'picker' },
   { label: _t('Headers'), value: 'headers' },
   { label: _t('Raw JSON'), value: 'raw' },
 ]
