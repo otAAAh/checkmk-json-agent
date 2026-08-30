@@ -222,6 +222,19 @@ def _validate_extraction(value: object) -> None:
     """
     if not isinstance(value, dict):
         return
+    # Host labels for a host this extraction never creates would land nowhere:
+    # they are resolved per '[*]' element and attached to the host that element
+    # becomes, so without a piggyback host name there is nothing to attach to.
+    if value.get("piggyback_labels") and not (
+        isinstance(value.get("piggyback_host"), str) and value["piggyback_host"].strip()
+    ):
+        raise validators.ValidationError(
+            Message(
+                "'Labels for the created host' needs 'Create one host per element, "
+                "named by this field' - without it the element stays a service on "
+                "this host and there is no host to label."
+            )
+        )
     calc = value.get("calc")
     has_path = isinstance(value.get("calc_path"), str) and value["calc_path"].strip()
     uses_other = _calc_uses_other(calc)
@@ -585,6 +598,47 @@ def _extraction() -> Dictionary:
                         "data for hosts that do not exist yet - create the hosts "
                         "(manually or with Dynamic host management) or the data "
                         "is never monitored."
+                    ),
+                ),
+            ),
+            "piggyback_labels": DictElement(
+                required=False,
+                parameter_form=List(
+                    title=Title("Labels for the created host"),
+                    help_text=Help(
+                        "Checkmk HOST labels for the host each '[*]' element becomes, "
+                        "built from fields within that element - so the 50 hosts a "
+                        "'nodes[*]' rule creates can carry their own region, role or "
+                        "tier and be targeted by folder rules, views and filters. "
+                        "Needs 'Create one host per element' above; without it the "
+                        "element stays a service on this host and there is nothing "
+                        "to label. Each key is prefixed with 'json_api/'. These are "
+                        "HOST labels, unlike 'Service labels' below, which describe "
+                        "the individual service."
+                    ),
+                    element_template=Dictionary(
+                        elements={
+                            "path": DictElement(
+                                required=True,
+                                parameter_form=String(
+                                    title=Title("JSON path"),
+                                    help_text=Help(
+                                        "Relative to each '[*]' element, e.g. 'region'."
+                                    ),
+                                    custom_validate=(validators.LengthInRange(min_value=1),),
+                                ),
+                            ),
+                            "key": DictElement(
+                                required=False,
+                                parameter_form=String(
+                                    title=Title("Label key (optional)"),
+                                    help_text=Help(
+                                        "Defaults to the path's last segment. The "
+                                        "'json_api/' prefix is added automatically."
+                                    ),
+                                ),
+                            ),
+                        }
                     ),
                 ),
             ),
