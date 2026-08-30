@@ -59,6 +59,7 @@ def test_basic_command_line(ssc):
             "service": "Health",
             "label_path": None,
             "piggyback_host": None,
+            "piggyback_labels": [],
             "filter": None,
             "unit": None,
             "labels": [],

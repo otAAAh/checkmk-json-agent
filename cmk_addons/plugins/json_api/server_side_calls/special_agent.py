@@ -93,6 +93,10 @@ class Extraction(BaseModel, frozen=True):
     # label-suffixed service on the polling host. Resolved by the agent, which
     # sanitises it and routes the result into a '<<<<host>>>>' section.
     piggyback_host: str | None = None
+    # HOST labels for the piggyback host this element becomes, resolved by the
+    # agent within the element. Distinct from `labels`, which are SERVICE labels
+    # on the service itself.
+    piggyback_labels: Sequence[LabelSpec] = ()
     # Keep only wildcard/count elements matching this predicate (opaque to the
     # server-side call; the agent applies it). Serialized via model_dump below.
     filter: FilterSpec | None = None

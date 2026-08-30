@@ -1041,6 +1041,7 @@ def _result(
     summary_fields: dict[str, str] | None = None,
     row_key: str | None = None,
     calc_other: object = None,
+    host_labels: dict[str, str] | None = None,
 ) -> dict:
     # Values that are not JSON scalars (dict/list) are reported as strings.
     if found and isinstance(value, (dict, list)):
@@ -1051,6 +1052,10 @@ def _result(
         # services go into the plain section), a name means a piggyback host and
         # is stripped back out before the section is written.
         "host": host,
+        # Host labels for THAT piggyback host, resolved from this element. Also
+        # internal routing, stripped with 'host': they belong to the host, not to
+        # the service, so they are merged per host in _split_by_host.
+        "host_labels": host_labels or {},
         "path": spec["path"],
         "url": url,
         "found": found,
@@ -1258,6 +1263,14 @@ def _extract(
             # the labelled name on the polling host, so it is still monitored
             # instead of vanishing.
             host = _piggyback_host(element, host_path)
+            # Only meaningful once the element IS its own host; on the polling
+            # host they would silently become labels of the polling host, which
+            # is emphatically not what "label the host I created" asked for.
+            element_host_labels = (
+                _resolve_host_labels(spec.get("piggyback_labels") or [], element)
+                if host is not None
+                else {}
+            )
             label = " / ".join(label_segments)
             if host is not None:
                 service = spec["service"]
@@ -1276,6 +1289,7 @@ def _extract(
                     host,
                     summary_fields=_resolve_summary(summary, element),
                     calc_other=_resolve_calc_other(spec, element),
+                    host_labels=element_host_labels,
                     # An element whose label field resolved to an empty string
                     # still needs a row of its own: falling back to None would
                     # quietly turn it into a plain attribute of a node that is
@@ -1572,23 +1586,34 @@ def _process_endpoint(
         return _fail(f"Endpoint processing failed: {exc}")
 
 
-def _split_by_host(results: list[dict]) -> tuple[list[dict], dict[str, list[dict]]]:
+def _split_by_host(
+    results: list[dict],
+) -> tuple[list[dict], dict[str, list[dict]], dict[str, dict[str, str]]]:
     """Partition results into the polling host's own and per-piggyback-host.
 
-    The ``host`` key is an internal routing hint, not part of the section format,
-    so it is stripped here: the check sees identical payloads either way and needs
-    no knowledge of piggybacking at all. Insertion order is preserved so the
-    output stays deterministic across runs.
+    ``host`` and ``host_labels`` are internal routing hints, not part of the
+    section format, so they are stripped here: the check sees identical payloads
+    either way and needs no knowledge of piggybacking at all. Insertion order is
+    preserved so the output stays deterministic across runs.
+
+    The third return value is the host labels each piggyback host earned, merged
+    across every extraction that placed a service on it (later wins per key) -
+    they describe the HOST, so two fields of the same element must not each
+    write their own section-level label map.
     """
     own: list[dict] = []
     piggybacked: dict[str, list[dict]] = {}
+    labels: dict[str, dict[str, str]] = {}
     for result in results:
         host = result.pop("host", None)
+        host_labels = result.pop("host_labels", None) or {}
         if host is None:
             own.append(result)
-        else:
-            piggybacked.setdefault(host, []).append(result)
-    return own, piggybacked
+            continue
+        piggybacked.setdefault(host, []).append(result)
+        if host_labels:
+            labels.setdefault(host, {}).update(host_labels)
+    return own, piggybacked, labels
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -1612,7 +1637,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 host_labels.update(endpoint_host_labels)  # later endpoints win per key
                 endpoint_records.append(record)
 
-    own, piggybacked = _split_by_host(results)
+    own, piggybacked, piggyback_labels = _split_by_host(results)
     # The polling host's own section: the endpoint records live here too, because
     # they describe the REQUEST, which belongs to the host holding the rule - not
     # to any element the response happened to contain.
@@ -1625,7 +1650,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         # match, counter, timestamp, ...) works there unchanged.
         sys.stdout.write(f"<<<<{host}>>>>\n")
         sys.stdout.write("<<<json_api:sep(0)>>>\n")
-        sys.stdout.write(json.dumps({"results": host_results, "host_labels": {}}) + "\n")
+        sys.stdout.write(
+            json.dumps(
+                {"results": host_results, "host_labels": piggyback_labels.get(host, {})}
+            )
+            + "\n"
+        )
     if piggybacked:
         # Close the last piggyback section, or everything after it in the agent
         # output would be attributed to that host.
