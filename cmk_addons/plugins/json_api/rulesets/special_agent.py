@@ -487,7 +487,13 @@ def _extraction() -> Dictionary:
                         "product, one service per combination. A leading '$.' is "
                         "optional. Keys that themselves contain '.' or '[' can be "
                         "addressed with bracket-quoted segments, e.g. "
-                        "\"data['foo.bar'].value\"."
+                        "\"data['foo.bar'].value\". To monitor a RESPONSE HEADER "
+                        "instead of a field of the body, prefix its name with "
+                        "'@header.', e.g. '@header.X-RateLimit-Remaining' for an "
+                        "API quota or '@header.Last-Modified' with 'Interpret the "
+                        "value as' set to a timestamp for the age of the data. "
+                        "Header names are matched case-insensitively and none of "
+                        "the path syntax above applies to them."
                     ),
                     prefill=InputHint("status"),
                     custom_validate=(validators.LengthInRange(min_value=1),),

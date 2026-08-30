@@ -74,6 +74,46 @@ def test_extract_scalar(agent):
     assert all(r["url"] == "http://test/h" for r in results)
 
 
+def test_extract_from_response_header(agent):
+    specs = [
+        {"path": "@header.X-RateLimit-Remaining", "service": "Budget"},
+        # HTTP field names are case-insensitive, so the configured spelling need
+        # not match what the server actually sent.
+        {"path": "@header.content-type", "service": "Type"},
+        {"path": "@header.X-Absent", "service": "Gone"},
+    ]
+    headers = {"X-RateLimit-Remaining": "4999", "Content-Type": "application/json"}
+    results = agent._extract(DOC, specs, "http://test/h", headers)
+    by_service = {r["service"]: r for r in results}
+
+    assert by_service["Budget"]["found"] is True
+    assert by_service["Budget"]["value"] == "4999"
+    assert by_service["Type"]["value"] == "application/json"
+    assert by_service["Gone"]["found"] is False
+    assert by_service["Gone"]["error"] == "header not in response"
+
+
+def test_extract_header_path_does_not_touch_the_body(agent):
+    """A '@header.' path is answered from the headers even when the body has a
+    field of the same name, and reports 'not in response' with no headers at all
+    (an endpoint served from a pre-header cache) rather than falling back."""
+    specs = [{"path": "@header.status", "service": "H"}]
+    (result,) = agent._extract(DOC, specs, "http://test/h", {"status": "from-header"})
+    assert result["value"] == "from-header"
+
+    (result,) = agent._extract(DOC, specs, "http://test/h", None)
+    assert result["found"] is False
+
+
+def test_extract_header_ignores_wildcard_machinery(agent):
+    """Header names contain no path grammar: '[*]' and aggregation do not apply,
+    so a name is looked up verbatim rather than split into segments."""
+    specs = [{"path": "@header.X-Odd[*]Name", "service": "Odd", "aggregate": "count"}]
+    (result,) = agent._extract(DOC, specs, "http://test/h", {"X-Odd[*]Name": "1"})
+    assert result["found"] is True
+    assert result["value"] == "1"
+
+
 def test_extract_count_list(agent):
     specs = [{"path": "items", "service": "Items", "count": True}]
     (result,) = agent._extract(DOC, specs, "http://test/h")

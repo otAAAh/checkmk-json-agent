@@ -14,6 +14,7 @@ Two plugins read the one ``json_api`` section:
 """
 
 import ast
+import email.utils
 import json
 import math
 import re
@@ -691,6 +692,26 @@ def _parse_iso_timestamp(text: str) -> float | None:
     return parsed.timestamp()
 
 
+def _parse_http_date(text: str) -> float | None:
+    """An HTTP-date (RFC 9110) as a Unix epoch float, or None.
+
+    The format 'Last-Modified', 'Expires' and a date-form 'Retry-After' are
+    written in - 'Wed, 21 Oct 2015 07:28:00 GMT' - which is neither a number nor
+    ISO 8601, so reading a header as a timestamp needs it. An HTTP-date is
+    always GMT; a parser that nonetheless returns a naive datetime is read as
+    UTC rather than as the monitoring server's local zone.
+    """
+    try:
+        parsed = email.utils.parsedate_to_datetime(text.strip())
+    except (TypeError, ValueError):
+        return None
+    if parsed is None:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=UTC)
+    return parsed.timestamp()
+
+
 def _parse_timestamp(value: object, fmt: str) -> float | None:
     """The value as a Unix epoch float, per the configured format, or None."""
     number = _as_number(value)
@@ -702,10 +723,17 @@ def _parse_timestamp(value: object, fmt: str) -> float | None:
         case "iso":
             return _parse_iso_timestamp(value) if isinstance(value, str) else None
     # "auto" (and anything unknown): a number is an epoch, in milliseconds when
-    # it is far too large to be seconds; everything else is tried as ISO 8601.
+    # it is far too large to be seconds; a string is tried as ISO 8601 and then
+    # as an HTTP-date, so a 'Last-Modified' header read via '@header.' resolves
+    # without the rule having to name a format.
     if number is not None:
         return number / 1000.0 if abs(number) > _EPOCH_MS_THRESHOLD else number
-    return _parse_iso_timestamp(value) if isinstance(value, str) else None
+    if not isinstance(value, str):
+        return None
+    # Not `iso or http_date`: a timestamp of exactly epoch 0 is a real value and
+    # would be discarded as falsy.
+    stamp = _parse_iso_timestamp(value)
+    return stamp if stamp is not None else _parse_http_date(value)
 
 
 def _derive(entry: Item) -> tuple[float | None, str, Callable[[float], str] | None, CheckResult]:
