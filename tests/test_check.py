@@ -729,6 +729,24 @@ def test_parse_timestamp_formats(check):
     assert check._parse_timestamp(None, "auto") is None
 
 
+def test_parse_timestamp_auto_reads_an_http_date(check):
+    """'auto' also accepts an HTTP-date, which is what a 'Last-Modified' or
+    'Expires' header read via a '@header.' path actually contains."""
+    assert check._parse_timestamp("Wed, 21 Oct 2015 07:28:00 GMT", "auto") == 1445412480.0
+    # An HTTP-date is always GMT; a parser returning a naive datetime must not be
+    # read as the monitoring server's local zone.
+    assert check._parse_timestamp("Wed, 21 Oct 2015 07:28:00 -0000", "auto") == 1445412480.0
+    # The explicit formats stay strict - 'iso' means ISO 8601, not "any date".
+    assert check._parse_timestamp("Wed, 21 Oct 2015 07:28:00 GMT", "iso") is None
+
+
+def test_parse_timestamp_keeps_epoch_zero(check):
+    """1970-01-01 is a real timestamp, not a parse failure: the ISO result must
+    not be discarded as falsy before the HTTP-date fallback is tried."""
+    assert check._parse_timestamp("1970-01-01T00:00:00Z", "auto") == 0.0
+    assert check._parse_timestamp(0, "auto") == 0.0
+
+
 def test_timestamp_age_metric_and_summary(check, monkeypatch):
     _fixed_clock(check, monkeypatch, 1700003600.0)
     section = _section(

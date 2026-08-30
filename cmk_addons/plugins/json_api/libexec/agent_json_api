@@ -625,6 +625,10 @@ def _fetch(
         "from_cache": False,
         "cache_age": None,
         "attempts": 1,
+        # Response headers, so an extraction can read one (see _HEADER_PREFIX).
+        # Cached alongside the body: replaying the body with someone else's
+        # headers would describe a response that never existed.
+        "headers": {},
     }
     # A cached body younger than the endpoint's TTL is served without touching the
     # network at all - that is the whole point, for an API with a request quota.
@@ -709,6 +713,7 @@ def _attempt(
             status = response.status_code
             meta["status"] = status
             meta["final_url"] = scrub(response.url)
+            meta["headers"] = dict(response.headers)
             # While the socket is still open and before the body is read. Done
             # here rather than after the status checks so a certificate is still
             # reported for an endpoint answering 503 - the cert is a property of
@@ -1127,13 +1132,58 @@ def _expand_wildcards(
     return expanded
 
 
-def _extract(document: object, extractions: list[dict], url: str) -> list[dict]:
+# A path naming a RESPONSE HEADER rather than a field of the body, e.g.
+# '@header.X-RateLimit-Remaining'. A prefix rather than a second form field: the
+# extraction's 'path' stays the one required "where the value comes from", so no
+# existing rule needs migrating and the Explorer's value_raw shape is unchanged.
+# A body key literally called '@header' is shadowed by this - documented in the
+# ruleset help, and no API in practice has one.
+_HEADER_PREFIX = "@header."
+
+
+def _resolve_header(headers: object, path: str) -> tuple[bool, object]:
+    """Resolve a '@header.<name>' path against the response headers.
+
+    HTTP field names are case-insensitive (RFC 9110), and the name reaches us as
+    whatever the operator typed, so the lookup is case-folded rather than exact.
+    """
+    name = path[len(_HEADER_PREFIX) :].strip()
+    if not isinstance(headers, dict) or not name:
+        return False, None
+    wanted = name.lower()
+    for header, value in headers.items():
+        if isinstance(header, str) and header.lower() == wanted:
+            return True, value
+    return False, None
+
+
+def _extract(
+    document: object, extractions: list[dict], url: str, headers: object = None
+) -> list[dict]:
     results = []
     for spec in extractions:
         label_specs = spec.get("labels") or []
         # Resolved in the same scope as the service labels: the current '[*]'
         # element, or the document root where there is no element.
         summary = spec.get("summary")
+        # A header is a single scalar off the response, so none of the body-only
+        # machinery (wildcards, aggregation, filters) applies to it.
+        if spec["path"].strip().startswith(_HEADER_PREFIX):
+            found, value = _resolve_header(headers, spec["path"].strip())
+            results.append(
+                _result(
+                    spec,
+                    spec["service"],
+                    found,
+                    value,
+                    "header not in response",
+                    url,
+                    _resolve_labels(label_specs, document),
+                    summary_fields=_resolve_summary(summary, document),
+                )
+            )
+            continue
+
         segments = _split_wildcards(spec["path"])
         aggregate = _aggregate_mode(spec)
         filt = spec.get("filter")
@@ -1479,7 +1529,7 @@ def _process_endpoint(
         document, error, meta = _fetch(endpoint, secret, debug)
         if error is not None:
             return _fail(error, meta)
-        results = _extract(document, endpoint.get("extractions", []), url)
+        results = _extract(document, endpoint.get("extractions", []), url, meta.get("headers"))
         host_labels = _resolve_host_labels(endpoint.get("host_labels", []), document)
         if debug:
             for result in results:

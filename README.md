@@ -29,6 +29,9 @@ Targets **Checkmk 2.4+** and the current stable plugin APIs
 - **Path extraction** with a dotted syntax: `status`, `components.db.status`,
   `items[0].count` (leading `$.` optional); keys containing `.` or `[` can be
   bracket-quoted, e.g. `data['foo.bar'].value`
+- **Response headers** as a value source: prefix the name with `@header.`
+  (e.g. `@header.X-RateLimit-Remaining`) to monitor an API quota, a
+  `Retry-After` or the age of a `Last-Modified`
 - **One service per field**, named as you choose
 - **Array & object auto-discovery**: a `[*]` wildcard (e.g. `nodes[*].health`)
   creates one service per array element - or per key when it lands on a JSON
@@ -459,6 +462,28 @@ Given `GET /status` → `{"last_backup": "2026-07-28T02:00:00Z"}`:
 goes WARN once the last backup is older than 26 hours, CRIT after two days.
 Epoch seconds and milliseconds work the same way; a timestamp without a time
 zone is read as UTC.
+
+### Monitoring an API rate-limit budget
+
+A path starting with `@header.` reads a **response header** instead of a field
+of the body. Given a `GET /v4/projects` that answers with
+`RateLimit-Remaining: 137` and `Last-Modified: Wed, 21 Oct 2015 07:28:00 GMT`:
+
+| Service name | JSON path | Interpret as | Check |
+|---|---|---|---|
+| `API budget` | `@header.RateLimit-Remaining` | (as it stands) | lower levels `100 / 20` |
+| `Data age` | `@header.Last-Modified` | a timestamp (format `auto`) | upper levels `3600 / 86400` |
+
+`JSON API budget` goes WARN once fewer than 100 calls remain in the window and
+CRIT below 20 — so the quota is visible before it runs out and the endpoint
+starts answering 429. Header names are matched case-insensitively, and none of
+the body path syntax (`[*]`, aggregation, filters, bracket-quoting) applies to
+them: a header is a single scalar. `auto` also reads an HTTP-date, which is
+what `Last-Modified` and a date-form `Retry-After` contain.
+
+A response served from the [cache](#caching-responses) replays the headers it
+was stored with, so a cached serve never mixes one response's body with
+another's headers.
 
 ### Multiple endpoints
 
