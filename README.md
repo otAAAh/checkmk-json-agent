@@ -466,7 +466,11 @@ zone is read as UTC.
 ### Monitoring an API rate-limit budget
 
 A path starting with `@header.` reads a **response header** instead of a field
-of the body. Given a `GET /v4/projects` that answers with
+of the body. Both Explorers offer them for picking rather than making you type
+one from memory: the in-site wizard shows a **Headers** tab next to the field
+picker (the Checkmk server fetched the response, so it has them), and the
+standalone Explorer has a **Response headers** paste area — paste `curl -sSi`
+output and it lists the header names to click. Given a `GET /v4/projects` that answers with
 `RateLimit-Remaining: 137` and `Last-Modified: Wed, 21 Oct 2015 07:28:00 GMT`:
 
 | Service name | JSON path | Interpret as | Check |

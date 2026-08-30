@@ -38,6 +38,12 @@
   .tab .x { color:var(--mut); font-weight:700; padding:0 2px; border-radius:3px; }
   .tab .x:hover { color:var(--crit); }
   .tab.addtab { color:var(--acc); border-style:dashed; }
+  /* body/headers sub-tabs inside a panel */
+  .subtabs { display:flex; gap:6px; margin:0 0 8px; }
+  .hdrrow { display:flex; align-items:center; gap:8px; padding:2px 4px; border-radius:4px; }
+  .hdrrow:hover { background:#161a1f; }
+  .hdrrow .k { color:var(--fg); }
+  .hdrrow .v { color:var(--mut); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; flex:1; }
   /* connection */
   .toggles { display:flex; gap:16px; align-items:center; margin:4px 0 10px; flex-wrap:wrap; }
   .toggles label { color:var(--fg); font-size:13px; display:flex; gap:6px; align-items:center; cursor:pointer; }
@@ -89,8 +95,23 @@
     <div id="conn"></div>
 
     <hr>
-    <h2>Sample JSON response (this endpoint)</h2>
-    <textarea id="json" spellcheck="false"></textarea>
+    <h2>Sample response (this endpoint)</h2>
+    <div class="subtabs">
+      <div class="tab active" id="in-tab-body">Body (JSON)</div>
+      <div class="tab" id="in-tab-headers">Response headers</div>
+    </div>
+    <div id="in-pane-body">
+      <textarea id="json" spellcheck="false"></textarea>
+    </div>
+    <div id="in-pane-headers" style="display:none;">
+      <p class="muted" style="margin:0 0 6px;">
+        Paste the response headers — e.g. the output of <code>curl -sSi</code>.
+        A status line and the body below are ignored; only <code>Name: value</code>
+        lines are read. Nothing is sent anywhere.
+      </p>
+      <textarea id="rawheaders" spellcheck="false"
+                placeholder="HTTP/2 200&#10;content-type: application/json&#10;x-ratelimit-remaining: 4999"></textarea>
+    </div>
     <div style="margin-top:8px; display:flex; gap:8px;">
       <button id="parse">Parse →</button>
       <button class="ghost" id="sample">Load sample</button>
@@ -101,7 +122,12 @@
   <!-- MIDDLE: tree + fields -->
   <div class="panel">
     <h2>2 · Pick fields <span class="muted" id="which-ep"></span></h2>
+    <div class="subtabs">
+      <div class="tab active" id="pick-tab-body">Body</div>
+      <div class="tab" id="pick-tab-headers">Headers <span class="muted" id="hdr-count"></span></div>
+    </div>
     <div id="tree" class="muted">Parse some JSON to see its structure.</div>
+    <div id="headers" class="muted" style="display:none;">Paste response headers to pick one.</div>
     <h2 style="margin-top:14px;">Selected fields</h2>
     <div id="fields" class="muted">None yet — click <em>monitor</em> on a value above.</div>
   </div>
@@ -156,6 +182,16 @@ const SAMPLE = {
   ]
 };
 
+// Shown alongside the sample body, in the shape 'curl -sSi' prints: a status
+// line (ignored) and the headers worth monitoring.
+const SAMPLE_HEADERS = [
+  "HTTP/2 200",
+  "content-type: application/json",
+  "x-ratelimit-limit: 5000",
+  "x-ratelimit-remaining: 4999",
+  "last-modified: Wed, 21 Oct 2015 07:28:00 GMT",
+].join("\n");
+
 // ---- state ----------------------------------------------------------------
 function makeEndpoint(withSample) {
   return {
@@ -169,10 +205,16 @@ function makeEndpoint(withSample) {
     ca_bundle: "", client_cert: "", client_key: "",
     json: withSample ? JSON.stringify(SAMPLE, null, 2) : "",
     parsedRoot: null, parseErr: "",
+    // Pasted response headers and what parsing them yielded. The agent can read
+    // a header with an '@header.' path, but this page never makes a request, so
+    // they have to be pasted like the body is.
+    rawHeaders: withSample ? SAMPLE_HEADERS : "",
+    parsedHeaders: [],
     extractions: [],
   };
 }
-const state = { endpoints: [makeEndpoint(true)], active: 0 };
+// Which sub-tab each panel shows: the response body, or its headers.
+const state = { endpoints: [makeEndpoint(true)], active: 0, inTab: "body", pickTab: "body" };
 const ep = () => state.endpoints[state.active];
 
 const $ = id => document.getElementById(id);
@@ -489,6 +531,55 @@ function renderTree() {
     return;
   }
   if (!(tree.className === "err")) tree.className = "";
+}
+
+// One 'Name: value' header line. Deliberately not anchored to the start of the
+// paste: 'curl -i' leads with a status line and may be followed by the body, and
+// both are simply skipped by requiring a field-name token before the colon.
+// The name token is RFC 9110's, the same one the ruleset validates.
+const HEADER_LINE = /^([!#$%&'*+.^_`|~0-9A-Za-z-]+):[ \t]*(.*)$/;
+
+function parseHeaders(text) {
+  const seen = new Map();
+  for (const line of String(text || "").split(/\r?\n/)) {
+    const m = HEADER_LINE.exec(line.trim());
+    if (!m) continue;
+    // A repeated header (Set-Cookie, Link) keeps the first occurrence, which is
+    // what requests reports first too; the point here is picking a NAME.
+    if (!seen.has(m[1].toLowerCase())) seen.set(m[1].toLowerCase(), { name: m[1], value: m[2] });
+  }
+  return [...seen.values()];
+}
+
+function renderHeaders() {
+  const box = $("headers");
+  const list = ep().parsedHeaders;
+  $("hdr-count").textContent = list.length ? `(${list.length})` : "";
+  box.innerHTML = "";
+  if (!list.length) {
+    box.className = "muted";
+    box.textContent = ep().rawHeaders.trim()
+      ? "No 'Name: value' header lines found in what was pasted."
+      : "Paste response headers to pick one.";
+    return;
+  }
+  box.className = "";
+  for (const h of list) {
+    const path = "@header." + h.name;
+    const row = document.createElement("div");
+    row.className = "hdrrow";
+    const already = ep().extractions.some(x => x.path === path);
+    row.innerHTML =
+      `<span class="k">${esc(h.name)}</span>` +
+      `<span class="v">${esc(h.value)}</span>`;
+    const btn = document.createElement("button");
+    btn.className = "ghost";
+    btn.textContent = already ? "monitored" : "monitor";
+    btn.disabled = already;
+    btn.onclick = () => { addExtraction(path); renderFields(); renderOutputs(); renderHeaders(); };
+    row.appendChild(btn);
+    box.appendChild(row);
+  }
 }
 
 // ---- extraction state -----------------------------------------------------
@@ -860,6 +951,10 @@ function doParse() {
   $("parse-err").textContent = "";
   const e = ep();
   e.json = $("json").value;
+  e.rawHeaders = $("rawheaders").value;
+  // Headers are parsed even when the body does not: they are independent
+  // sources, and an endpoint may well be worth monitoring for its quota alone.
+  e.parsedHeaders = parseHeaders(e.rawHeaders);
   try {
     e.parsedRoot = JSON.parse(e.json);
     e.parseErr = "";
@@ -869,23 +964,49 @@ function doParse() {
     $("parse-err").textContent = e.parseErr;
   }
   renderTree();
+  renderHeaders();
+}
+
+function renderSubTabs() {
+  const panes = {
+    "in-tab-body": ["in-pane-body", state.inTab === "body"],
+    "in-tab-headers": ["in-pane-headers", state.inTab === "headers"],
+    "pick-tab-body": ["tree", state.pickTab === "body"],
+    "pick-tab-headers": ["headers", state.pickTab === "headers"],
+  };
+  for (const [tab, [pane, on]] of Object.entries(panes)) {
+    $(tab).className = "tab" + (on ? " active" : "");
+    $(pane).style.display = on ? "" : "none";
+  }
 }
 
 function renderAll() {
   renderTabs();
   renderConn();
   $("json").value = ep().json;
+  $("rawheaders").value = ep().rawHeaders;
   $("parse-err").textContent = ep().parseErr;
   $("which-ep").textContent = `· endpoint ${state.active + 1}`;
+  renderSubTabs();
   renderTree();
+  renderHeaders();
   renderFields();
   renderOutputs();
 }
 
 // ---- wiring ---------------------------------------------------------------
 $("parse").onclick = doParse;
-$("sample").onclick = () => { $("json").value = JSON.stringify(SAMPLE, null, 2); doParse(); };
+$("sample").onclick = () => {
+  $("json").value = JSON.stringify(SAMPLE, null, 2);
+  $("rawheaders").value = SAMPLE_HEADERS;
+  doParse();
+};
 $("json").addEventListener("input", () => { ep().json = $("json").value; });
+$("rawheaders").addEventListener("input", () => { ep().rawHeaders = $("rawheaders").value; });
+$("in-tab-body").onclick = () => { state.inTab = "body"; renderSubTabs(); };
+$("in-tab-headers").onclick = () => { state.inTab = "headers"; renderSubTabs(); };
+$("pick-tab-body").onclick = () => { state.pickTab = "body"; renderSubTabs(); };
+$("pick-tab-headers").onclick = () => { state.pickTab = "headers"; renderSubTabs(); };
 document.querySelectorAll("[data-copy]").forEach(b => {
   b.onclick = () => {
     navigator.clipboard.writeText($(b.dataset.copy).textContent);

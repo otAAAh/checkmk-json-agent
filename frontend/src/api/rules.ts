@@ -49,6 +49,10 @@ export interface EndpointJson {
   json?: unknown
   status?: number
   error?: string
+  /** Response headers, for the picker's Headers tab — an '@header.' path can
+   * monitor one (a rate-limit budget, a Last-Modified age). Absent when the
+   * request failed, or when the sample was pasted by hand. */
+  headers?: Record<string, string>
 }
 
 /**

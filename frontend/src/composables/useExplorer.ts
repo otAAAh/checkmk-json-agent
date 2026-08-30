@@ -158,6 +158,11 @@ const delay = (ms: number): Promise<void> => new Promise((resolve) => setTimeout
 const samplesLoading = ref(false)
 const sampleLoading = reactive<Record<number, boolean>>({})
 const sampleErrors = reactive<Record<number, string>>({})
+// The response headers of the last successful fetch, per endpoint index. Kept
+// out of the wizard state on purpose: unlike the sample JSON they are never
+// edited or submitted - they only feed the picker's Headers tab, so an
+// '@header.' path can be clicked rather than typed from memory.
+const sampleHeaders = reactive<Record<number, Record<string, string>>>({})
 
 async function fetchSample(i: number): Promise<void> {
   const url = endpointUrl(state.connections[i])
@@ -175,8 +180,12 @@ async function fetchSample(i: number): Promise<void> {
     ])
     if (result.ok) {
       services.sampleJson = JSON.stringify(result.json, null, 2)
+      sampleHeaders[i] = result.headers ?? {}
     } else {
       sampleErrors[i] = result.error ?? 'fetch failed'
+      // A failed refetch must not leave the previous response's headers on
+      // offer: they no longer describe anything the endpoint returned.
+      delete sampleHeaders[i]
     }
   } finally {
     sampleLoading[i] = false
@@ -530,6 +539,7 @@ export function useExplorer() {
     samplesLoading,
     sampleLoading,
     sampleErrors,
+    sampleHeaders,
     preflight,
     testEndpoint,
     testAllEndpoints,

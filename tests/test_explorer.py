@@ -73,6 +73,25 @@ def explorer_output() -> dict:
     return json.loads(result.stdout)
 
 
+def test_header_paste_is_reduced_to_header_names(explorer_output: dict):
+    """The Explorer cannot fetch, so headers are pasted - typically a whole
+    'curl -sSi' dump. Only 'Name: value' lines may survive, or the picker offers
+    '@header.' paths for a status line or a stray body line."""
+    parsed = explorer_output["headers"]
+    assert [h["name"] for h in parsed] == ["content-type", "X-RateLimit-Remaining", "set-cookie"]
+    # The status line, the blank line and the JSON body contribute nothing.
+    assert all(not h["name"].startswith("HTTP") for h in parsed)
+    # A repeated header collapses to one pickable name, keeping the first value.
+    assert [h["value"] for h in parsed if h["name"] == "set-cookie"] == ["a=1"]
+    # The name carried into the extraction keeps the API's own spelling.
+    assert parsed[1]["value"] == "4999"
+
+
+def test_header_path_gets_a_sensible_default_service_name(explorer_output: dict):
+    """'@header.' must not leak into the service name the picker proposes."""
+    assert explorer_output["headerService"] == "X-RateLimit-Remaining"
+
+
 @pytest.fixture(scope="module")
 def rule_value(explorer_output: dict) -> dict:
     # The Explorer emits value_raw as Python source; it must be a valid literal

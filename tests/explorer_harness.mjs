@@ -170,6 +170,19 @@ src += `
   const out = {
     valuePy: valuePy(),
     cli: state.endpoints.map(endpointCliObj),
+    // The header picker's parser, driven over a realistic 'curl -sSi' paste:
+    // a status line, real headers, a blank line and the body, all of which must
+    // reduce to just the header names an '@header.' path can address.
+    headers: parseHeaders(
+      "HTTP/2 200\\r\\n" +
+      "content-type: application/json\\r\\n" +
+      "X-RateLimit-Remaining: 4999\\r\\n" +
+      "set-cookie: a=1\\r\\n" +
+      "set-cookie: b=2\\r\\n" +
+      "\\r\\n" +
+      '{"status": "UP", "nodes": []}'
+    ),
+    headerService: defaultService("@header.X-RateLimit-Remaining"),
   };
   console.log(JSON.stringify(out));
 })();
