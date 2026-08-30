@@ -489,9 +489,16 @@ def _migrate_extraction(value: object) -> dict[str, object]:
     * the boolean ``count`` ("count the elements at this path") becomes the
       ``"count"`` choice of the richer ``aggregate`` dropdown, which now also
       offers sum / average / minimum / maximum.
+
+    Anything that is not a dictionary yields an EMPTY extraction rather than an
+    exception. A migrate runs while the form is being RENDERED, so raising here
+    takes down the whole Setup page instead of flagging a field: emptying a
+    required entry and saving hands this ``None`` on the re-render, and the
+    operator loses the rule form rather than being shown which box to fill in.
+    Degrading leaves an empty row for exactly that box.
     """
     if not isinstance(value, dict):
-        raise TypeError(f"Unexpected extraction value: {value!r}")
+        return {}
     migrated = dict(value)
     if "expected" in migrated and "match" not in migrated:
         expected = migrated.pop("expected")
@@ -1230,9 +1237,14 @@ def _endpoint() -> Dictionary:
 
 def _migrate_to_endpoints(value: object) -> dict[str, object]:
     """Wrap a pre-multi-endpoint rule (flat connection at the top level) into
-    the current single-key ``{"endpoints": [...]}`` shape."""
+    the current single-key ``{"endpoints": [...]}`` shape.
+
+    Like :func:`_migrate_extraction`, a value that is not a dictionary degrades
+    to an empty rule instead of raising: this also runs during rendering, where
+    an exception costs the operator the entire form.
+    """
     if not isinstance(value, dict):
-        raise TypeError(f"Unexpected rule value: {value!r}")
+        return {"endpoints": []}
     if "endpoints" in value:
         return value
     return {"endpoints": [value]}
