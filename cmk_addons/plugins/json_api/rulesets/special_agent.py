@@ -10,6 +10,7 @@ deliberate UX choice — no separate master-item / discovery / threshold rules.
 
 import ast
 import re
+from collections import Counter
 from urllib.parse import urlparse
 
 from cmk.rulesets.v1 import Help, Label, Message, Title
@@ -98,12 +99,12 @@ def _unique_or_duplicates(value: object, key: str) -> list[str]:
     """The non-empty values of ``key`` across the endpoints that occur twice."""
     if not isinstance(value, (list, tuple)):
         return []
-    values = [
+    counts = Counter(
         ep[key].strip()
         for ep in value
         if isinstance(ep, dict) and isinstance(ep.get(key), str) and ep[key].strip()
-    ]
-    return sorted({item for item in values if values.count(item) > 1})
+    )
+    return sorted(item for item, count in counts.items() if count > 1)
 
 
 def _validate_unique_endpoints(value: object) -> None:

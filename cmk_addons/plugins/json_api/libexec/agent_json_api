@@ -87,6 +87,28 @@ def _reveal_secret(args: argparse.Namespace, name: str) -> str:
     return _legacy_pwstore.lookup(Path(store_file), secret_id)
 
 
+def _strip_root(path: str) -> str:
+    """``path`` without surrounding space and without a JSONPath '$' / '$.' root."""
+    cleaned = path.strip()
+    if cleaned.startswith("$."):
+        return cleaned[2:]
+    if cleaned.startswith("$"):
+        return cleaned[1:]
+    return cleaned
+
+
+def _token_key(match: re.Match[str]) -> str | None:
+    """The dict key a path token matched, or ``None`` when it is an array index.
+
+    Tested against ``None`` rather than for truthiness: a bracket-quoted key can
+    legitimately be empty (``['']``).
+    """
+    for group in ("sq", "dq", "key"):
+        if (key := match.group(group)) is not None:
+            return key
+    return None
+
+
 def _resolve_path(data: object, path: str) -> tuple[bool, object]:
     """Resolve a dotted path with optional [index] segments.
 
@@ -96,12 +118,7 @@ def _resolve_path(data: object, path: str) -> tuple[bool, object]:
     wildcards ('[*]') are handled one level up, in _expand_wildcards.
     """
     current = data
-    cleaned = path.strip()
-    if cleaned.startswith("$."):
-        cleaned = cleaned[2:]
-    elif cleaned.startswith("$"):
-        cleaned = cleaned[1:]
-    for match in _PATH_TOKEN.finditer(cleaned):
+    for match in _PATH_TOKEN.finditer(_strip_root(path)):
         index = match.group("idx")
         if index is not None:
             i = int(index)
@@ -109,13 +126,7 @@ def _resolve_path(data: object, path: str) -> tuple[bool, object]:
                 return False, None
             current = current[i]
             continue
-        # A dict key, either plain or bracket-quoted. group() returns "" (not
-        # None) for an empty quoted key like [''], so test for None explicitly.
-        key = match.group("sq")
-        if key is None:
-            key = match.group("dq")
-        if key is None:
-            key = match.group("key")
+        key = _token_key(match)
         if not isinstance(current, dict) or key not in current:
             return False, None
         current = current[key]
@@ -266,7 +277,7 @@ class _Session(requests.Session):
 def _build_session(endpoint: dict, secret: str | None) -> tuple[requests.Session, dict[str, str]]:
     session = _Session(_auth_header_name(endpoint))
     _apply_proxy(session, endpoint)
-    headers = {name: value for name, value in endpoint.get("headers", [])}
+    headers = dict(endpoint.get("headers", []))
     match endpoint.get("auth"):
         case "auth_login":
             session.auth = (endpoint["username"], secret or "")
@@ -1110,8 +1121,7 @@ def _expand_wildcards(
         return [([], False, None, "array or object not found at wildcard path", _NO_ELEMENT)]
 
     expanded: list[tuple[list[str], bool, object, str, object]] = []
-    elements = [element for _default, element in pairs]
-    for label, element in zip(_element_labels(pairs, label_path), elements):
+    for label, (_default, element) in zip(_element_labels(pairs, label_path), pairs):
         for sub_labels, found, value, error, leaf in _expand_wildcards(element, rest, label_path):
             expanded.append(([label, *sub_labels], found, value, error, leaf))
     return expanded
@@ -1237,20 +1247,10 @@ def _label_key_from_path(path: str) -> str:
     'metadata.name' -> 'name', "data['foo.bar']" -> 'foo.bar', 'components[*]' ->
     'components'. Falls back to the cleaned path when it ends in an array index.
     """
-    cleaned = path.strip()
-    if cleaned.startswith("$."):
-        cleaned = cleaned[2:]
-    elif cleaned.startswith("$"):
-        cleaned = cleaned[1:]
-    cleaned = cleaned.replace("[*]", "")  # a wildcard is not part of the key
+    cleaned = _strip_root(path).replace("[*]", "")  # a wildcard is not part of the key
     key = None
     for match in _PATH_TOKEN.finditer(cleaned):
-        token = match.group("sq")
-        if token is None:
-            token = match.group("dq")
-        if token is None:
-            token = match.group("key")
-        if token is not None:
+        if (token := _token_key(match)) is not None:
             key = token
     return key or cleaned
 
@@ -1374,7 +1374,7 @@ def _element_labels(pairs: list[tuple[str, object]], label_path: str | None) -> 
     two elements can never collapse into one service.
     """
     labels = []
-    for position, (default_label, element) in enumerate(pairs):
+    for default_label, element in pairs:
         if label_path:
             found, value = _resolve_path(element, label_path)
             labels.append(str(value) if found else default_label)

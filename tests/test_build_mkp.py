@@ -77,8 +77,8 @@ def test_explorer_package_ships_web_and_gui_parts():
     Web arcnames are relative to local/share/check_mk/web (start with 'htdocs/');
     gui arcnames relative to local/lib/python3/cmk/gui/plugins (e.g. wato/...py).
     """
-    web_files = build_mkp._web_files()
-    gui_files = build_mkp._gui_files()
+    web_files = build_mkp._shipped_files(build_mkp.WEB_BASE)
+    gui_files = build_mkp._shipped_files(build_mkp.GUI_BASE)
     assert web_files, "expected static assets under web/ to be packaged"
     assert gui_files, "expected the GUI page module under gui/ to be packaged"
     web_expected = sorted(str(f.relative_to(build_mkp.WEB_BASE)) for f in web_files)

@@ -59,12 +59,18 @@ _SECTIONS: tuple[tuple[str, set[str]], ...] = (
     ("Other", set()),  # catch-all, keep last
 )
 
+# The section each known type maps to; anything missing falls to "Other".
+_SECTION_OF = {ctype: section for section, types in _SECTIONS for ctype in types}
+
 
 @functools.lru_cache(maxsize=1)
+def _pyproject() -> dict:
+    return tomllib.loads((REPO / "pyproject.toml").read_text())
+
+
 def _repo_url() -> str:
     """The project's GitHub URL, from pyproject, for commit/PR links."""
-    data = tomllib.loads((REPO / "pyproject.toml").read_text())
-    return data["tool"]["mkp"]["download_url"].rstrip("/")
+    return _pyproject()["tool"]["mkp"]["download_url"].rstrip("/")
 
 
 def _git(*args: str) -> str:
@@ -78,8 +84,7 @@ def _git(*args: str) -> str:
 
 
 def _project_version() -> str:
-    data = tomllib.loads((REPO / "pyproject.toml").read_text())
-    return data["project"]["version"]
+    return _pyproject()["project"]["version"]
 
 
 def _version_tags() -> list[str]:
@@ -119,14 +124,9 @@ def _bucket(subject: str) -> tuple[str, str]:
     An unrecognised "word:" prefix is preserved verbatim.
     """
     match = _PREFIX.match(subject)
-    if match and match.group("type") in _KNOWN_TYPES:
-        ctype = match.group("type")
-        rest = match.group("rest") or subject
-        for section, types in _SECTIONS:
-            if ctype in types:
-                return section, _cap(rest)
-        return "Other", _cap(rest)
-    return "Other", _cap(subject)
+    if match is None or match.group("type") not in _KNOWN_TYPES:
+        return "Other", _cap(subject)
+    return _SECTION_OF.get(match.group("type"), "Other"), _cap(match.group("rest") or subject)
 
 
 def _bullet(short: str, cleaned: str) -> str:
