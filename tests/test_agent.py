@@ -114,6 +114,42 @@ def test_extract_header_ignores_wildcard_machinery(agent):
     assert result["value"] == "1"
 
 
+def test_calc_second_path_resolved_per_element(agent):
+    """'other' comes from the element the value came from, so each element is
+    compared against ITS OWN total rather than the first one's."""
+    doc = {"disks": [{"used": 25, "total": 100}, {"used": 90, "total": 200}]}
+    specs = [
+        {
+            "path": "disks[*].used",
+            "service": "Disk",
+            "label_path": "used",
+            "calc": "value / other * 100",
+            "calc_path": "total",
+        }
+    ]
+    results = agent._extract(doc, specs, "http://test/h")
+    assert [r["calc_other"] for r in results] == [100, 200]
+    # The expression itself is passed through untouched for the check to apply.
+    assert all(r["calc"] == "value / other * 100" for r in results)
+
+
+def test_calc_second_path_from_root_without_a_wildcard(agent):
+    doc = {"used": 3, "limit": 12}
+    specs = [
+        {"path": "used", "service": "Quota", "calc": "value / other * 100", "calc_path": "limit"}
+    ]
+    (result,) = agent._extract(doc, specs, "http://test/h")
+    assert result["calc_other"] == 12
+
+
+def test_calc_second_path_missing_resolves_to_none(agent):
+    """An unresolvable second path is reported as absent, not as a zero: the
+    check then fails the expression instead of computing a plausible ratio."""
+    specs = [{"path": "status", "service": "S", "calc": "value / other", "calc_path": "nope"}]
+    (result,) = agent._extract(DOC, specs, "http://test/h")
+    assert result["calc_other"] is None
+
+
 def test_extract_count_list(agent):
     specs = [{"path": "items", "service": "Items", "count": True}]
     (result,) = agent._extract(DOC, specs, "http://test/h")

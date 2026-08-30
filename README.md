@@ -74,7 +74,9 @@ Targets **Checkmk 2.4+** and the current stable plugin APIs
 - **Transform the numeric value**: an optional arithmetic expression (using the
   variable `value`) applied to a numeric value before levels and the metric —
   e.g. `value / 1024 / 1024` for bytes→MiB or `(value - 32) * 5 / 9` for °F→°C;
-  only numbers, parentheses and `+ - * /` are allowed and it is evaluated safely
+  only numbers, parentheses and `+ - * /` are allowed and it is evaluated safely.
+  A **second path** can supply `other`, so a used/total pair becomes a
+  percentage: `value / other * 100`
   (never `eval`)
 - **Show the context next to the value**: an optional summary text with `{path}`
   placeholders — `{message} (leader {leader})` — appended to the service summary,
@@ -180,6 +182,7 @@ Each **field to monitor** has:
 | **Interpret the value as** | Optional: *a counter* — monitor the change **per second** rather than the total (the first check, and any check after the counter went backwards, keeps the previous state because no rate can be computed yet); or *a timestamp* — monitor its **age in seconds** (format `auto` / epoch seconds / epoch milliseconds / ISO 8601; no time zone means UTC). The derived number is what the transform, levels and metric use; string matching does not apply to it |
 | **Unit** | Optional: `count` / `bytes` / `seconds` / `percent` — renders the value in the summary/details *and* the metric and graph with that unit (numeric values only) |
 | **Transform the numeric value** | Optional arithmetic expression on the variable `value` (e.g. `value / 1024 / 1024`), applied to a numeric value before levels and the metric; only numbers, parentheses and `+ - * /` are allowed |
+| **Second path for the transform** | Optional second field, available to the transform as `other` — which is what turns a used/total pair into a percentage (`value / other * 100`). Resolved in the **same scope** as the value: within each `[*]` element, or the response root without a wildcard, so every element is compared against its own total. The transform must use `other` and `other` requires this path — either alone is rejected in Setup. A path that does not resolve fails the calculation rather than substituting a value |
 | **Extra text in the service summary** | Optional text appended to the summary, after the value. `{path}` inserts another field of the same response — resolved *within the current element* for a `[*]` wildcard, from the response root otherwise — e.g. `{message} (leader {leader})`. A path that is not in the response renders as `(n/a)`; a value that is an object or array renders as its size. Presentation only: it never changes the state, the levels or the metric. Put on one line and truncated if long |
 | **Write into the HW/SW inventory** | Optional: a tree node (e.g. `software.applications.json_api`, starting with `hardware`, `software` or `networking`) and an attribute name (defaults to the JSON path's last segment). The value goes into the host's inventory tree and, by default, creates **no service** — tick *Also create a service* if you want both. A `[*]` wildcard writes one **table row** per element, keyed by the element's label, so several fields over the same collection fill in columns of the same row. Use it for values that rarely change: every change is recorded in the inventory history. Inventory runs on its own, slower schedule |
 | **Upper / lower levels** | WARN/CRIT for numeric values |
@@ -365,6 +368,28 @@ the metric apply. Given `GET /status` → `{"heap_bytes": 734003200}`:
 
 The service checks, graphs and displays the value in MiB, so the levels are set
 in MiB too. A broken expression makes the service UNKNOWN.
+
+### Turning a used/total pair into a percentage
+
+Most APIs report a pair rather than a percentage. A **second path** supplies the
+variable `other` to the transform, resolved in the same scope as the value —
+within each `[*]` element, so every element is compared against *its own* total.
+
+Given `GET /storage` → `{"disks": [{"id": "sda", "used": 25, "total": 100},
+{"id": "sdb", "used": 180, "total": 200}]}`:
+
+| Service name | JSON path | Second path | Transform | Unit | Check |
+|---|---|---|---|---|---|
+| `Disk` | `disks[*].used` | `total` | `value / other * 100` | `percent` | upper levels `80 / 90` |
+
+That yields `JSON Disk sda` at `Value: 25.00%` (OK) and `JSON Disk sdb` at
+`Value: 90.00%` (CRIT) — one service per disk, each against its own capacity.
+
+The transform must actually use `other`, and `other` requires the second path;
+either half alone is rejected in Setup rather than becoming a puzzling UNKNOWN.
+If the second path does not resolve for some element, that service reports the
+calculation as failed instead of substituting a value — a missing `total` must
+not turn into a plausible-looking ratio.
 
 ### Array auto-discovery
 

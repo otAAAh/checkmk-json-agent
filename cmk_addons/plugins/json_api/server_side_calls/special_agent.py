@@ -109,8 +109,12 @@ class Extraction(BaseModel, frozen=True):
     # straight from the CascadingSingleChoice form spec. Opaque here; the check
     # interprets it.
     match: object = None
-    # Arithmetic expression over 'value', applied to a numeric value by the check.
+    # Arithmetic expression over 'value' (and 'other'), applied to a numeric
+    # value by the check.
     calc: str | None = None
+    # Second path supplying 'other' in that expression, resolved by the agent in
+    # the same scope as the value itself.
+    calc_path: str | None = None
     # Extra text for the service summary, with '{path}' placeholders. The agent
     # resolves the paths (it has the document and the current '[*]' element); the
     # check renders the text. Presentation only - never touches the state.

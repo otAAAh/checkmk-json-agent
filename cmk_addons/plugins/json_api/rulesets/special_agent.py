@@ -83,11 +83,14 @@ def _validate_calc(value: str) -> None:
     for node in ast.walk(tree):
         if not isinstance(node, _CALC_ALLOWED_NODES):
             raise validators.ValidationError(
-                Message("Only the variable 'value', numbers, parentheses and + - * / are allowed.")
+                Message(
+                    "Only the variables 'value' and 'other', numbers, parentheses "
+                    "and + - * / are allowed."
+                )
             )
-        if isinstance(node, ast.Name) and node.id != "value":
+        if isinstance(node, ast.Name) and node.id not in ("value", "other"):
             raise validators.ValidationError(
-                Message("Unknown variable '%s' - only 'value' is available.") % node.id
+                Message("Unknown variable '%s' - only 'value' and 'other' are available.") % node.id
             )
         if isinstance(node, ast.Constant) and (
             isinstance(node.value, bool) or not isinstance(node.value, (int, float))
@@ -192,6 +195,51 @@ def _validate_endpoint(value: object) -> None:
                 )
                 % header.strip()
             )
+
+
+def _calc_uses_other(expression: object) -> bool:
+    """Whether a calc expression names the second operand.
+
+    Parsed rather than substring-matched, so a path or a number that merely
+    contains the letters 'other' is not mistaken for the variable.
+    """
+    if not isinstance(expression, str) or not expression.strip():
+        return False
+    try:
+        tree = ast.parse(expression, mode="eval")
+    except SyntaxError:
+        return False  # _validate_calc reports the syntax error itself
+    return any(isinstance(node, ast.Name) and node.id == "other" for node in ast.walk(tree))
+
+
+def _validate_extraction(value: object) -> None:
+    """The transform and its second path must agree.
+
+    Either half alone is a silent no-op - an expression naming 'other' with no
+    second path can never be computed, and a second path no expression uses is
+    resolved and thrown away - so both are rejected at configuration time rather
+    than becoming a puzzling UNKNOWN (or nothing at all) on the service.
+    """
+    if not isinstance(value, dict):
+        return
+    calc = value.get("calc")
+    has_path = isinstance(value.get("calc_path"), str) and value["calc_path"].strip()
+    uses_other = _calc_uses_other(calc)
+    if uses_other and not has_path:
+        raise validators.ValidationError(
+            Message(
+                "The transform uses 'other', so 'Second path for the transform' "
+                "must be set to say where that value comes from."
+            )
+        )
+    if has_path and not uses_other:
+        raise validators.ValidationError(
+            Message(
+                "'Second path for the transform' is only used through the "
+                "variable 'other' - add it to the transform (e.g. "
+                "'value / other * 100') or clear the path."
+            )
+        )
 
 
 # A summary template: literal text with '{path}' placeholders, no nesting. The
@@ -462,6 +510,7 @@ def _extraction() -> Dictionary:
     return Dictionary(
         title=Title("Field to monitor"),
         migrate=_migrate_extraction,
+        custom_validate=(_validate_extraction,),
         elements={
             "service": DictElement(
                 required=True,
@@ -785,10 +834,33 @@ def _extraction() -> Dictionary:
                         "'value'. Only numbers, parentheses and + - * / are "
                         "allowed. Examples: 'value / 1024 / 1024' (bytes to MiB), "
                         "'value * 1000' (seconds to milliseconds), "
-                        "'(value - 32) * 5 / 9' (Fahrenheit to Celsius)."
+                        "'(value - 32) * 5 / 9' (Fahrenheit to Celsius). A second "
+                        "field can be brought in as 'other' - see below - which is "
+                        "what turns a used/total pair into a percentage: "
+                        "'value / other * 100'."
                     ),
                     prefill=InputHint("value / 1024 / 1024"),
                     custom_validate=(_validate_calc,),
+                ),
+            ),
+            "calc_path": DictElement(
+                required=False,
+                parameter_form=String(
+                    title=Title("Second path for the transform ('other')"),
+                    help_text=Help(
+                        "A second field, made available to the transform above as "
+                        "the variable 'other'. Most APIs report a used/total or "
+                        "current/limit pair rather than a percentage, so this is "
+                        "what lets one service monitor the ratio: point the JSON "
+                        "path at 'used', this at 'total', and use "
+                        "'value / other * 100' with the unit set to '%'. It is "
+                        "resolved in the SAME scope as the value - within each "
+                        "'[*]' element, or the response root without a wildcard - "
+                        "so every element is compared against its own total. The "
+                        "transform must actually use 'other', and 'other' requires "
+                        "this path; either one alone is rejected."
+                    ),
+                    prefill=InputHint("total"),
                 ),
             ),
             "match": DictElement(

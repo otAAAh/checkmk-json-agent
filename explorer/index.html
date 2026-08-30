@@ -501,7 +501,7 @@ function addExtraction(path) {
     aggregate: "",
     valueAs: "", tsFormat: "auto",
     flPath: "", flOp: "not_equals", flValue: "",
-    unit: "", calc: "", summary: "", lu_w: "", lu_c: "", ll_w: "", ll_c: "",
+    unit: "", calc: "", calcPath: "", summary: "", lu_w: "", lu_c: "", ll_w: "", ll_c: "",
     invNode: "", invKey: "", invKeepService: false,
     matchMode: "", mmPattern: "", mmState: "2",
     smOk: "", smWarn: "", smCrit: "", smState: "0",
@@ -554,7 +554,8 @@ function renderFields() {
         ["", "count", "bytes", "seconds", "percent"].map(u =>
           `<option value="${u}"${e.unit === u ? " selected" : ""}>${u || "no unit"}</option>`).join("") +
       `</select></div>` +
-      `<div class="row"><label>Transform</label><input type="text" data-f="calc" data-i="${i}" value="${escAttr(e.calc)}" placeholder="e.g. value / 1024 / 1024"></div>` +
+      `<div class="row"><label>Transform</label><input type="text" data-f="calc" data-i="${i}" value="${escAttr(e.calc)}" placeholder="e.g. value / 1024 / 1024, or value / other * 100"></div>` +
+      `<div class="row"><label>Second path ('other')</label><input type="text" data-f="calcPath" data-i="${i}" value="${escAttr(e.calcPath)}" placeholder="(optional) e.g. total — only with 'other' in the transform"></div>` +
       `<div class="row"><label>Summary text</label><input type="text" data-f="summary" data-i="${i}" value="${escAttr(e.summary)}" placeholder="extra text, e.g. {message} (leader {leader})"></div>` +
       `<div class="row"><label>Inventory node</label><input type="text" data-f="invNode" data-i="${i}" value="${escAttr(e.invNode)}" placeholder="(optional) e.g. software.applications.json_api — no service unless kept"></div>` +
       `<div class="row"><label>Inventory attribute</label><input type="text" data-f="invKey" data-i="${i}" value="${escAttr(e.invKey)}" placeholder="(optional) defaults to the path's last segment"></div>` +
@@ -619,6 +620,7 @@ function extractionObjs(e) {
       o.filter = { path: x.flPath.trim(), op: x.flOp || "equals", value: x.flValue || "" };
     if (x.unit) o.unit = x.unit;
     if (x.calc) o.calc = x.calc;
+    if (x.calcPath && x.calcPath.trim()) o.calc_path = x.calcPath.trim();
     if (x.summary && x.summary.trim()) o.summary = x.summary.trim();
     if (x.invNode && x.invNode.trim()) {
       o.inventory = { node: x.invNode.trim(), keep_service: !!x.invKeepService };
@@ -656,6 +658,7 @@ function pyExtraction(o) {
   if (o.filter) p.push(`'filter': {'path': ${pyStr(o.filter.path)}, 'op': ${pyStr(o.filter.op)}, 'value': ${pyStr(o.filter.value)}}`);
   if (o.unit) p.push(`'unit': ${pyStr(o.unit)}`);
   if (o.calc) p.push(`'calc': ${pyStr(o.calc)}`);
+  if (o.calc_path) p.push(`'calc_path': ${pyStr(o.calc_path)}`);
   if (o.summary) p.push(`'summary': ${pyStr(o.summary)}`);
   if (o.inventory) {
     const inv = [`'node': ${pyStr(o.inventory.node)}`];

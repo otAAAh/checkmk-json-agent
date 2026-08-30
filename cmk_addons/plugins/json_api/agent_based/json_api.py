@@ -189,6 +189,9 @@ class Item:
     url: str
     # How to read the value: as it stands, as a counter, or as a timestamp.
     value_as: _ValueAs = None
+    # The transform's second operand, resolved by the agent in this service's own
+    # scope. None means "no second path, or it did not resolve to anything".
+    calc_other: float | None = None
     # The aggregation the agent already applied ('count'/'sum'/...), for Details.
     aggregate: str | None = None
     # Service labels (key, value) the agent resolved for this service, sans the
@@ -454,6 +457,7 @@ def parse_json_api(string_table: StringTable) -> Section | None:
             levels_lower=_coerce_levels(result.get("levels_lower")),
             match=_coerce_match(result.get("match"), result.get("expected")),
             calc=_coerce_calc(result.get("calc")),
+            calc_other=_optional_number(result.get("calc_other")),
             unit=result.get("unit"),
             metric_name=_metric_name(result.get("unit")),
             render_func=_render_func(result.get("unit")),
@@ -613,14 +617,20 @@ def _evaluate_match(match: tuple[str, object], text: str) -> tuple[State, str]:
     return State(no_match), ("no pattern matched" if no_match != 0 else "")
 
 
-def _apply_calc(value: float, expr: str) -> float:
-    """Evaluate a small arithmetic expression over the variable ``value``.
+def _apply_calc(value: float, expr: str, other: float | None = None) -> float:
+    """Evaluate a small arithmetic expression over ``value`` (and ``other``).
 
-    Only numeric literals, ``value``, parentheses and + - * / (incl. unary +/-)
-    are supported; anything else raises ``ValueError``. This walks the AST and
-    never uses ``eval``, so a rule cannot smuggle in code execution. Operators
-    are dispatched with explicit ``isinstance`` branches (rather than a lookup
-    table of ``operator`` callables) so the arithmetic stays statically typed.
+    Only numeric literals, the names ``value`` and ``other``, parentheses and
+    + - * / (incl. unary +/-) are supported; anything else raises
+    ``ValueError``. This walks the AST and never uses ``eval``, so a rule cannot
+    smuggle in code execution. Operators are dispatched with explicit
+    ``isinstance`` branches (rather than a lookup table of ``operator``
+    callables) so the arithmetic stays statically typed.
+
+    ``other`` is the second path's value, resolved by the agent. An expression
+    naming it when it did not resolve is an error rather than a default: silently
+    substituting 0 or 1 would turn a missing field into a plausible-looking
+    ratio.
     """
 
     def _eval(node: ast.AST) -> float:
@@ -650,8 +660,13 @@ def _apply_calc(value: float, expr: str) -> float:
             and isinstance(node.value, (int, float))
         ):
             return float(node.value)
-        if isinstance(node, ast.Name) and node.id == "value":
-            return value
+        if isinstance(node, ast.Name):
+            if node.id == "value":
+                return value
+            if node.id == "other":
+                if other is None:
+                    raise ValueError("the second path did not resolve to a number")
+                return other
         raise ValueError("unsupported expression")
 
     return float(_eval(ast.parse(expr, mode="eval")))
@@ -840,7 +855,7 @@ def _value_results(
     # silently ignored.
     if number is not None and entry.calc:
         try:
-            number = _apply_calc(number, entry.calc)
+            number = _apply_calc(number, entry.calc, entry.calc_other)
         except (ValueError, ZeroDivisionError, OverflowError) as exc:
             yield Result(state=State.UNKNOWN, summary=f"Calculation '{entry.calc}' failed: {exc}")
             return

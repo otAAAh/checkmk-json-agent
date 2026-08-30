@@ -1040,6 +1040,7 @@ def _result(
     host: str | None = None,
     summary_fields: dict[str, str] | None = None,
     row_key: str | None = None,
+    calc_other: object = None,
 ) -> dict:
     # Values that are not JSON scalars (dict/list) are reported as strings.
     if found and isinstance(value, (dict, list)):
@@ -1059,6 +1060,13 @@ def _result(
         "levels_lower": spec.get("levels_lower"),
         "match": spec.get("match"),
         "calc": spec.get("calc"),
+        # The second operand of a two-path transform, already resolved in this
+        # result's own scope - only the agent has the document and the current
+        # '[*]' element, and 'other' means "this element's total", not the
+        # document's. None when no second path is configured or it did not
+        # resolve; the check then reports the expression as failed rather than
+        # quietly computing with a stand-in.
+        "calc_other": calc_other,
         "unit": spec.get("unit"),
         # Passed through for the check: it derives the per-second rate / the age
         # (it owns the value store and knows "now").
@@ -1204,6 +1212,7 @@ def _extract(
                     url,
                     labels,
                     summary_fields=_resolve_summary(summary, document),
+                    calc_other=_resolve_calc_other(spec, document),
                 )
             )
             continue
@@ -1227,6 +1236,7 @@ def _extract(
                     url,
                     labels,
                     summary_fields=_resolve_summary(summary, document),
+                    calc_other=_resolve_calc_other(spec, document),
                 )
             )
             continue
@@ -1265,6 +1275,7 @@ def _extract(
                     labels,
                     host,
                     summary_fields=_resolve_summary(summary, element),
+                    calc_other=_resolve_calc_other(spec, element),
                     # An element whose label field resolved to an empty string
                     # still needs a row of its own: falling back to None would
                     # quietly turn it into a plain attribute of a node that is
@@ -1321,6 +1332,21 @@ def _summary_value(value: object) -> str:
         return "null"
     text = _label_value(value)
     return text if text is not None else str(value)
+
+
+def _resolve_calc_other(spec: dict, element: object) -> object:
+    """Resolve the transform's second path within ``element``, or ``None``.
+
+    Resolved in the same scope as the service's labels and summary - the current
+    '[*]' element, or the document root where there is no element - so
+    'value / other * 100' over 'disks[*].used' with 'total' compares each disk
+    against ITS OWN total rather than against some other element's.
+    """
+    path = spec.get("calc_path")
+    if not isinstance(path, str) or not path.strip():
+        return None
+    found, value = _resolve_path(element, path.strip())
+    return value if found else None
 
 
 def _resolve_summary(template: object, element: object) -> dict[str, str]:

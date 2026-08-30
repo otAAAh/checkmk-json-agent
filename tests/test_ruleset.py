@@ -65,6 +65,33 @@ def test_invalid_calc_rejected(ruleset, expr):
         ruleset._validate_calc(expr)
 
 
+def test_calc_accepts_the_second_operand(ruleset):
+    ruleset._validate_calc("value / other * 100")  # must not raise
+
+
+def test_calc_and_its_second_path_must_agree(ruleset):
+    """Either half alone is a silent no-op, so both are rejected at config time."""
+    ruleset._validate_extraction({"calc": "value / other", "calc_path": "total"})
+    ruleset._validate_extraction({"calc": "value / 2"})  # neither half: fine
+
+    with pytest.raises(ValidationError, match="must be set"):
+        ruleset._validate_extraction({"calc": "value / other"})
+    with pytest.raises(ValidationError, match="only used through"):
+        ruleset._validate_extraction({"calc": "value / 2", "calc_path": "total"})
+    # A blank path does not count as set.
+    with pytest.raises(ValidationError, match="must be set"):
+        ruleset._validate_extraction({"calc": "value / other", "calc_path": "  "})
+
+
+@pytest.mark.parametrize(
+    "expr",
+    ["value / 2", "other_total", "'other'", "", None, "value +"],
+)
+def test_calc_uses_other_is_parsed_not_substring_matched(ruleset, expr):
+    """A path or identifier that merely contains 'other' is not the variable."""
+    assert ruleset._calc_uses_other(expr) is False
+
+
 def test_parameter_form_builds(ruleset):
     # Smoke test: the form spec constructs without error.
     assert ruleset._parameter_form() is not None
@@ -141,6 +168,7 @@ def test_extraction_form_has_the_expected_keys(ruleset):
         "levels_upper",
         "levels_lower",
         "calc",
+        "calc_path",
         "match",
         "inventory",
         "summary",

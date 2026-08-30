@@ -67,6 +67,7 @@ def test_basic_command_line(ssc):
             # The CascadingSingleChoice tuple survives the JSON round-trip as a list.
             "match": ["must_match", {"pattern": "UP"}],
             "calc": None,
+            "calc_path": None,
             "inventory": None,
             "summary": None,
             "aggregate": None,
