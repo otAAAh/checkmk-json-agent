@@ -112,7 +112,7 @@ def _render_days(days: float) -> str:
     before expiry does not render as '0 days'.
     """
     rounded = round(days, 1)
-    shown = int(rounded) if float(rounded).is_integer() else rounded
+    shown = int(rounded) if rounded.is_integer() else rounded
     return f"{shown} days"
 
 
@@ -156,7 +156,7 @@ def _rate_render_func(unit: object) -> Callable[[float], str]:
 
 
 def _fmt_rate(number: float) -> str:
-    return _fmt_number(number) if float(number).is_integer() else f"{number:.6g}"
+    return _fmt_number(number) if number.is_integer() else f"{number:.6g}"
 
 
 @dataclass(frozen=True)
@@ -268,7 +268,7 @@ def _coerce_match(raw: object, legacy_expected: object = None) -> _Match:
     keeps working alongside the migrated ruleset.
     """
     match raw:
-        case ["must_match", dict() as cfg] | ("must_match", dict() as cfg):
+        case ["must_match", dict() as cfg]:
             pattern = cfg.get("pattern")
             if isinstance(pattern, str):
                 return (
@@ -278,9 +278,9 @@ def _coerce_match(raw: object, legacy_expected: object = None) -> _Match:
                         "state_no_match": _coerce_state(cfg.get("state_no_match"), 2),
                     },
                 )
-        case ["must_match", str() as pattern] | ("must_match", str() as pattern):
+        case ["must_match", str() as pattern]:
             return ("must_match", {"pattern": pattern, "state_no_match": 2})
-        case ["state_map", dict() as cfg] | ("state_map", dict() as cfg):
+        case ["state_map", dict() as cfg]:
             cleaned: dict[str, object] = {
                 key: cfg[key]
                 for key in ("ok", "warn", "crit")
@@ -313,12 +313,12 @@ def _coerce_value_as(raw: object) -> _ValueAs:
     of failing the service.
     """
     match raw:
-        case ["counter", _] | ("counter", _) | "counter":
+        case ["counter", _] | "counter":
             return ("counter", None)
-        case ["timestamp", dict() as cfg] | ("timestamp", dict() as cfg):
+        case ["timestamp", dict() as cfg]:
             fmt = cfg.get("format")
             return ("timestamp", {"format": fmt if isinstance(fmt, str) and fmt else "auto"})
-        case ["timestamp", _] | ("timestamp", _) | "timestamp":
+        case ["timestamp", _] | "timestamp":
             return ("timestamp", {"format": "auto"})
     return None
 
@@ -392,6 +392,20 @@ def _optional_str(raw: object) -> str | None:
     return raw if isinstance(raw, str) and raw else None
 
 
+def _unique_name(name: str, taken: Mapping[str, object]) -> str:
+    """``name``, suffixed ' (2)', ' (3)', ... until it is not already in ``taken``.
+
+    Two endpoints (or two services) configured with the same name would
+    otherwise collapse into one, silently dropping the second.
+    """
+    if name not in taken:
+        return name
+    suffix = 2
+    while f"{name} ({suffix})" in taken:
+        suffix += 1
+    return f"{name} ({suffix})"
+
+
 def _endpoint_statuses(raw: object) -> dict[str, EndpointStatus]:
     """The agent's ``endpoints`` list, keyed by name (the service item).
 
@@ -404,12 +418,7 @@ def _endpoint_statuses(raw: object) -> dict[str, EndpointStatus]:
         if not isinstance(record, dict):
             continue
         url = _optional_str(record.get("url")) or "?"
-        name = _optional_str(record.get("name")) or url
-        if name in statuses:
-            suffix = 2
-            while f"{name} ({suffix})" in statuses:
-                suffix += 1
-            name = f"{name} ({suffix})"
+        name = _unique_name(_optional_str(record.get("name")) or url, statuses)
         statuses[name] = EndpointStatus(
             name=name,
             url=url,
@@ -435,12 +444,7 @@ def parse_json_api(string_table: StringTable) -> Section | None:
     for result in payload["results"]:
         # The agent already makes wildcard labels unique; this is a defensive
         # backstop so a duplicate service name can never silently drop a service.
-        name = result["service"]
-        if name in items:
-            suffix = 2
-            while f"{name} ({suffix})" in items:
-                suffix += 1
-            name = f"{name} ({suffix})"
+        name = _unique_name(result["service"], items)
         items[name] = Item(
             found=result["found"],
             value=result["value"],

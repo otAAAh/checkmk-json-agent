@@ -92,7 +92,7 @@ def compile_mo(catalog: Mapping[str, str]) -> bytes:
     id and translation offset tables, then the NUL-terminated strings. Keys are
     sorted by their UTF-8 bytes, as gettext binary-searches them.
     """
-    keys = sorted((k.encode("utf-8") for k in catalog), key=lambda b: b)
+    keys = sorted(k.encode("utf-8") for k in catalog)
     values = {k.encode("utf-8"): catalog[k].encode("utf-8") for k in catalog}
 
     ids = b""

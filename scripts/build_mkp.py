@@ -59,45 +59,32 @@ def _load_metadata() -> tuple[dict, dict]:
     return data["project"], data["tool"]["mkp"]
 
 
-def _plugin_files(family: str) -> list[Path]:
+def _shipped_files(base: Path) -> list[Path]:
+    """Every file under ``base`` worth packaging, or [] when there is no ``base``.
+
+    Build artefacts of the checkout itself (``__pycache__``, ``.pyc``) are never
+    part of a package, whichever part the directory feeds.
+    """
+    if not base.is_dir():
+        return []
     return sorted(
         path
-        for path in (PLUGINS_BASE / family).rglob("*")
+        for path in base.rglob("*")
         if path.is_file() and path.suffix != ".pyc" and "__pycache__" not in path.parts
     )
 
 
-def _inner_tar(files: list[Path]) -> bytes:
-    """Uncompressed tar of the plugin files, paths relative to PLUGINS_BASE."""
-    buffer = io.BytesIO()
-    with tarfile.open(fileobj=buffer, mode="w") as tar:
-        for file in files:
-            arcname = file.relative_to(PLUGINS_BASE)
-            info = tar.gettarinfo(str(file), arcname=str(arcname))
-            info.uid = info.gid = 0
-            info.uname = info.gname = ""
-            # Special agent executables under libexec/ must stay executable.
-            info.mode = 0o755 if "libexec" in arcname.parts else 0o644
-            with file.open("rb") as handle:
-                tar.addfile(info, handle)
-    return buffer.getvalue()
+def _inner_tar(files: list[Path], base: Path) -> bytes:
+    """Uncompressed tar of ``files`` with arcnames relative to ``base``.
 
+    ``base`` is the repo directory that maps onto the site directory the part
+    unpacks into, so the arcname is what the site ends up with:
+    ``json_api/agent_based/...`` for the plugin part, ``htdocs/json_api/...``
+    for the web part, ``wato/json_explorer/...`` for the gui part.
 
-def _web_files() -> list[Path]:
-    """Static GUI assets under web/, or [] when the repo ships none."""
-    if not WEB_BASE.is_dir():
-        return []
-    return sorted(
-        path for path in WEB_BASE.rglob("*") if path.is_file() and "__pycache__" not in path.parts
-    )
-
-
-def _tar_relative_to(files: list[Path], base: Path) -> bytes:
-    """Uncompressed tar of ``files`` with arcnames relative to ``base`` (mode 644).
-
-    Used for the ``web`` part (arcnames like ``htdocs/json_api/vue-eval.html``,
-    relative to ``local/share/check_mk/web``) and the ``gui`` part (arcnames like
-    ``wato/json_explorer.py``, relative to ``local/lib/python3/cmk/gui/plugins``).
+    Ownership is zeroed (the tar must not carry the build machine's user) and
+    everything ships read-only except a special agent under ``libexec/``, which
+    Checkmk executes.
     """
     buffer = io.BytesIO()
     with tarfile.open(fileobj=buffer, mode="w") as tar:
@@ -106,21 +93,10 @@ def _tar_relative_to(files: list[Path], base: Path) -> bytes:
             info = tar.gettarinfo(str(file), arcname=str(arcname))
             info.uid = info.gid = 0
             info.uname = info.gname = ""
-            info.mode = 0o644
+            info.mode = 0o755 if "libexec" in arcname.parts else 0o644
             with file.open("rb") as handle:
                 tar.addfile(info, handle)
     return buffer.getvalue()
-
-
-def _gui_files() -> list[Path]:
-    """GUI page modules under gui/, or [] when the repo ships none."""
-    if not GUI_BASE.is_dir():
-        return []
-    return sorted(
-        path
-        for path in GUI_BASE.rglob("*")
-        if path.is_file() and path.suffix != ".pyc" and "__pycache__" not in path.parts
-    )
 
 
 def _locale_entries(family: str) -> list[tuple[str, bytes]]:
@@ -141,25 +117,21 @@ def _locale_entries(family: str) -> list[tuple[str, bytes]]:
     return entries
 
 
+def _add_bytes(tar: tarfile.TarFile, name: str, content: bytes) -> None:
+    """Add in-memory ``content`` as ``name``. A fresh TarInfo is already
+    unowned and mode 644, so only the size has to be filled in."""
+    info = tarfile.TarInfo(name)
+    info.size = len(content)
+    tar.addfile(info, io.BytesIO(content))
+
+
 def _inner_tar_from_bytes(entries: list[tuple[str, bytes]]) -> bytes:
     """Uncompressed tar built from in-memory (arcname, content) pairs."""
     buffer = io.BytesIO()
     with tarfile.open(fileobj=buffer, mode="w") as tar:
         for arcname, content in entries:
-            info = tarfile.TarInfo(arcname)
-            info.size = len(content)
-            info.mode = 0o644
-            info.uid = info.gid = 0
-            info.uname = info.gname = ""
-            tar.addfile(info, io.BytesIO(content))
+            _add_bytes(tar, arcname, content)
     return buffer.getvalue()
-
-
-def _add_bytes(tar: tarfile.TarFile, name: str, content: bytes) -> None:
-    info = tarfile.TarInfo(name)
-    info.size = len(content)
-    info.mode = 0o644
-    tar.addfile(info, io.BytesIO(content))
 
 
 def _manifest(
@@ -214,7 +186,7 @@ def build() -> Path:
     """
     project, mkp = _load_metadata()
     family = mkp["package_name"]
-    files = _plugin_files(family)
+    files = _shipped_files(PLUGINS_BASE / family)
     if not files:
         raise SystemExit(f"No plugin files found under {PLUGINS_BASE / family}")
 
@@ -222,7 +194,7 @@ def build() -> Path:
     locale_entries = _locale_entries(family)
 
     package_files: dict[str, list[str]] = {"cmk_addons_plugins": relative}
-    part_tars = [("cmk_addons_plugins.tar", _inner_tar(files))]
+    part_tars = [("cmk_addons_plugins.tar", _inner_tar(files, PLUGINS_BASE))]
     if locale_entries:
         package_files["locales"] = [arcname for arcname, _ in locale_entries]
         part_tars.append(("locales.tar", _inner_tar_from_bytes(locale_entries)))
@@ -256,7 +228,7 @@ def build_explorer() -> Path | None:
     """
     project, mkp = _load_metadata()
     explorer = mkp["explorer"]
-    web_files = _web_files()
+    web_files = _shipped_files(WEB_BASE)
     if not web_files:
         return None
     # web/ also holds committed, always-present assets (vue-eval.html), so a
@@ -269,14 +241,14 @@ def build_explorer() -> Path | None:
             f"Wizard bundle not built: {wizard_manifest.relative_to(REPO)} is missing. "
             "Run 'make frontend' before packaging the Explorer."
         )
-    gui_files = _gui_files()
+    gui_files = _shipped_files(GUI_BASE)
 
     version = project["version"]
     package_files: dict[str, list[str]] = {"web": [str(f.relative_to(WEB_BASE)) for f in web_files]}
-    part_tars = [("web.tar", _tar_relative_to(web_files, WEB_BASE))]
+    part_tars = [("web.tar", _inner_tar(web_files, WEB_BASE))]
     if gui_files:
         package_files["gui"] = [str(f.relative_to(GUI_BASE)) for f in gui_files]
-        part_tars.append(("gui.tar", _tar_relative_to(gui_files, GUI_BASE)))
+        part_tars.append(("gui.tar", _inner_tar(gui_files, GUI_BASE)))
 
     manifest = _manifest(
         name=explorer["package_name"],
