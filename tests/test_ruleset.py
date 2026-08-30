@@ -69,6 +69,18 @@ def test_calc_accepts_the_second_operand(ruleset):
     ruleset._validate_calc("value / other * 100")  # must not raise
 
 
+def test_piggyback_labels_need_a_piggyback_host(ruleset):
+    ruleset._validate_extraction(
+        {"piggyback_host": "name", "piggyback_labels": [{"path": "region"}]}
+    )
+    with pytest.raises(ValidationError, match="Create one host per element"):
+        ruleset._validate_extraction({"piggyback_labels": [{"path": "region"}]})
+    with pytest.raises(ValidationError, match="Create one host per element"):
+        ruleset._validate_extraction(
+            {"piggyback_host": "  ", "piggyback_labels": [{"path": "region"}]}
+        )
+
+
 def test_calc_and_its_second_path_must_agree(ruleset):
     """Either half alone is a silent no-op, so both are rejected at config time."""
     ruleset._validate_extraction({"calc": "value / other", "calc_path": "total"})
@@ -175,6 +187,7 @@ def test_extraction_form_has_the_expected_keys(ruleset):
         "path",
         "label_path",
         "piggyback_host",
+        "piggyback_labels",
         "labels",
         "aggregate",
         "filter",

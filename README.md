@@ -39,6 +39,9 @@ Targets **Checkmk 2.4+** and the current stable plugin APIs
   labelled by a field you pick (or the index/key); multiple wildcards
   (e.g. `pods[*].containers[*].ready`) expand the cartesian product, with
   composite `<pod> / <container>` labels
+- **Host labels on the created hosts**: a piggyback host can carry labels
+  resolved from its own element (`region`, `role`, …), so folder rules and views
+  can target the hosts a `[*]` rule created
 - **One Checkmk host per element** (piggyback): instead of many services on the
   polling host, name a field within each `[*]` element and every element becomes
   a host of its own — so an API describing a fleet gives you hosts, each with its
@@ -437,6 +440,27 @@ Three things to know:
   So does anything you extract from outside the wildcard, such as an aggregation.
 - **If an endpoint is unreachable**, its services report the failure on the
   polling host: there is no response to read host names out of.
+
+### Labelling the hosts a `[*]` rule creates
+
+A piggyback host *is* the element it came from, so it can carry that element's
+own facts as **host labels** — which is what lets folder rules, views and
+filters target them. Given `GET /cluster` → `{"nodes": [{"name": "node-01",
+"health": "UP", "region": "eu-west", "role": "worker"}, …]}`:
+
+| Service name | JSON path | One host per element | Labels for that host |
+|---|---|---|---|
+| `Health` | `nodes[*].health` | `name` | `region`, `role` (as key `tier`) |
+
+Each created host then carries `json_api/region:eu-west` and
+`json_api/tier:worker`, resolved from *its own* element. The key defaults to the
+path's last segment.
+
+These are **host** labels on the created host, distinct from *Service labels*
+(which describe the individual service) and from the endpoint's own *Host
+labels* (which are resolved from the response root and stay on the polling host,
+because they describe the API rather than any element of it). Setup rejects them
+without a piggyback host name — there would be no host to attach them to.
 
 ### Aggregating a collection
 
