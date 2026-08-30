@@ -1384,15 +1384,38 @@ def test_split_by_host_partitions_and_strips_the_routing_key(agent):
         {"service": "C", "host": "h1"},
         {"service": "D", "host": "h2"},
     ]
-    own, piggybacked = agent._split_by_host(results)
+    own, piggybacked, labels = agent._split_by_host(results)
     assert own == [{"service": "A"}]
     assert piggybacked == {
         "h1": [{"service": "B"}, {"service": "C"}],
         "h2": [{"service": "D"}],
     }
+    assert labels == {}
     # 'host' is internal routing, never part of the section format.
     assert all("host" not in r for r in own)
     assert all("host" not in r for group in piggybacked.values() for r in group)
+
+
+def test_split_by_host_merges_labels_per_piggyback_host(agent):
+    """Host labels describe the HOST, so every service placed on it contributes
+    to one map (later wins per key) instead of each writing its own."""
+    results = [
+        {"service": "A", "host": None, "host_labels": {"ignored": "1"}},
+        {"service": "B", "host": "h1", "host_labels": {"role": "worker"}},
+        {"service": "C", "host": "h1", "host_labels": {"region": "eu"}},
+        {"service": "D", "host": "h1", "host_labels": {"role": "leader"}},
+        {"service": "E", "host": "h2", "host_labels": {}},
+    ]
+    own, piggybacked, labels = agent._split_by_host(results)
+    assert labels == {"h1": {"role": "leader", "region": "eu"}}
+    # An element that resolved none contributes no entry at all, and the polling
+    # host's own results never route their labels here.
+    assert "h2" not in labels
+    # Both routing keys are stripped from what the check actually sees.
+    assert own == [{"service": "A"}]
+    assert all(
+        "host" not in r and "host_labels" not in r for group in piggybacked.values() for r in group
+    )
 
 
 def test_main_emits_a_piggyback_section_per_host(agent, monkeypatch, capsys):
@@ -1431,6 +1454,62 @@ def test_main_emits_a_piggyback_section_per_host(agent, monkeypatch, capsys):
     # The last piggyback section is closed, or later agent output would be
     # attributed to that host.
     assert lines[-1] == "<<<<>>>>"
+
+
+def test_main_labels_each_piggyback_host_from_its_own_element(agent, monkeypatch, capsys):
+    """Each created host carries the labels of the element it came from - the
+    whole point of piggybacking is that the element IS the host, so 'region' must
+    follow the element rather than landing on the polling host."""
+    doc = {
+        "cluster": "prod",
+        "nodes": [
+            {"name": "node-01", "health": "UP", "region": "eu-west", "role": "worker"},
+            {"name": "node-02", "health": "DOWN", "region": "us-east", "role": "leader"},
+        ],
+    }
+    monkeypatch.setattr(
+        agent, "_fetch", lambda endpoint, secret, debug=False: (doc, None, {"status": 200})
+    )
+    endpoint = {
+        "url": "http://cluster",
+        "extractions": [
+            {
+                "path": "nodes[*].health",
+                "service": "Health",
+                "piggyback_host": "name",
+                "piggyback_labels": [{"path": "region"}, {"path": "role", "key": "tier"}],
+            }
+        ],
+        "host_labels": [{"path": "cluster", "key": "kind"}],
+    }
+    assert agent.main(["--endpoint", json.dumps(endpoint)]) == 0
+    sections = capsys.readouterr().out.splitlines()
+
+    node1 = json.loads(sections[sections.index("<<<<node-01>>>>") + 2])
+    node2 = json.loads(sections[sections.index("<<<<node-02>>>>") + 2])
+    # The key defaults to the path's last segment, or is taken from 'key'.
+    assert node1["host_labels"] == {"region": "eu-west", "tier": "worker"}
+    assert node2["host_labels"] == {"region": "us-east", "tier": "leader"}
+    # The endpoint's own root-scoped host labels stay on the polling host: they
+    # describe the API, not any element of it.
+    own = json.loads(sections[1])
+    assert "kind" not in node1["host_labels"]
+    assert set(own["host_labels"]) == {"kind"}
+
+
+def test_piggyback_labels_are_ignored_without_a_piggyback_host(agent):
+    """Without a host to attach to they would silently become labels of the
+    POLLING host, which is not what 'label the host I created' asked for."""
+    specs = [
+        {
+            "path": "nodes[*].health",
+            "service": "Health",
+            "piggyback_labels": [{"path": "region"}],
+        }
+    ]
+    doc = {"nodes": [{"name": "n1", "health": "UP", "region": "eu"}]}
+    results = agent._extract(doc, specs, "http://test/h")
+    assert all(r["host_labels"] == {} for r in results)
 
 
 def test_main_emits_no_piggyback_markers_without_piggyback_hosts(agent, monkeypatch, capsys):
