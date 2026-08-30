@@ -12,6 +12,23 @@ this list needs none.
 `scripts/gen_changelog.py --version X.Y.Z` appends the matching section to the
 GitHub Release body, so these notes travel with the release people actually read.
 
+## [0.14.0]
+
+### A timestamp field with format `auto` now reads HTTP-dates
+
+`Interpret the value as → a timestamp` with format `auto` previously accepted a
+number (epoch seconds or milliseconds) or an ISO 8601 string, and reported
+anything else as `Not a valid timestamp` (UNKNOWN). It now also accepts an
+**HTTP-date** — `Wed, 21 Oct 2015 07:28:00 GMT` — because that is what
+`Last-Modified`, `Expires` and a date-form `Retry-After` contain, and those only
+became reachable in this release (see the `@header.` paths below).
+
+**Effect:** a field that was stuck at UNKNOWN because its value was an HTTP-date
+now resolves to a real age. If that field has upper levels configured, it can go
+WARN or CRIT on the next check where it previously sat UNKNOWN. This only affects
+fields explicitly configured as timestamps whose value is an HTTP-date; the
+explicit `ISO 8601` format is unchanged and stays strict.
+
 ## [0.13.0]
 
 ### Sending a field to the inventory takes its service away
