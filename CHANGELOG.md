@@ -3,6 +3,32 @@
 All notable changes to this project, one section per released version.
 Generated from the git history by `scripts/gen_changelog.py`.
 
+## [0.14.0] - 2026-08-30
+
+### Features
+
+- Give piggyback hosts host labels from their own element ([#165](https://github.com/otAAAh/checkmk-json-agent/pull/165)) ([`07b7799`](https://github.com/otAAAh/checkmk-json-agent/commit/07b7799))
+- Pick response headers instead of typing '@header.' paths ([#162](https://github.com/otAAAh/checkmk-json-agent/pull/162)) ([`3c904b6`](https://github.com/otAAAh/checkmk-json-agent/commit/3c904b6))
+- Compute a ratio from a second path with the 'other' variable ([#160](https://github.com/otAAAh/checkmk-json-agent/pull/160)) ([`c294cdf`](https://github.com/otAAAh/checkmk-json-agent/commit/c294cdf))
+- Read a value from a response header with an '@header.' path ([#159](https://github.com/otAAAh/checkmk-json-agent/pull/159)) ([`bbd8828`](https://github.com/otAAAh/checkmk-json-agent/commit/bbd8828))
+
+### Fixes
+
+- Do not crash the rule form when a required field is emptied ([#163](https://github.com/otAAAh/checkmk-json-agent/pull/163)) ([`2928cc4`](https://github.com/otAAAh/checkmk-json-agent/commit/2928cc4))
+
+### Other
+
+- The 0.14.0 forum announcement and its upgrade note ([#166](https://github.com/otAAAh/checkmk-json-agent/pull/166)) ([`d5c16db`](https://github.com/otAAAh/checkmk-json-agent/commit/d5c16db))
+- Deps: Bump ruff from 0.16.3 to 0.16.4 ([#154](https://github.com/otAAAh/checkmk-json-agent/pull/154)) ([`a0d3da8`](https://github.com/otAAAh/checkmk-json-agent/commit/a0d3da8))
+- Use Checkmk's own click-outside and key-shortcut helpers ([#158](https://github.com/otAAAh/checkmk-json-agent/pull/158)) ([`c3f2d44`](https://github.com/otAAAh/checkmk-json-agent/commit/c3f2d44))
+- Bump the actions group with 2 updates ([#155](https://github.com/otAAAh/checkmk-json-agent/pull/155)) ([`deddc2d`](https://github.com/otAAAh/checkmk-json-agent/commit/deddc2d))
+- Deps: Bump mypy from 2.3.0 to 2.3.1 ([#153](https://github.com/otAAAh/checkmk-json-agent/pull/153)) ([`e628584`](https://github.com/otAAAh/checkmk-json-agent/commit/e628584))
+- Collapse duplicated logic, no behaviour change ([#157](https://github.com/otAAAh/checkmk-json-agent/pull/157)) ([`7fa1e91`](https://github.com/otAAAh/checkmk-json-agent/commit/7fa1e91))
+- Bump the actions group with 2 updates ([#152](https://github.com/otAAAh/checkmk-json-agent/pull/152)) ([`37aa37e`](https://github.com/otAAAh/checkmk-json-agent/commit/37aa37e))
+- Deps: Bump ruff from 0.16.1 to 0.16.3 ([#151](https://github.com/otAAAh/checkmk-json-agent/pull/151)) ([`b0aaa34`](https://github.com/otAAAh/checkmk-json-agent/commit/b0aaa34))
+- Refresh the Exchange listing, four releases behind ([#150](https://github.com/otAAAh/checkmk-json-agent/pull/150)) ([`f9aac06`](https://github.com/otAAAh/checkmk-json-agent/commit/f9aac06))
+- Add the 0.13.0 forum announcement ([#149](https://github.com/otAAAh/checkmk-json-agent/pull/149)) ([`c9613a8`](https://github.com/otAAAh/checkmk-json-agent/commit/c9613a8))
+
 ## [0.13.0] - 2026-08-14
 
 ### Features

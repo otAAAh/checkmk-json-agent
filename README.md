@@ -131,8 +131,8 @@ Download the `.mkp` from the [Releases](https://github.com/otAAAh/checkmk-json-a
 page (or [build it](#building-from-source)), then, as the site user:
 
 ```sh
-mkp add json_api-0.13.0.mkp
-mkp enable json_api 0.13.0
+mkp add json_api-0.14.0.mkp
+mkp enable json_api 0.14.0
 ```
 
 Or upload it in the GUI under **Setup → Extension packages**.
