@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-2.0-only
 [project]
 name = "checkmk-json-agent"
-version = "0.14.0"
+version = "0.15.0"
 description = "Generic Checkmk special agent for monitoring any HTTP/JSON API"
 requires-python = ">=3.12"
 license = "GPL-2.0-only"

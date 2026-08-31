@@ -3,6 +3,23 @@
 All notable changes to this project, one section per released version.
 Generated from the git history by `scripts/gen_changelog.py`.
 
+## [0.15.0] - 2026-08-31
+
+### Features
+
+- Authenticate with OAuth 2.0 client credentials ([#172](https://github.com/otAAAh/checkmk-json-agent/pull/172)) ([`1eecc5b`](https://github.com/otAAAh/checkmk-json-agent/commit/1eecc5b))
+
+### Fixes
+
+- The wizard's token preview could echo the client secret ([#173](https://github.com/otAAAh/checkmk-json-agent/pull/173)) ([`a41fd92`](https://github.com/otAAAh/checkmk-json-agent/commit/a41fd92))
+
+### Other
+
+- Prepare 0.15.0 - announcement and refreshed Exchange listings ([#174](https://github.com/otAAAh/checkmk-json-agent/pull/174)) ([`6c017aa`](https://github.com/otAAAh/checkmk-json-agent/commit/6c017aa))
+- Bump the actions group with 2 updates ([#170](https://github.com/otAAAh/checkmk-json-agent/pull/170)) ([`19ca238`](https://github.com/otAAAh/checkmk-json-agent/commit/19ca238))
+- Deps: Bump ruff from 0.16.4 to 0.16.5 ([#169](https://github.com/otAAAh/checkmk-json-agent/pull/169)) ([`df57976`](https://github.com/otAAAh/checkmk-json-agent/commit/df57976))
+- Spike — go generic client-credentials for OAuth2 ([#171](https://github.com/otAAAh/checkmk-json-agent/pull/171)) ([`255bc95`](https://github.com/otAAAh/checkmk-json-agent/commit/255bc95))
+
 ## [0.14.0] - 2026-08-30
 
 ### Features
