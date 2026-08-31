@@ -657,9 +657,16 @@ def _store_token(spec: dict, secret: str | None, token: str, ttl: float) -> None
     entry = {"token": token, "expires_at": time.time() + max(ttl - _TOKEN_EXPIRY_SKEW, 0.0)}
     try:
         temporary = path.with_suffix(f".{os.getpid()}.tmp")
-        temporary.write_text(json.dumps(entry), encoding="utf-8")
-        # An access token is a bearer credential at rest, exactly like the
-        # password store's own file.
+        # An access token is a bearer credential at rest. Storing one is the
+        # whole point of caching it - the alternative is asking the identity
+        # provider on every check - and it cannot be hashed (it has to be sent)
+        # or encrypted usefully (the key would have to sit beside it). Checkmk's
+        # own password store and the Graph client in cmk/plugins/emailchecks
+        # keep credentials on disk the same way. Mitigated by 0600 and by living
+        # in the site's tmp, which is cleared with the site.
+        temporary.write_text(  # codeql[py/clear-text-storage-sensitive-data]
+            json.dumps(entry), encoding="utf-8"
+        )
         temporary.chmod(0o600)
         temporary.replace(path)
         _prune_cache(path.parent)
@@ -712,7 +719,14 @@ def _request_token(endpoint: dict, spec: dict, secret: str | None, debug: bool) 
             timeout=timeout if timeout is not None else 30.0,
         )
     except requests.exceptions.RequestException as exc:
-        raise _TokenError(f"Token request failed: {_redact_secret(str(exc), secret)}") from exc
+        # Only the exception TYPE and the token URL, never the message. requests
+        # can quote the request it was making, and with the credentials sent in
+        # the body that request literally contains the client secret - redacting
+        # it afterwards is a weaker guarantee than never assembling it. The
+        # token URL is configuration, not a credential.
+        raise _TokenError(
+            f"Token request to {spec['token_url']} failed ({type(exc).__name__})"
+        ) from exc
     with response:
         if not 200 <= response.status_code < 300:
             reason = getattr(response, "reason", "") or ""

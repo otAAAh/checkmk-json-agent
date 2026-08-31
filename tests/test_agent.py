@@ -605,6 +605,26 @@ def test_oauth2_token_failure_is_reported_without_the_secret(agent, monkeypatch,
     assert "s3cret" not in error
 
 
+def test_oauth2_connection_failure_reports_no_request_detail(agent, monkeypatch, token_cache):
+    """requests can quote the request it was making, and with the credentials
+    sent in the BODY that request contains the client secret. So the error
+    carries only the exception type and the token URL - never its message."""
+
+    def boom(_self, _url, **_kwargs):
+        raise agent.requests.exceptions.ConnectionError(
+            "failed posting to https://idp/token with body client_secret=s3cret"
+        )
+
+    monkeypatch.setattr(agent.requests.Session, "post", boom)
+    _capture_request(agent, monkeypatch)
+    endpoint = {**OAUTH2_ENDPOINT, "oauth2": {**OAUTH2_ENDPOINT["oauth2"], "client_auth": "post"}}
+
+    _document, error, _meta = agent._fetch(endpoint, "s3cret")
+
+    assert "s3cret" not in error
+    assert "ConnectionError" in error and "https://idp/token" in error
+
+
 def test_oauth2_token_response_without_a_token_is_an_error(agent, monkeypatch, token_cache):
     _capture_token_post(agent, monkeypatch, response=_FakeTokenResponse(payload={"foo": "bar"}))
     _capture_request(agent, monkeypatch)
