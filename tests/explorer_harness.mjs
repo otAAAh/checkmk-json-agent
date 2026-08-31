@@ -161,11 +161,25 @@ const FIXTURE_KEY_QUERY = {
   auth: { type: "query", username: "", pwid: "pw-store-id", field: "api_key" },
 };
 
+const FIXTURE_OAUTH2 = {
+  ...FIXTURE,
+  name: "oauth2",
+  url: "https://app.example.com/v4/health",
+  auth: {
+    type: "oauth2", username: "", pwid: "pw-store-id", field: "",
+    tokenUrl: "https://login.example.com/oauth2/v2.0/token",
+    clientId: "monitoring",
+    scope: "api://monitoring/.default",
+    audience: "",
+    clientAuth: "post",
+  },
+};
+
 // Run the generator code with a known fixture and print the result. This block
 // shares the script's top-level scope, so it can see `state`, `valuePy`, etc.
 src += `
 ;(function () {
-  state.endpoints = [${JSON.stringify(FIXTURE)}, ${JSON.stringify(FIXTURE_KEY_HEADER)}, ${JSON.stringify(FIXTURE_KEY_QUERY)}];
+  state.endpoints = [${JSON.stringify(FIXTURE)}, ${JSON.stringify(FIXTURE_KEY_HEADER)}, ${JSON.stringify(FIXTURE_KEY_QUERY)}, ${JSON.stringify(FIXTURE_OAUTH2)}];
   state.active = 0;
   const out = {
     valuePy: valuePy(),

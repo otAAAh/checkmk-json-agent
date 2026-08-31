@@ -85,6 +85,58 @@ def _connection() -> dict[str, Any]:
     return {"url": request.get_str_input_mandatory("url").strip()}
 
 
+class _TokenError(Exception):
+    """The OAuth2 token could not be obtained; reported as the fetch error."""
+
+
+def _access_token(params: dict[str, Any], conn: dict[str, Any]) -> str:
+    """Exchange the client credentials for an access token.
+
+    Unlike the agent this does NOT cache: the wizard fetch is a one-off preview
+    with a person waiting, and a cache would only add a way for the preview to
+    disagree with what the agent will do. The agent owns the caching.
+    """
+    secret = _resolve_password(params.get("client_secret"))
+    data = {"grant_type": "client_credentials"}
+    if scope := params.get("scope"):
+        data["scope"] = str(scope)
+    if audience := params.get("audience"):
+        data["audience"] = str(audience)
+
+    session = requests.Session()
+    if params.get("client_auth") == "post":
+        data["client_id"] = str(params.get("client_id", ""))
+        data["client_secret"] = secret
+    else:
+        session.auth = (str(params.get("client_id", "")), secret)
+
+    try:
+        response = session.post(
+            params["token_url"],
+            data=data,
+            timeout=conn.get("timeout") or _TIMEOUT,
+            verify=conn.get("verify_cert", True),
+        )
+    except requests.RequestException as exc:
+        raise _TokenError(_("Token request failed: %s") % exc) from exc
+    if not 200 <= response.status_code < 300:
+        raise _TokenError(
+            _(
+                "Token request returned HTTP %d — check the client credentials, the "
+                "scope, and how the client credentials are sent"
+            )
+            % response.status_code
+        )
+    try:
+        payload = response.json()
+    except ValueError as exc:
+        raise _TokenError(_("Token response is not valid JSON")) from exc
+    token = payload.get("access_token") if isinstance(payload, dict) else None
+    if not isinstance(token, str) or not token:
+        raise _TokenError(_("Token response carries no 'access_token'"))
+    return token
+
+
 def _perform_request(conn: dict[str, Any]) -> requests.Response:
     session = requests.Session()
     headers = {h["name"]: h["value"] for h in conn.get("headers", []) if isinstance(h, dict)}
@@ -102,6 +154,8 @@ def _perform_request(conn: dict[str, Any]) -> requests.Response:
             headers[params.get("header") or "X-API-Key"] = _resolve_password(params.get("key"))
         elif kind == "auth_query":
             query = {params.get("parameter") or "api_key": _resolve_password(params.get("key"))}
+        elif kind == "auth_oauth2":
+            headers["Authorization"] = "Bearer " + _access_token(params, conn)
 
     method = str(conn.get("method", "GET")).upper()
     body = conn.get("body") if method == "POST" else None
@@ -144,6 +198,11 @@ class JsonExplorerFetchPage(AjaxPage):
 
         try:
             resp = _perform_request(conn)
+        except _TokenError as exc:
+            # Reported on its own: "the token endpoint said no" is a different
+            # problem from "the API said no", and conflating them sends the
+            # operator to the wrong URL.
+            return {"ok": False, "error": str(exc)}
         except requests.RequestException as exc:
             # The message of a connection error quotes the URL it tried to
             # reach - including an API key placed in a query parameter.

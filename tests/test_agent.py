@@ -452,6 +452,213 @@ def _capture_request(agent, monkeypatch, response=None):
     return captured
 
 
+# --- OAuth2 client credentials ---------------------------------------------
+
+OAUTH2_ENDPOINT = {
+    "url": "http://api/health",
+    "auth": "auth_oauth2",
+    "oauth2": {
+        "token_url": "https://idp/token",
+        "client_id": "monitoring",
+        "scope": "api://monitoring/.default",
+        "client_auth": "basic",
+    },
+}
+
+
+class _FakeTokenResponse(_FakeResponse):
+    """A token endpoint's answer; _request_token uses .json(), not iter_content."""
+
+    def __init__(self, payload=None, status_code=200):
+        super().__init__(body=b"", status_code=status_code)
+        self._payload = {"access_token": "tok-1", "expires_in": 3600}
+        if payload is not None:
+            self._payload = payload
+
+    def json(self):
+        if self._payload is _NOT_JSON:
+            raise ValueError("no json")
+        return self._payload
+
+
+_NOT_JSON = object()
+
+
+@pytest.fixture
+def token_cache(agent, monkeypatch, tmp_path):
+    """Isolate the on-disk token cache so tests cannot see each other's tokens."""
+    directory = tmp_path / "tokens"
+    directory.mkdir()
+    monkeypatch.setattr(
+        agent,
+        "_cache_dir",
+        lambda name=agent._CACHE_DIR_NAME: directory if "token" in name else None,
+    )
+    return directory
+
+
+def _capture_token_post(agent, monkeypatch, response=None):
+    """Patch Session.post so the token request's kwargs can be inspected."""
+    calls = []
+
+    def fake_post(self, url, **kwargs):
+        calls.append({"url": url, "auth": self.auth, **kwargs})
+        return response() if callable(response) else (response or _FakeTokenResponse())
+
+    monkeypatch.setattr(agent.requests.Session, "post", fake_post)
+    return calls
+
+
+def test_oauth2_exchanges_credentials_and_sends_a_bearer_token(agent, monkeypatch, token_cache):
+    posts = _capture_token_post(agent, monkeypatch)
+    captured = _capture_request(agent, monkeypatch)
+
+    document, error, _meta = agent._fetch(OAUTH2_ENDPOINT, "s3cret")
+
+    assert error is None and document == {"ok": 1}
+    # The client credentials went to the TOKEN url, as a basic-auth pair.
+    (post,) = posts
+    assert post["url"] == "https://idp/token"
+    assert post["auth"] == ("monitoring", "s3cret")
+    assert post["data"]["grant_type"] == "client_credentials"
+    assert post["data"]["scope"] == "api://monitoring/.default"
+    # The client secret is never sent to the API, only the access token is.
+    assert captured["headers"]["Authorization"] == "Bearer tok-1"
+
+
+def test_oauth2_can_send_the_credentials_in_the_body(agent, monkeypatch, token_cache):
+    endpoint = {**OAUTH2_ENDPOINT, "oauth2": {**OAUTH2_ENDPOINT["oauth2"], "client_auth": "post"}}
+    posts = _capture_token_post(agent, monkeypatch)
+    _capture_request(agent, monkeypatch)
+
+    agent._fetch(endpoint, "s3cret")
+
+    (post,) = posts
+    assert post["auth"] is None  # not in the Authorization header
+    assert post["data"]["client_id"] == "monitoring"
+    assert post["data"]["client_secret"] == "s3cret"
+
+
+def test_oauth2_reuses_a_cached_token_across_fetches(agent, monkeypatch, token_cache):
+    posts = _capture_token_post(agent, monkeypatch)
+    _capture_request(agent, monkeypatch)
+
+    agent._fetch(OAUTH2_ENDPOINT, "s3cret")
+    agent._fetch(OAUTH2_ENDPOINT, "s3cret")
+
+    # One exchange for two requests: that is the point of caching the token.
+    assert len(posts) == 1
+
+
+def test_oauth2_refetches_an_expired_token(agent, monkeypatch, token_cache):
+    posts = _capture_token_post(
+        agent,
+        monkeypatch,
+        response=lambda: _FakeTokenResponse({"access_token": "tok-1", "expires_in": 1}),
+    )
+    _capture_request(agent, monkeypatch)
+
+    agent._fetch(OAUTH2_ENDPOINT, "s3cret")
+    # expires_in below the refresh skew means the entry is already stale.
+    agent._fetch(OAUTH2_ENDPOINT, "s3cret")
+
+    assert len(posts) == 2
+
+
+def test_oauth2_discards_a_cached_token_rejected_with_401(agent, monkeypatch, token_cache):
+    """A provider can revoke a token before it expires; one silent retry with a
+    fresh token beats reporting 401 until the cached entry times out."""
+    posts = _capture_token_post(agent, monkeypatch)
+    _capture_request(agent, monkeypatch)
+    agent._fetch(OAUTH2_ENDPOINT, "s3cret")  # seed the cache
+    assert len(posts) == 1
+
+    _capture_request(agent, monkeypatch, response=_FakeResponse(body=b"", status_code=401))
+    _document, error, meta = agent._fetch(OAUTH2_ENDPOINT, "s3cret")
+
+    assert "401" in error
+    assert len(posts) == 2  # the cached token was discarded and re-fetched
+    assert meta["attempts"] == 1  # the refresh is not a retry of the retry policy
+
+
+def test_oauth2_does_not_retry_a_401_on_a_freshly_minted_token(agent, monkeypatch, token_cache):
+    """Wrong credentials or scope answer 401 however often you ask, so a token
+    minted seconds ago earns no second attempt."""
+    posts = _capture_token_post(agent, monkeypatch)
+    _capture_request(agent, monkeypatch, response=_FakeResponse(body=b"", status_code=401))
+
+    _document, error, _meta = agent._fetch(OAUTH2_ENDPOINT, "s3cret")
+
+    assert "401" in error
+    assert len(posts) == 1
+
+
+def test_oauth2_token_failure_is_reported_without_the_secret(agent, monkeypatch, token_cache):
+    _capture_token_post(
+        agent, monkeypatch, response=_FakeTokenResponse(payload={}, status_code=401)
+    )
+    _capture_request(agent, monkeypatch)
+
+    _document, error, _meta = agent._fetch(OAUTH2_ENDPOINT, "s3cret")
+
+    assert "Token request returned HTTP 401" in error
+    assert "s3cret" not in error
+
+
+def test_oauth2_connection_failure_reports_no_request_detail(agent, monkeypatch, token_cache):
+    """requests can quote the request it was making, and with the credentials
+    sent in the BODY that request contains the client secret. So the error
+    carries only the exception type and the token URL - never its message."""
+
+    def boom(_self, _url, **_kwargs):
+        raise agent.requests.exceptions.ConnectionError(
+            "failed posting to https://idp/token with body client_secret=s3cret"
+        )
+
+    monkeypatch.setattr(agent.requests.Session, "post", boom)
+    _capture_request(agent, monkeypatch)
+    endpoint = {**OAUTH2_ENDPOINT, "oauth2": {**OAUTH2_ENDPOINT["oauth2"], "client_auth": "post"}}
+
+    _document, error, _meta = agent._fetch(endpoint, "s3cret")
+
+    assert "s3cret" not in error
+    assert "ConnectionError" in error and "https://idp/token" in error
+
+
+def test_oauth2_token_response_without_a_token_is_an_error(agent, monkeypatch, token_cache):
+    _capture_token_post(agent, monkeypatch, response=_FakeTokenResponse(payload={"foo": "bar"}))
+    _capture_request(agent, monkeypatch)
+
+    _document, error, _meta = agent._fetch(OAUTH2_ENDPOINT, "s3cret")
+    assert "no 'access_token'" in error
+
+
+def test_oauth2_debug_output_never_shows_the_bearer_token(agent, monkeypatch, token_cache, capsys):
+    """--debug prints the request headers, and for this mode one of them carries
+    the access token. _redacted_headers masks Authorization unconditionally;
+    this pins that, because CodeQL flags the flow and cannot see the sanitizer."""
+    _capture_token_post(agent, monkeypatch)
+    _capture_request(agent, monkeypatch)
+
+    agent._fetch(OAUTH2_ENDPOINT, "s3cret", debug=True)
+
+    err = capsys.readouterr().err
+    assert "header Authorization: <redacted>" in err
+    assert "tok-1" not in err  # the access token itself
+    assert "s3cret" not in err  # and the client secret
+
+
+def test_oauth2_token_cache_key_separates_credentials_and_scope(agent):
+    spec = OAUTH2_ENDPOINT["oauth2"]
+    base = agent._token_cache_key(spec, "s3cret")
+    # A different secret, scope or client must never share a cached token.
+    assert base != agent._token_cache_key(spec, "other")
+    assert base != agent._token_cache_key({**spec, "scope": "other"}, "s3cret")
+    assert base != agent._token_cache_key({**spec, "client_id": "other"}, "s3cret")
+    # The secret itself never appears in the key (it becomes a filename).
+    assert "s3cret" not in base
+
+
 def test_fetch_disables_redirects_when_configured(agent, monkeypatch):
     captured = _capture_request(agent, monkeypatch)
     doc, error, _meta = agent._fetch({"url": "http://x", "follow_redirects": False}, None)

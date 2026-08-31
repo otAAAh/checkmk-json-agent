@@ -198,7 +198,13 @@ function makeEndpoint(withSample) {
     name: "", url: "", method: "GET", body: "",
     headers: [],                 // [{name, value}]
     // 'field' names the header / query parameter for the API-key modes.
-    auth: { type: "none", username: "", pwid: "", field: "" },  // none | login | token | header | query
+    // none | login | token | header | query | oauth2. 'field' names the header /
+    // query parameter for the API-key modes; the oauth2 group is only used by
+    // that mode (token URL, client id, scope, audience, how to send the id).
+    auth: {
+      type: "none", username: "", pwid: "", field: "",
+      tokenUrl: "", clientId: "", scope: "", audience: "", clientAuth: "basic",
+    },
     verify_cert: true, follow_redirects: true, timeout: "", cache_ttl: "", accept_status: "",
     retries: "", retry_backoff: "0.5",
     proxy_mode: "default", proxy_url: "",   // default (env) | url | no_proxy
@@ -347,6 +353,19 @@ function renderConn() {
            <label>Parameter name</label><input type="text" id="c-authfield" value="${escAttr(e.auth.field)}" placeholder="api_key">
            <label>API key (store ID)</label><input type="text" id="c-pwid" value="${escAttr(e.auth.pwid)}" placeholder="ID from Setup → Passwords">
          </div>`
+      : e.auth.type === "oauth2"
+      ? `<div class="grid2">
+           <label>Token URL</label><input type="text" id="c-tokenurl" value="${escAttr(e.auth.tokenUrl)}" placeholder="https://login.example.com/oauth2/v2.0/token — NOT the API URL">
+           <label>Client ID</label><input type="text" id="c-clientid" value="${escAttr(e.auth.clientId)}">
+           <label>Client secret (store ID)</label><input type="text" id="c-pwid" value="${escAttr(e.auth.pwid)}" placeholder="ID from Setup → Passwords">
+           <label>Scope</label><input type="text" id="c-scope" value="${escAttr(e.auth.scope)}" placeholder="(optional) e.g. api://monitoring/.default">
+           <label>Audience</label><input type="text" id="c-audience" value="${escAttr(e.auth.audience)}" placeholder="(optional) required by some providers, e.g. Auth0">
+           <label>Send credentials</label>
+           <select id="c-clientauth">
+             <option value="basic"${e.auth.clientAuth !== "post" ? " selected" : ""}>In the Authorization header (HTTP basic)</option>
+             <option value="post"${e.auth.clientAuth === "post" ? " selected" : ""}>In the request body</option>
+           </select>
+         </div>`
       : "";
   const bodyRow =
     e.method === "POST"
@@ -367,6 +386,7 @@ function renderConn() {
          <option value="token"${e.auth.type === "token" ? " selected" : ""}>Bearer token</option>
          <option value="header"${e.auth.type === "header" ? " selected" : ""}>API key in a request header</option>
          <option value="query"${e.auth.type === "query" ? " selected" : ""}>API key in a query parameter</option>
+         <option value="oauth2"${e.auth.type === "oauth2" ? " selected" : ""}>OAuth 2.0 (client credentials)</option>
        </select>
        ${bodyRow}
      </div>
@@ -414,6 +434,13 @@ function renderConn() {
   bind("c-clientkey", () => { e.client_key = $("c-clientkey").value; renderOutputs(); });
   bind("c-user", () => { e.auth.username = $("c-user").value; renderOutputs(); });
   bind("c-pwid", () => { e.auth.pwid = $("c-pwid").value; renderOutputs(); });
+  bind("c-tokenurl", () => { e.auth.tokenUrl = $("c-tokenurl").value; renderOutputs(); });
+  bind("c-clientid", () => { e.auth.clientId = $("c-clientid").value; renderOutputs(); });
+  bind("c-scope", () => { e.auth.scope = $("c-scope").value; renderOutputs(); });
+  bind("c-audience", () => { e.auth.audience = $("c-audience").value; renderOutputs(); });
+  if ($("c-clientauth")) {
+    $("c-clientauth").onchange = () => { e.auth.clientAuth = $("c-clientauth").value; renderOutputs(); };
+  }
   bind("c-authfield", () => { e.auth.field = $("c-authfield").value; renderOutputs(); });
   if ($("c-body")) $("c-body").oninput = () => { e.body = $("c-body").value; renderOutputs(); };
 
@@ -797,12 +824,26 @@ function pyAuth(auth) {
   if (auth.type === "query") {
     return `('auth_query', {'parameter': ${pyStr(auth.field || "api_key")}, 'key': ${ref}})`;
   }
+  if (auth.type === "oauth2") {
+    const parts = [
+      `'token_url': ${pyStr(auth.tokenUrl || "")}`,
+      `'client_id': ${pyStr(auth.clientId || "")}`,
+      `'client_secret': ${ref}`,
+    ];
+    if (auth.scope && auth.scope.trim()) parts.push(`'scope': ${pyStr(auth.scope.trim())}`);
+    if (auth.audience && auth.audience.trim()) parts.push(`'audience': ${pyStr(auth.audience.trim())}`);
+    parts.push(`'client_auth': ${pyStr(auth.clientAuth === "post" ? "post" : "basic")}`);
+    return `('auth_oauth2', {${parts.join(", ")}})`;
+  }
   return `('auth_token', {'token': ${ref}})`;
 }
 
 // The agent-facing auth type for the CLI blob: a bare string, since the secret
 // travels separately (server_side_calls _endpoint_json).
-const AUTH_KIND = { login: "auth_login", token: "auth_token", header: "auth_header", query: "auth_query" };
+const AUTH_KIND = {
+  login: "auth_login", token: "auth_token", header: "auth_header",
+  query: "auth_query", oauth2: "auth_oauth2",
+};
 
 function anyAuth() { return state.endpoints.some(e => e.auth.type !== "none"); }
 
@@ -923,6 +964,17 @@ function endpointCliObj(e) {
   if (e.auth.type === "login") o.username = e.auth.username || "";
   if (e.auth.type === "header") o.auth_header = e.auth.field || "X-API-Key";
   if (e.auth.type === "query") o.auth_query = e.auth.field || "api_key";
+  if (e.auth.type === "oauth2") {
+    // Mirrors _endpoint_json: the non-secret half rides in the blob, the client
+    // secret travels separately as --secret_<i>.
+    o.oauth2 = {
+      token_url: e.auth.tokenUrl || "",
+      client_id: e.auth.clientId || "",
+      scope: (e.auth.scope || "").trim() || null,
+      audience: (e.auth.audience || "").trim() || null,
+      client_auth: e.auth.clientAuth === "post" ? "post" : "basic",
+    };
+  }
   return o;
 }
 

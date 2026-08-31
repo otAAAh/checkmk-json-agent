@@ -54,6 +54,21 @@ class AuthQuery(BaseModel, frozen=True):
     key: Secret
 
 
+class AuthOAuth2(BaseModel, frozen=True):
+    # The machine-to-machine grant: the agent trades these for a short-lived
+    # access token. Only the SECRET travels as a Secret reference; the token URL,
+    # client id, scope and audience are not credentials and ride in the endpoint
+    # blob like every other non-secret setting.
+    token_url: str
+    client_id: str
+    client_secret: Secret
+    scope: str | None = None
+    audience: str | None = None
+    # Whether the client id/secret go in an HTTP basic header or the POST body.
+    # RFC 6749 allows both and providers disagree; see the ruleset help.
+    client_auth: Literal["basic", "post"] = "basic"
+
+
 class LabelSpec(BaseModel, frozen=True):
     path: str
     # Optional key override; the agent derives it from the path's last segment
@@ -182,6 +197,7 @@ class Endpoint(BaseModel, frozen=True):
         | tuple[Literal["auth_token"], AuthToken]
         | tuple[Literal["auth_header"], AuthHeader]
         | tuple[Literal["auth_query"], AuthQuery]
+        | tuple[Literal["auth_oauth2"], AuthOAuth2]
         | None
     ) = None
     extractions: Sequence[Extraction] = ()
@@ -249,6 +265,16 @@ def _endpoint_json(endpoint: Endpoint, macros: Mapping[str, str]) -> str:
             spec["auth_header"] = header
         case ("auth_query", AuthQuery(parameter=parameter)):
             spec["auth_query"] = parameter
+        case ("auth_oauth2", AuthOAuth2() as oauth2):
+            # Macros are resolved in the token URL too: a shared rule may well
+            # point at a per-host identity provider.
+            spec["oauth2"] = {
+                "token_url": replace_macros(oauth2.token_url, macros),
+                "client_id": oauth2.client_id,
+                "scope": oauth2.scope,
+                "audience": oauth2.audience,
+                "client_auth": oauth2.client_auth,
+            }
     return json.dumps(spec)
 
 
@@ -268,6 +294,8 @@ def _commands_function(
                 args += [f"--secret_{index}-id", token]
             case ("auth_header", AuthHeader(key=key)) | ("auth_query", AuthQuery(key=key)):
                 args += [f"--secret_{index}-id", key]
+            case ("auth_oauth2", AuthOAuth2(client_secret=client_secret)):
+                args += [f"--secret_{index}-id", client_secret]
     yield SpecialAgentCommand(command_arguments=args)
 
 

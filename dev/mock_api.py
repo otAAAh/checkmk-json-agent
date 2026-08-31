@@ -16,6 +16,13 @@ Endpoints (all GET unless noted):
   /query    POST — echoes the posted JSON under {"echo": ...} (+ a status)
   /secure   401 unless an Authorization header is present (basic OR bearer);
             returns {"status": "ok", "authorized": true} when it is
+  /token    POST - an OAuth 2.0 client-credentials token endpoint. Accepts the
+            client id/secret either as HTTP basic auth or in the request body,
+            so both settings of "How to send the client credentials" can be
+            exercised. Credentials: monitoring / s3cret (dev only!).
+  /oauth    401 unless a bearer token issued by /token is presented; returns a
+            small document plus how many tokens have been issued so far, which
+            is how you can SEE the agent caching the token between checks
   /down     always HTTP 500 (test the "endpoint unreachable/UNKNOWN" path)
   /slow     responds after ~5s (test per-endpoint timeouts)
   /notjson  returns non-JSON text (test the non-JSON UNKNOWN path)
@@ -24,6 +31,7 @@ Endpoints (all GET unless noted):
 from __future__ import annotations
 
 import argparse
+import base64
 import contextlib
 import json
 import time
@@ -72,6 +80,16 @@ METRICS = {
 }
 
 
+# The dev-only OAuth 2.0 client the /token endpoint accepts, and the tokens it
+# has handed out. Deliberately trivial: this exists to exercise the agent's flow,
+# not to model an identity provider.
+OAUTH_CLIENT = ("monitoring", "s3cret")
+ISSUED_TOKENS: dict[str, float] = {}
+# Short enough that a token visibly expires while you watch, long enough that a
+# normal check interval reuses the cached one.
+OAUTH_TOKEN_TTL = 300
+
+
 class Handler(BaseHTTPRequestHandler):
     def _send(self, code: int, payload: object, *, raw: bytes | None = None) -> None:
         body = raw if raw is not None else json.dumps(payload).encode()
@@ -92,6 +110,21 @@ class Handler(BaseHTTPRequestHandler):
                 self._send(200, {"status": "ok", "authorized": True})
             else:
                 self._send(401, {"error": "missing Authorization header"})
+        elif path == "/oauth":
+            token = (self.headers.get("Authorization") or "").removeprefix("Bearer ").strip()
+            if token and token in ISSUED_TOKENS and time.time() < ISSUED_TOKENS[token]:
+                self._send(
+                    200,
+                    {
+                        "status": "UP",
+                        "queue": {"depth": 7, "oldest_seconds": 41},
+                        # Watch this NOT climb across checks: the agent caches
+                        # the token until shortly before it expires.
+                        "tokens_issued": len(ISSUED_TOKENS),
+                    },
+                )
+            else:
+                self._send(401, {"error": "missing or unknown bearer token"})
         elif path == "/down":
             self._send(500, {"error": "simulated outage"})
         elif path == "/slow":
@@ -102,9 +135,43 @@ class Handler(BaseHTTPRequestHandler):
         else:
             self._send(404, {"error": f"no such path: {path}"})
 
+    def _oauth_token(self, raw: bytes) -> None:
+        """The client-credentials grant, accepting either credential transport."""
+        form = {}
+        for pair in raw.decode("utf-8", "replace").split("&"):
+            key, _, value = pair.partition("=")
+            if key:
+                from urllib.parse import unquote_plus
+
+                form[unquote_plus(key)] = unquote_plus(value)
+
+        auth = self.headers.get("Authorization", "")
+        if auth.startswith("Basic "):
+            with contextlib.suppress(Exception):
+                name, _, secret = base64.b64decode(auth[6:]).decode().partition(":")
+                form.setdefault("client_id", name)
+                form.setdefault("client_secret", secret)
+
+        if form.get("grant_type") != "client_credentials":
+            self._send(400, {"error": "unsupported_grant_type"})
+            return
+        if (form.get("client_id"), form.get("client_secret")) != OAUTH_CLIENT:
+            self._send(401, {"error": "invalid_client"})
+            return
+
+        token = f"tok-{len(ISSUED_TOKENS) + 1}-{int(time.time())}"
+        ISSUED_TOKENS[token] = time.time() + OAUTH_TOKEN_TTL
+        self._send(
+            200,
+            {"access_token": token, "token_type": "Bearer", "expires_in": OAUTH_TOKEN_TTL},
+        )
+
     def do_POST(self) -> None:  # noqa: N802
         length = int(self.headers.get("Content-Length", 0))
         raw = self.rfile.read(length) if length else b""
+        if self.path.split("?", 1)[0].rstrip("/") == "/token":
+            self._oauth_token(raw)
+            return
         try:
             echo = json.loads(raw) if raw else None
         except json.JSONDecodeError:
