@@ -4,10 +4,13 @@
 **Question asked:** Checkmk 2.5 ships built-in *OAuth2 connections* — can this plugin
 reuse them instead of growing its own OAuth2 support?
 
-**Answer: no, not for the agent package — and the built-in is the wrong shape for us
-anyway.** But the *pattern* it follows is exactly what we should copy, and there is a
-second, simpler precedent in the very same Checkmk plugin that we can follow almost
-line for line.
+**Decision: build a generic OAuth2 client-credentials mode on public APIs only, and
+leave the Setup-managed connection types alone for now.**
+
+The built-in connections are not reusable by the agent package (§2), and the flow they
+serve — interactive consent, then refresh — is an edge case we are explicitly deferring
+(§2a). What *is* reusable is the pattern they follow, which a second, simpler precedent
+in the very same Checkmk plugin lets us copy almost line for line (§3).
 
 Evidence below is from the `2.5.0` branch, which is what `frontend-build.yml` pins and
 what a 2.5 site actually runs.
@@ -68,7 +71,7 @@ Four independent blockers, any one of which would be enough:
 | 1 | **Does not exist in 2.4** | `git ls-tree origin/2.4.0 \| grep oauth2_connections` → **0 files**. Our agent package is `min_required = "2.4.0"`. |
 | 2 | **Microsoft Entra ID only** | `OAuth2ConnectorType = Literal["microsoft_entra_id"]`. There is no other connector type. A plugin called *Generic JSON API* cannot ship auth that only works against one vendor's IdP. |
 | 3 | **Internal + unstable APIs** | The server-side type is `cmk.server_side_calls.internal.OAuth2Connection`; the form spec is `cmk.gui.form_specs.unstable.OAuth2ConnectionSetup`. Neither is in `cmk.server_side_calls.v1` — checked on **both** `2.5.0` and `master`, so this is not about to become public. |
-| 4 | **Wrong OAuth2 flow** | It stores an `access_token` *and* a `refresh_token`, i.e. authorization-code with interactive admin consent. Monitoring wants **client credentials**: no human, no browser, no refresh token. |
+| 4 | **A different flow from the one we need** | It stores an `access_token` *and* a `refresh_token` — authorization-code with interactive consent. That is correct for what it serves (§2a), but it is not what most JSON APIs need, and a special agent cannot own it alone. |
 
 Blocker 3 is the one that matters most for this repo specifically. The two-package split
 exists *precisely* so the agent depends only on public, stable plugin APIs — that is why
@@ -78,6 +81,25 @@ tie the monitoring agent to an unversioned internal contract.
 
 Blockers 1 and 2 are fatal on their own regardless of packaging: we would drop every 2.4
 user and still only support Entra.
+
+### 2a. Why the built-in stores a refresh token — recorded, then deferred
+
+The stored `access_token` / `refresh_token` is not over-engineering. **Some cloud
+vendors give you no choice:** the data is only reachable with *delegated* permissions on
+behalf of a real user, so a human has to consent in a browser once, and unattended
+operation afterwards means holding a refresh token and exchanging it as the access token
+expires. Client credentials is simply not on offer for those APIs.
+
+That is why it is a Setup-managed *connection object* rather than rule fields: the
+consent step needs a browser, which a headless agent does not have, and refresh tokens
+rotate at runtime, so the credential cannot live in static rule configuration. (See
+`emailchecks`' Graph client, which keeps the current tokens in a password-store file it
+owns and writes the rotated values back — `_get_stored_token` / `_store_token`.)
+
+**We are treating this as an edge case and leaving it out of scope.** It is recorded here
+so the design is not mistaken for over-engineering next time someone reads it, and so
+that if a user does turn up needing it, we start from "the interactive half cannot live
+in a special agent" rather than trying to hand-roll it.
 
 ---
 
@@ -161,16 +183,26 @@ the ceremony around it is the bulk, as always in this repo.
 
 ---
 
-## 5. Recommendation
+## 5. Decision
 
-Build a generic client-credentials mode on public APIs only. Do **not** depend on the
-built-in OAuth2 connections: they are 2.5-only, Entra-only, internal-API, and the wrong
-flow.
+**Build a generic OAuth2 client-credentials mode, on public APIs only.** It covers the
+unattended machine-to-machine case that most monitored JSON APIs offer, it works on 2.4
+alongside every other auth mode, and it needs nothing internal or unstable.
 
-Revisit **only if** Checkmk promotes an OAuth2 type into `cmk.server_side_calls.v1`
-*and* adds a connector type that is not Entra-specific. Neither is true on `master`
-today, so this is not a "wait for it" situation.
+**The Setup-managed connection types are out of scope.** Not because they are badly
+designed — for the flow they serve they are right (§2a) — but because for us they are
+2.5-only, Entra-only and internal API, in service of an edge case. Ignoring them costs us
+nothing today: an endpoint authenticated either way still arrives at `_build_session()`
+as a bearer token, so nothing about this decision blocks adding the other flow later.
 
-If we ever want Entra specifically *and* are willing to make it 2.5+, it could go in the
-**Explorer** package, which already depends on internal GUI APIs by design — but that is
-a separate product decision and does not help the agent.
+Reopen the question only if a user actually needs an API that offers no client-credentials
+grant. At that point the answer is still *not* to hand-roll it in the agent — the
+realistic options would be Checkmk promoting an OAuth2 type into
+`cmk.server_side_calls.v1` with a non-Entra connector (not true on `master` today), or
+hosting the GUI half in the **Explorer** package, which is already 2.5+ and already
+depends on internal GUI APIs by design.
+
+## 6. Next step
+
+One implementing PR, scoped as §4. No further investigation needed — the mechanism is
+proven by `emailchecks` and every supporting piece already exists in our agent.
