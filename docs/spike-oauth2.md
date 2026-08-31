@@ -202,7 +202,23 @@ realistic options would be Checkmk promoting an OAuth2 type into
 hosting the GUI half in the **Explorer** package, which is already 2.5+ and already
 depends on internal GUI APIs by design.
 
-## 6. Next step
+## 6. Outcome
 
-One implementing PR, scoped as §4. No further investigation needed — the mechanism is
-proven by `emailchecks` and every supporting piece already exists in our agent.
+**Implemented in #172** — `auth_oauth2`, essentially as sketched in §4: token URL,
+client ID, client secret from the password store, optional scope and audience, and an
+explicit choice of how the client credentials are sent. The token is cached under a key
+covering the credential (hashed) with an expiry taken from the provider's `expires_in`,
+and a cached token rejected with 401 is discarded and retried once.
+
+Two things worth recording, because the spike did not predict them:
+
+- **`dev/mock_api.py` grew a `/token` endpoint.** §4 listed "testing needs a fake token
+  endpoint" as a risk; it turned out to be the cheapest part. It accepts the credentials
+  either way, so the transport toggle is exercisable, and its `/oauth` document reports
+  `tokens_issued` so the caching is *observable* rather than merely asserted.
+- **The client-auth toggle earned its place immediately.** The mock provider accepts
+  both transports precisely because a wrong choice surfaces as a 401 from the token URL
+  rather than from the API, which is the confusing failure §4 predicted.
+
+This document stays as the record of *why* the built-in connections were not reused, and
+§2a of why they are shaped the way they are — so neither has to be re-derived.
