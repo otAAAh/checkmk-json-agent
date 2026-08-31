@@ -664,6 +664,9 @@ def _store_token(spec: dict, secret: str | None, token: str, ttl: float) -> None
         # own password store and the Graph client in cmk/plugins/emailchecks
         # keep credentials on disk the same way. Mitigated by 0600 and by living
         # in the site's tmp, which is cleared with the site.
+        # (CodeQL flags this as clear-text storage. The suppression comment
+        # below is honoured by the CodeQL CLI but not by GitHub's default code
+        # scanning, so the alert also has to be dismissed in the Security tab.)
         temporary.write_text(  # codeql[py/clear-text-storage-sensitive-data]
             json.dumps(entry), encoding="utf-8"
         )

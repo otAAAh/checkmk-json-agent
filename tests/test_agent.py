@@ -633,6 +633,21 @@ def test_oauth2_token_response_without_a_token_is_an_error(agent, monkeypatch, t
     assert "no 'access_token'" in error
 
 
+def test_oauth2_debug_output_never_shows_the_bearer_token(agent, monkeypatch, token_cache, capsys):
+    """--debug prints the request headers, and for this mode one of them carries
+    the access token. _redacted_headers masks Authorization unconditionally;
+    this pins that, because CodeQL flags the flow and cannot see the sanitizer."""
+    _capture_token_post(agent, monkeypatch)
+    _capture_request(agent, monkeypatch)
+
+    agent._fetch(OAUTH2_ENDPOINT, "s3cret", debug=True)
+
+    err = capsys.readouterr().err
+    assert "header Authorization: <redacted>" in err
+    assert "tok-1" not in err  # the access token itself
+    assert "s3cret" not in err  # and the client secret
+
+
 def test_oauth2_token_cache_key_separates_credentials_and_scope(agent):
     spec = OAUTH2_ENDPOINT["oauth2"]
     base = agent._token_cache_key(spec, "s3cret")
