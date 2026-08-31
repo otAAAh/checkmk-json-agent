@@ -208,6 +208,31 @@ def test_explorer_emits_api_key_header_auth(rule_value: dict, explorer_output: d
     assert "key" not in cli
 
 
+def test_explorer_emits_oauth2_client_credentials_auth(rule_value: dict, explorer_output: dict):
+    """The rule value carries the token URL / client id / secret reference; the
+    CLI blob carries the same minus the secret, which travels as --secret_<i>."""
+    endpoint = rule_value["endpoints"][3]
+    kind, spec = endpoint["auth"]
+    assert kind == "auth_oauth2"
+    assert spec["token_url"] == "https://login.example.com/oauth2/v2.0/token"
+    assert spec["client_id"] == "monitoring"
+    assert spec["client_secret"] == ("cmk_postprocessed", "stored_password", ("pw-store-id", ""))
+    assert spec["scope"] == "api://monitoring/.default"
+    assert spec["client_auth"] == "post"
+    # An empty optional is omitted rather than sent as "" - the ruleset treats a
+    # missing key and an empty string differently.
+    assert "audience" not in spec
+
+    cli = explorer_output["cli"][3]
+    assert cli["auth"] == "auth_oauth2"
+    assert cli["oauth2"]["token_url"] == "https://login.example.com/oauth2/v2.0/token"
+    assert cli["oauth2"]["client_id"] == "monitoring"
+    assert cli["oauth2"]["audience"] is None
+    # The secret never reaches the blob, which is loggable.
+    assert "client_secret" not in cli["oauth2"]
+    assert "pw-store-id" not in json.dumps(cli)
+
+
 def test_explorer_emits_api_key_query_auth(rule_value: dict, explorer_output: dict):
     endpoint = rule_value["endpoints"][2]
     kind, spec = endpoint["auth"]

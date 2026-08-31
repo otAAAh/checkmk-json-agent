@@ -22,10 +22,12 @@ Targets **Checkmk 2.4+** and the current stable plugin APIs
 - **Multiple endpoints per rule**: each with its own method/headers/auth/
   timeout/fields; their results merge into one section, and an unreachable
   endpoint only affects its own services
-- **Auth**: none, HTTP basic (username/password), bearer token, or an **API key**
+- **Auth**: none, HTTP basic (username/password), bearer token, an **API key**
   in a header of the API's choosing (`X-API-Key`, `PRIVATE-TOKEN`, ...) or in a
-  query parameter — every secret goes through the Checkmk password store, never
-  onto the command line, into the configuration or into a log in clear text
+  query parameter, or **OAuth 2.0 client credentials** (the agent exchanges a
+  client ID/secret for a short-lived token and caches it) — every secret goes
+  through the Checkmk password store, never onto the command line, into the
+  configuration or into a log in clear text
 - **Path extraction** with a dotted syntax: `status`, `components.db.status`,
   `items[0].count` (leading `$.` optional); keys containing `.` or `[` can be
   bracket-quoted, e.g. `data['foo.bar'].value`
@@ -511,6 +513,44 @@ Given `GET /status` → `{"last_backup": "2026-07-28T02:00:00Z"}`:
 goes WARN once the last backup is older than 26 hours, CRIT after two days.
 Epoch seconds and milliseconds work the same way; a timestamp without a time
 zone is read as UTC.
+
+### An API behind OAuth 2.0
+
+Pick **OAuth 2.0 (client credentials)** as the authentication and give the
+identity provider's token endpoint — not the API URL:
+
+| | |
+|---|---|
+| Token URL | `https://login.example.com/oauth2/v2.0/token` |
+| Client ID | `monitoring` |
+| Client secret | from the password store |
+| Scope | `api://monitoring/.default` (optional) |
+| Audience | (optional; some providers, e.g. Auth0, require it) |
+| Send credentials | in the Authorization header, or in the request body |
+
+The agent POSTs `grant_type=client_credentials`, and sends the resulting token
+to the API as `Authorization: Bearer <token>`.
+
+**The token is cached** until shortly before it expires (using the provider's
+own `expires_in`, minus a safety margin), so a rule polling every minute does
+not ask the provider every minute. The cache is keyed on the token URL, client
+ID, scope, audience and a *hash* of the secret — so two endpoints of the same
+rule sharing a client share one token, and two rules with different credentials
+never share one. It lives in the site's `tmp`, mode 0600, like the response
+cache.
+
+If the provider rejects a *cached* token with a 401 — a rotated secret, a
+revoked grant — the agent discards it and retries once with a fresh one. A token
+minted seconds ago and rejected is reported as-is: that means the credentials or
+the scope are wrong, and asking again would only double every check's requests.
+
+> **Which "Send credentials"?** RFC 6749 allows both the Authorization header and
+> the request body, and providers disagree about which they accept. A wrong
+> choice shows up as an unhelpful 401 *from the token URL*. Try the header first.
+
+This is the machine-to-machine grant only. If your API can only be reached with a
+token a *person* obtained by logging in through a browser, this mode cannot help —
+see [docs/spike-oauth2.md](docs/spike-oauth2.md).
 
 ### Monitoring an API rate-limit budget
 

@@ -415,6 +415,96 @@ def _authentication() -> CascadingSingleChoice:
                 ),
             ),
             CascadingSingleChoiceElement(
+                name="auth_oauth2",
+                title=Title("OAuth 2.0 (client credentials)"),
+                parameter_form=Dictionary(
+                    help_text=Help(
+                        "The machine-to-machine OAuth 2.0 grant: the agent exchanges a "
+                        "client ID and secret for a short-lived access token and sends "
+                        "it as 'Authorization: Bearer <token>'. The token is cached "
+                        "until shortly before it expires, so a rule polling every "
+                        "minute does not ask the identity provider every minute. No "
+                        "browser and no user consent are involved - if your API only "
+                        "works with a token obtained by a person logging in, this is "
+                        "not the right mode."
+                    ),
+                    elements={
+                        "token_url": DictElement(
+                            required=True,
+                            parameter_form=String(
+                                title=Title("Token URL"),
+                                help_text=Help(
+                                    "The identity provider's token endpoint, e.g. "
+                                    "'https://login.example.com/oauth2/v2.0/token'. "
+                                    "This is NOT the API URL above."
+                                ),
+                                prefill=InputHint("https://login.example.com/oauth2/v2.0/token"),
+                                custom_validate=(_validate_url,),
+                            ),
+                        ),
+                        "client_id": DictElement(
+                            required=True,
+                            parameter_form=String(
+                                title=Title("Client ID"),
+                                custom_validate=(validators.LengthInRange(min_value=1),),
+                            ),
+                        ),
+                        "client_secret": DictElement(
+                            required=True,
+                            parameter_form=Password(
+                                title=Title("Client secret"),
+                                migrate=migrate_to_password,
+                            ),
+                        ),
+                        "scope": DictElement(
+                            required=False,
+                            parameter_form=String(
+                                title=Title("Scope"),
+                                help_text=Help(
+                                    "Space-separated scopes to request, if the provider "
+                                    "needs them - e.g. 'api://monitoring/.default'."
+                                ),
+                            ),
+                        ),
+                        "audience": DictElement(
+                            required=False,
+                            parameter_form=String(
+                                title=Title("Audience"),
+                                help_text=Help(
+                                    "Sent as the 'audience' parameter. Required by some "
+                                    "providers (Auth0, for instance) to say which API "
+                                    "the token is for; leave empty otherwise."
+                                ),
+                            ),
+                        ),
+                        "client_auth": DictElement(
+                            required=False,
+                            parameter_form=SingleChoice(
+                                title=Title("How to send the client credentials"),
+                                help_text=Help(
+                                    "RFC 6749 allows both, and providers disagree about "
+                                    "which they accept - a wrong choice here shows up as "
+                                    "an unhelpful 401 from the token URL. Try the "
+                                    "Authorization header first; switch to the request "
+                                    "body if the provider rejects it."
+                                ),
+                                elements=[
+                                    SingleChoiceElement(
+                                        name="basic",
+                                        title=Title("In the Authorization header (HTTP basic)"),
+                                    ),
+                                    SingleChoiceElement(
+                                        name="post",
+                                        title=Title("In the request body"),
+                                    ),
+                                ],
+                                prefill=DefaultValue("basic"),
+                            ),
+                        ),
+                    },
+                ),
+            ),
+            CascadingSingleChoiceElement(
                 name="auth_header",
                 title=Title("API key in a request header"),
                 parameter_form=Dictionary(

@@ -365,6 +365,70 @@ def test_login_secret_keeps_username_in_blob(ssc):
     assert "--secret_0-id" in args
 
 
+def test_oauth2_keeps_only_the_non_secret_half_in_the_blob(ssc):
+    args = _command_args(
+        ssc,
+        {
+            "endpoints": [
+                {
+                    "url": "http://x",
+                    "verify_cert": True,
+                    "auth": (
+                        "auth_oauth2",
+                        {
+                            "token_url": "https://idp/token",
+                            "client_id": "monitoring",
+                            "client_secret": Secret(0),
+                            "scope": "api://monitoring/.default",
+                            "client_auth": "post",
+                        },
+                    ),
+                    "extractions": [],
+                }
+            ]
+        },
+    )
+    (endpoint,) = _endpoints(ssc, args)
+    assert endpoint["auth"] == "auth_oauth2"
+    # A token URL, a client id and a scope are not credentials, so they ride in
+    # the blob like every other setting.
+    assert endpoint["oauth2"]["token_url"] == "https://idp/token"
+    assert endpoint["oauth2"]["client_id"] == "monitoring"
+    assert endpoint["oauth2"]["scope"] == "api://monitoring/.default"
+    assert endpoint["oauth2"]["client_auth"] == "post"
+    # The client secret is not in the blob - it travels as its own option, the
+    # same way every other secret does.
+    assert "client_secret" not in endpoint["oauth2"]
+    assert "--secret_0-id" in args
+
+
+def test_oauth2_token_url_resolves_macros(ssc):
+    args = _command_args(
+        ssc,
+        {
+            "endpoints": [
+                {
+                    "url": "http://x",
+                    "verify_cert": True,
+                    "auth": (
+                        "auth_oauth2",
+                        {
+                            "token_url": "https://$HOSTNAME$.idp/token",
+                            "client_id": "c",
+                            "client_secret": Secret(0),
+                        },
+                    ),
+                    "extractions": [],
+                }
+            ]
+        },
+        host=_host({"$HOSTNAME$": "myhost"}),
+    )
+    (endpoint,) = _endpoints(ssc, args)
+    # One shared rule can point at a per-host identity provider.
+    assert endpoint["oauth2"]["token_url"] == "https://myhost.idp/token"
+
+
 def test_accept_status_serialized(ssc):
     args = _command_args(
         ssc,
