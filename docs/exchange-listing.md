@@ -14,6 +14,10 @@ included. One rule. Any API. Done.
 - 🎯 **Any endpoint, unmodified** — Spring Boot, Kubernetes, vendor appliances,
   your own apps. No special response format required.
 - 🧭 **Pick fields by path** — `components.db.status`, `items[0].count`, done.
+- 🧾 **Monitor the response headers too** — prefix a path with `@header.` and watch
+  what the API says *outside* the JSON: `@header.X-RateLimit-Remaining` alerts
+  before you exhaust your quota, `@header.Last-Modified` (as a timestamp) tells
+  you how stale the data is.
 - 🔁 **Auto-discover arrays *and* objects** — `nodes[*].status` becomes one
   service per array element, and `components[*].status` one per object key
   (e.g. a Spring Boot Actuator `/health` map), automatically.
@@ -64,16 +68,25 @@ included. One rule. Any API. Done.
   from a normal check-parameters rule without touching the connection.
 - 🏷️ **Labels from the response** — attach Checkmk **host** and **service labels**
   built from fields (`json_api/version`, `json_api/region`), so views, rules and
-  filters can key off what the API says about itself.
+  filters can key off what the API says about itself. The hosts a `[*]` rule
+  creates can carry labels from **their own element**, so 50 generated hosts are
+  addressable by region or role instead of being an anonymous crowd.
 - 🧮 **Transform the numeric value** — apply a small arithmetic expression like
   `value / 1024 / 1024` (bytes→MiB) or `(value - 32) * 5 / 9` (°F→°C) before
-  levels and the metric; safely evaluated, no `eval`.
+  levels and the metric; safely evaluated, no `eval`. A **second field** can join
+  in as `other`, which is what turns the used/total pair most APIs actually
+  return into a percentage: `value / other * 100`, resolved per `[*]` element so
+  every disk is measured against its own capacity.
 - 🔤 **String matching, two ways** — require a value to match a regex (pick the
   state when it doesn't, default CRIT), or map values like `ready` / `degraded`
   / `failed` straight to OK / WARN / CRIT.
-- 🔐 **Secure by default** — basic auth, bearer tokens **and API keys** (in a
-  header of the API's choosing, or a query parameter) all come from the Checkmk
-  **password store**, never from clear text in the rule or on a command line. TLS
+- 🔐 **Secure by default** — basic auth, bearer tokens, **API keys** (in a header
+  of the API's choosing, or a query parameter) **and OAuth 2.0 client
+  credentials** all come from the Checkmk **password store**, never from clear
+  text in the rule or on a command line. For OAuth the agent exchanges the client
+  ID and secret for a short-lived token itself and caches it until shortly before
+  it expires, so monitoring does not hammer your identity provider once a minute.
+  TLS
   verification is on by default, with a **custom CA bundle** for a private CA and
   **client certificates** for mutual TLS. Non-2xx status codes can be opted in per
   endpoint (read a `/health` that reports its problems with a 503), and an
