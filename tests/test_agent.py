@@ -648,6 +648,23 @@ def test_oauth2_debug_output_never_shows_the_bearer_token(agent, monkeypatch, to
     assert "s3cret" not in err  # and the client secret
 
 
+def test_oauth2_expired_token_is_removed_from_disk_on_read(agent, monkeypatch, token_cache):
+    """A dead bearer credential should not linger until the 7-day sweep, which
+    was written for response bodies and is far too slow for tokens."""
+    _capture_token_post(
+        agent,
+        monkeypatch,
+        response=lambda: _FakeTokenResponse({"access_token": "tok-1", "expires_in": 1}),
+    )
+    _capture_request(agent, monkeypatch)
+    agent._fetch(OAUTH2_ENDPOINT, "s3cret")
+    assert list(token_cache.glob("*.json")), "a token should have been cached"
+
+    # Reading it once it is stale both misses AND cleans up.
+    assert agent._cached_token(OAUTH2_ENDPOINT["oauth2"], "s3cret") is None
+    assert not list(token_cache.glob("*.json"))
+
+
 def test_oauth2_token_cache_key_separates_credentials_and_scope(agent):
     spec = OAUTH2_ENDPOINT["oauth2"]
     base = agent._token_cache_key(spec, "s3cret")
