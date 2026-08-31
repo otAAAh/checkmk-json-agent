@@ -646,7 +646,16 @@ def _cached_token(spec: dict, secret: str | None) -> str | None:
         return None
     if not isinstance(token, str) or not token:
         return None
-    return token if time.time() < expires_at else None
+    if time.time() < expires_at:
+        return token
+    # Expired: drop it now rather than leaving a dead bearer credential on disk
+    # until the 7-day sweep. Tokens live for minutes, so that sweep - written for
+    # response bodies whose key changed - is far too slow to be the only cleanup.
+    try:
+        path.unlink(missing_ok=True)
+    except OSError:
+        pass
+    return None
 
 
 def _store_token(spec: dict, secret: str | None, token: str, ttl: float) -> None:

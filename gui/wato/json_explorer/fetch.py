@@ -118,7 +118,15 @@ def _access_token(params: dict[str, Any], conn: dict[str, Any]) -> str:
             verify=conn.get("verify_cert", True),
         )
     except requests.RequestException as exc:
-        raise _TokenError(_("Token request failed: %s") % exc) from exc
+        # Only the exception TYPE and the token URL, never the message: requests
+        # can quote the request it was making, and with the credentials sent in
+        # the body that request contains the client secret. The agent's own
+        # token exchange is careful about this for the same reason - and
+        # _redacted() below would not have caught it, since it only knows about
+        # an API key placed in a query parameter.
+        raise _TokenError(
+            _("Token request to %s failed (%s)") % (params["token_url"], type(exc).__name__)
+        ) from exc
     if not 200 <= response.status_code < 300:
         raise _TokenError(
             _(
