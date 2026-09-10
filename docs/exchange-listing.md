@@ -52,6 +52,13 @@ included. One rule. Any API. Done.
   optional), response size and, for HTTPS, the **TLS certificate's remaining
   validity** — read from the connection it is already making, so no second check
   against the same URL. Zero configuration; it comes with the rule.
+- 📄 **See the response that caused the state** — optionally report the raw body
+  and the response headers in that endpoint's own service details, including for
+  a **rejected** response (an unexpected status, or a body that is not JSON) —
+  which is where an API explains itself: `HTTP 403` sends you to the credentials,
+  `tenant disabled` sends you to the right place. Capped at a byte budget you
+  set, with `Set-Cookie`, authorization headers and the endpoint's own secret
+  masked first. Off by default.
 - 🐢 **Rate-limited API? Cache it** — give an endpoint a TTL and the agent reuses
   its last response instead of asking again, so monitoring cannot exhaust a
   request quota. It never caches an error and never answers a failed request from
@@ -63,6 +70,12 @@ included. One rule. Any API. Done.
   the service reports when a retry *was* needed — it cannot hide a degrading API.
 - 🔗 **Many endpoints, one rule** — poll several APIs together, each with its own
   method, auth, and fields; an unreachable one only affects its own services.
+- 🔖 **Services named after the endpoint** — two endpoints of the same shape
+  extract the same fields, which would give you `JSON STATUS` and
+  `JSON STATUS (2)`. Name the endpoints instead and every service of one
+  application shares its prefix — `JSON app1-health STATUS` — which sorts them
+  together and makes them addressable as a **group** in service rules and
+  notification conditions.
 - 📈 **Thresholds & graphs in Checkmk** — WARN/CRIT and metrics live in *your*
   rule, not upstream in the API, and can be retuned per folder, host or service
   from a normal check-parameters rule without touching the connection.
