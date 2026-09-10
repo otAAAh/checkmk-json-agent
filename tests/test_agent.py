@@ -1435,6 +1435,10 @@ def test_process_endpoint_returns_a_record(agent, monkeypatch):
         "from_cache": False,
         "cache_age": None,
         "attempts": 1,
+        "body": None,
+        "body_truncated": False,
+        "body_size": None,
+        "headers": None,
     }
 
 
@@ -2483,3 +2487,227 @@ def test_two_endpoints_extracting_the_same_field_stay_distinguishable(agent, mon
         results, _labels, _record = agent._process_endpoint(args, index, endpoint)
         names += [r["service"] for r in results]
     assert names == ["app1 Status", "app2 Status"]
+
+
+# --- Reporting the raw response ----------------------------------------------
+
+REPORT = {"url": "http://a", "show_response": {"max_bytes": 2048, "headers": True}}
+
+
+def test_report_is_off_unless_configured(agent):
+    assert agent._report_spec({}) is None
+    assert agent._report_spec({"show_response": None}) is None
+    meta = {}
+    agent._store_report({}, meta, b'{"a": 1}', None)
+    assert meta == {}
+
+
+def test_reported_limit_is_clamped_to_the_hard_ceiling(agent):
+    assert agent._reported_limit({"max_bytes": 100}) == 100
+    assert agent._reported_limit({"max_bytes": 10**9}) == agent._MAX_REPORTED_BYTES
+    # Absent, zero or nonsense falls back to the default rather than to "all of it".
+    assert agent._reported_limit({}) == agent._DEFAULT_REPORTED_BYTES
+    assert agent._reported_limit({"max_bytes": 0}) == agent._DEFAULT_REPORTED_BYTES
+    assert agent._reported_limit({"max_bytes": "big"}) == agent._DEFAULT_REPORTED_BYTES
+    assert agent._reported_limit({"max_bytes": -5}) == 1
+
+
+def test_store_report_truncates_and_says_so(agent):
+    meta = {}
+    agent._store_report({"show_response": {"max_bytes": 4}}, meta, b"0123456789", None)
+    assert meta["body"] == "0123"
+    assert meta["body_truncated"] is True
+    # The full length is kept, so the service can say what was cut off.
+    assert meta["body_size"] == 10
+
+
+def test_store_report_keeps_a_short_body_whole(agent):
+    meta = {}
+    agent._store_report(REPORT, meta, b'{"status": "UP"}', None)
+    assert meta["body"] == '{"status": "UP"}'
+    assert meta["body_truncated"] is False
+
+
+def test_a_body_cut_mid_character_still_decodes(agent):
+    # Truncation is by BYTES, so it can split a multi-byte character; that must
+    # not throw away the whole report.
+    meta = {}
+    agent._store_report({"show_response": {"max_bytes": 2}}, meta, "äö".encode(), None)
+    assert meta["body"].startswith("ä")
+
+
+def test_the_reported_body_never_carries_the_secret(agent):
+    # An API that echoes the key it was given must not have it stored with the
+    # check result - the whole class of bug behind the token-preview fix.
+    meta = {}
+    agent._store_report(REPORT, meta, b'{"token": "s3cret"}', "s3cret")
+    assert "s3cret" not in meta["body"]
+    assert agent._REDACTED in meta["body"]
+
+
+def test_reported_headers_mask_credentials_and_the_secret(agent):
+    headers = {
+        "Content-Type": "application/json",
+        "Set-Cookie": "session=abc; HttpOnly",
+        "WWW-Authenticate": "Bearer realm=s3cret",
+    }
+    reported = agent._reported_headers(headers, "s3cret")
+    assert reported["Content-Type"] == "application/json"
+    # A session cookie is a live credential, whatever the request carried.
+    assert reported["Set-Cookie"] == agent._REDACTED
+    assert "s3cret" not in reported["WWW-Authenticate"]
+
+
+def test_headers_can_be_left_out_of_the_report(agent):
+    meta = {"headers": {"Content-Type": "application/json"}}
+    agent._store_report({"show_response": {"max_bytes": 99, "headers": False}}, meta, b"{}", None)
+    assert "headers_reported" not in meta
+    assert meta["body"] == "{}"
+
+
+def test_fetch_reports_a_successful_response(agent, monkeypatch):
+    _capture_request(agent, monkeypatch, _FakeResponse(b'{"s": "UP"}', headers={"X-Req": "42"}))
+    _document, error, meta = agent._fetch(REPORT, None)
+    assert error is None
+    assert meta["body"] == '{"s": "UP"}'
+    assert meta["headers_reported"] == {"X-Req": "42"}
+
+
+def test_fetch_reports_the_body_of_a_rejected_response(agent, monkeypatch):
+    # The case this feature exists for: the status alone does not say WHY, and
+    # the body is where the API explains itself.
+    _capture_request(
+        agent, monkeypatch, _FakeResponse(b'{"error": "tenant disabled"}', status_code=403)
+    )
+    _document, error, meta = agent._fetch(REPORT, None)
+    assert error.startswith("HTTP 403")
+    assert meta["body"] == '{"error": "tenant disabled"}'
+
+
+def test_fetch_reports_a_body_that_is_not_json(agent, monkeypatch):
+    _capture_request(agent, monkeypatch, _FakeResponse(b"<html>Gateway Timeout</html>"))
+    _document, error, meta = agent._fetch(REPORT, None)
+    assert "not valid JSON" in error
+    assert meta["body"] == "<html>Gateway Timeout</html>"
+
+
+class _UnreadableResponse(_FakeResponse):
+    """A response whose body must not be touched."""
+
+    def iter_content(self, chunk_size=65536):
+        raise AssertionError("the body must not be read")
+
+
+def test_a_rejected_response_body_is_not_read_unless_it_is_reported(agent, monkeypatch):
+    # Reading it would cost time and memory for every failing endpoint of every
+    # rule, to produce something nothing looks at.
+    _capture_request(agent, monkeypatch, _UnreadableResponse(status_code=403))
+    _document, error, meta = agent._fetch({"url": "http://a"}, None)
+    assert error.startswith("HTTP 403")
+    assert "body" not in meta
+
+
+def test_an_unreadable_error_body_does_not_change_the_endpoint_error(agent, monkeypatch):
+    _capture_request(agent, monkeypatch, _FakeResponse(b"whatever", status_code=403))
+    monkeypatch.setattr(
+        agent,
+        "_read_reportable",
+        lambda *_a: (_ for _ in ()).throw(agent.requests.exceptions.ConnectionError("reset")),
+    )
+    _document, error, meta = agent._fetch(REPORT, None)
+    assert error.startswith("HTTP 403")
+    assert "body" not in meta
+
+
+def test_an_error_body_is_only_read_up_to_the_reported_limit(agent, monkeypatch):
+    # Buffering a 50 MiB error page to show 2 KB of it would be pure waste, so
+    # reading stops at the limit - and the real length is then unknown, which the
+    # report must not pretend to know.
+    _capture_request(agent, monkeypatch, _FakeResponse(b"x" * 100000, status_code=500))
+    _document, error, meta = agent._fetch(
+        {"url": "http://a", "show_response": {"max_bytes": 16}}, None
+    )
+    assert error.startswith("HTTP 500")
+    assert meta["body"] == "x" * 16
+    assert meta["body_truncated"] is True
+    assert meta["body_size"] is None
+
+
+def test_read_reportable_stops_at_the_limit(agent):
+    body, more = agent._read_reportable(_FakeResponse(b"0123456789"), 4)
+    assert (body, more) == (b"0123", True)
+    body, more = agent._read_reportable(_FakeResponse(b"0123"), 4)
+    assert (body, more) == (b"0123", False)
+
+
+def test_the_report_is_rebuilt_from_a_cached_body(agent, cache_dir, monkeypatch):
+    endpoint = {**REPORT, "cache_ttl": 300}
+    _capture_request(agent, monkeypatch, _FakeResponse(b'{"s": "UP"}'))
+    agent._fetch(endpoint, None)
+
+    def explode(*_args, **_kw):
+        raise AssertionError("a cache hit must not touch the network")
+
+    monkeypatch.setattr(agent, "_build_session", explode)
+    _document, error, meta = agent._fetch(endpoint, None)
+    assert (error, meta["from_cache"]) == (None, True)
+    assert meta["body"] == '{"s": "UP"}'
+
+
+def test_the_report_is_not_stored_in_the_cache_file(agent, cache_dir, monkeypatch):
+    # It is derived from the body, and the body IS cached - so it is rebuilt on a
+    # hit under the settings in force then, not the ones of a previous check.
+    endpoint = {**REPORT, "cache_ttl": 300}
+    _capture_request(agent, monkeypatch, _FakeResponse(b'{"s": "UP"}'))
+    agent._fetch(endpoint, None)
+    _body, cached = agent._cache_read(endpoint, 300)
+    assert not {"body", "body_truncated", "body_size", "headers_reported"} & set(cached)
+
+
+def test_a_cached_body_is_reported_under_the_current_settings(agent, cache_dir, monkeypatch):
+    endpoint = {**REPORT, "cache_ttl": 300}
+    _capture_request(agent, monkeypatch, _FakeResponse(b'{"s": "UP"}'))
+    agent._fetch(endpoint, None)
+    monkeypatch.setattr(
+        agent, "_build_session", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("live"))
+    )
+    # Same cached body, a rule that now reports only 4 bytes of it.
+    tightened = {**endpoint, "show_response": {"max_bytes": 4, "headers": True}}
+    _document, _error, meta = agent._fetch(tightened, None)
+    assert (meta["body"], meta["body_truncated"]) == ('{"s"', True)
+
+
+def test_the_endpoint_record_carries_the_report(agent, monkeypatch):
+    monkeypatch.setattr(
+        agent,
+        "_fetch",
+        lambda endpoint, secret, debug=False: (
+            {"s": "UP"},
+            None,
+            {
+                "status": 200,
+                "body": '{"s": "UP"}',
+                "body_truncated": False,
+                "body_size": 11,
+                "headers_reported": {"X-Req": "42"},
+            },
+        ),
+    )
+    _results, _labels, record = agent._process_endpoint(
+        agent.parse_arguments(["--endpoint", "{}"]), 0, {"url": "http://x", "extractions": []}
+    )
+    assert record["body"] == '{"s": "UP"}'
+    assert record["body_size"] == 11
+    assert record["headers"] == {"X-Req": "42"}
+
+
+def test_the_endpoint_record_reports_nothing_by_default(agent, monkeypatch):
+    monkeypatch.setattr(
+        agent, "_fetch", lambda endpoint, secret, debug=False: ({"s": "UP"}, None, {"status": 200})
+    )
+    _results, _labels, record = agent._process_endpoint(
+        agent.parse_arguments(["--endpoint", "{}"]), 0, {"url": "http://x", "extractions": []}
+    )
+    assert record["body"] is None
+    assert record["headers"] is None
+    assert record["body_truncated"] is False

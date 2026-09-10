@@ -428,3 +428,16 @@ def test_service_prefix_with_a_name_passes(ruleset):
     ruleset._validate_endpoint({"url": "http://x", "service_prefix": True, "name": "app1"})
     # And an endpoint that does not prefix needs no name at all.
     ruleset._validate_endpoint({"url": "http://x", "service_prefix": False})
+
+
+def test_report_raw_response_form_has_the_expected_keys(ruleset):
+    form = ruleset._endpoint().elements["show_response"].parameter_form
+    assert set(form.elements) == {"max_bytes", "headers"}
+    # Reporting the body is the point of the option, so a size is required; the
+    # headers come along by default because they are small and informative.
+    assert form.elements["max_bytes"].parameter_form.prefill.value == 2048
+    assert form.elements["headers"].parameter_form.prefill.value is True
+
+
+def test_reporting_the_raw_response_is_optional(ruleset):
+    assert ruleset._endpoint().elements["show_response"].required is False

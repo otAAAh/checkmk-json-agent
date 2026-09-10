@@ -31,6 +31,10 @@ Targets **Checkmk 2.4+** and the current stable plugin APIs
 - **Path extraction** with a dotted syntax: `status`, `components.db.status`,
   `items[0].count` (leading `$.` optional); keys containing `.` or `[` can be
   bracket-quoted, e.g. `data['foo.bar'].value`
+- **The raw response in the check details**, per endpoint and opt-in: the body
+  (capped, credentials stripped) and the response headers on the endpoint's own
+  service — including the body of a *rejected* response, which is where an API
+  explains itself
 - **Response headers** as a value source: prefix the name with `@header.`
   (e.g. `@header.X-RateLimit-Remaining`) to monitor an API quota, a
   `Retry-After` or the age of a `Last-Modified`
@@ -170,6 +174,7 @@ Each endpoint has:
 | **Retry a failed request** | Optional: a number of retries (1–5) and a backoff in seconds, doubled for each further attempt and capped at 30 s in total. Only a connection error, a timeout, an HTTP 429 or a 5xx is retried — a 4xx, a body that is not JSON and an oversized response answer the same however often they are asked. A cached response makes no request, so nothing is retried. Off by default |
 | **Request timeout (seconds)** | Optional; defaults to 30 |
 | **Additional accepted HTTP status codes** | Optional; by default only 2xx responses are read (any other status → UNKNOWN). List extra codes (e.g. `503`) to parse and extract their body too. 2xx is always accepted |
+| **Report the raw response** | Optional; put the response itself into the *Details* of this endpoint's own `JSON API <name>` service — the body (capped at a byte budget you set, 2048 by default) and, unless you turn them off, the response headers. Includes the body of a *rejected* response. Credentials are stripped first. Off by default — see [Reporting the raw response](#reporting-the-raw-response) |
 | **HTTP proxy** | Optional; route via the environment's `HTTP_PROXY`/`HTTPS_PROXY`, an explicit proxy URL, or bypass. Unset = honour the environment |
 | **Fields to monitor** | One entry per service (see below) |
 
@@ -286,6 +291,54 @@ Notes:
   have to be discovered. Re-run a service discovery on the affected hosts
   afterwards, and expect to move any check-parameters rule that matched the old
   names.
+
+### Reporting the raw response
+
+A field service's *Details* name the **source URL** the value came from. That
+link is often useless in practice: the API may sit behind a firewall or in
+another network, so the browser reading the service cannot open it — and even
+where it can, it shows the API as it is *now*, not as it was when the check ran
+and went CRIT.
+
+Tick **Report the raw response** on an endpoint and the response itself lands in
+the *Details* of that endpoint's own `JSON API <name>` service:
+
+```text
+HTTP 403
+URL: https://app.example.com/api/v1/health
+Response headers:
+  content-type: application/json
+  x-request-id: 7f3c1a
+Response body (first 2048 of 8412 bytes):
+{"error": "tenant disabled", "since": "2026-09-08T11:20:00Z"}
+```
+
+- It is reported for a **rejected** response too — an unexpected HTTP status, or
+  a body that is not JSON. That is the case this exists for: the status code
+  alone does not say *why*, and the body is where the API explains itself. The
+  body of a rejected response is only read when this option is on, so a failing
+  endpoint costs nothing extra otherwise.
+- The body is cut off at your byte budget (default 2048, hard maximum 65536) and
+  the service says what was cut. Keep it small: these details are stored with
+  **every** check result of the service.
+- It goes on the **endpoint's own service**, not on each field service — one
+  copy per endpoint rather than one per field, and it is the service that
+  describes the request in the first place.
+- A **cached** response (see below) reports the cached body, which is what the
+  check actually read.
+
+**Credentials are stripped before anything is reported:** `Set-Cookie` (a live
+session token) and any authorization header are masked, and the endpoint's own
+secret is removed wherever it appears in the body or a header value — an API that
+echoes back the key it was given cannot leak it into the monitoring history.
+
+**Everything else is reported verbatim.** A service's details are stored with
+every check result and travel into notifications, so do not turn this on for a
+response carrying personal or otherwise sensitive data.
+
+> The raw response is **not archived**: the details always describe the most
+> recent check of that service. While the service stays CRIT that *is* the
+> failing response; once it recovers, the failure's body is gone.
 
 ### Caching responses
 
