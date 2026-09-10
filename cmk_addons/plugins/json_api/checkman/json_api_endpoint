@@ -33,6 +33,18 @@ description:
  because no request was made; a failing request is never answered from an
  expired cache, so a real outage still shows up.
 
+ The endpoint can also be configured to report the {raw response} in this
+ service's details: the body as it came off the wire, cut off at a configurable
+ number of bytes, and optionally the response headers. It covers a rejected
+ response too - an unexpected HTTP status, or a body that is not JSON - which is
+ where an API usually explains itself, and the body of such a response is only
+ read when this is switched on. Credentials are stripped first: {Set-Cookie} and
+ any authorization header are masked, and the endpoint's own secret is removed
+ wherever it appears. Everything else is reported verbatim, and these details are
+ stored with every check result, so it is off by default and should stay off for
+ a response carrying sensitive data. The details always describe the most recent
+ check; nothing is archived.
+
  Configure the levels for the response time, the levels for the certificate's
  remaining validity, and the state for an unreachable endpoint with the check
  parameters rule {Generic JSON API endpoint} (Setup >

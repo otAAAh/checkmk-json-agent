@@ -186,6 +186,25 @@ def _read_capped(response: requests.Response, limit: int) -> bytes:
     return b"".join(chunks)
 
 
+def _read_reportable(response: requests.Response, limit: int) -> tuple[bytes, bool]:
+    """Up to ``limit`` bytes of the body, and whether there was more after them.
+
+    Unlike ``_read_capped`` an oversized body is not an error here: the report is
+    capped by design, so this stops reading at the limit rather than buffering a
+    50 MiB error page in order to show 2 KB of it. Used only where the body is
+    wanted *for the report alone* - where it also has to be parsed, it has to be
+    read whole anyway.
+    """
+    chunks: list[bytes] = []
+    total = 0
+    for chunk in response.iter_content(chunk_size=8192):
+        chunks.append(chunk)
+        total += len(chunk)
+        if total > limit:
+            break
+    return b"".join(chunks)[:limit], total > limit
+
+
 def _effective_body(endpoint: dict) -> object | None:
     """The request body actually sent with this endpoint's request.
 
@@ -354,6 +373,83 @@ def _redact_secret(text: str, secret: str | None) -> str:
         if form and form in text:
             text = text.replace(form, _REDACTED)
     return text
+
+
+# Response headers that carry a credential of their own. 'Set-Cookie' is a live
+# session token: reporting it in a service's details would put it into the
+# monitoring history, and from there into anything that reads a service's output.
+_SENSITIVE_RESPONSE_HEADERS = frozenset(
+    {"set-cookie", "set-cookie2", "authorization", "proxy-authorization"}
+)
+
+# Hard ceiling for the reported body, whatever the rule asks for. The text ends
+# up in the endpoint service's details, which are stored with every check result
+# and shipped in notifications - this is not the place for a megabyte of JSON.
+_MAX_REPORTED_BYTES = 65536
+_DEFAULT_REPORTED_BYTES = 2048
+
+
+def _report_spec(endpoint: dict) -> dict | None:
+    """The endpoint's 'report the raw response' settings, or None when off."""
+    spec = endpoint.get("show_response")
+    return spec if isinstance(spec, dict) else None
+
+
+def _reported_limit(spec: dict) -> int:
+    """How many bytes of the body to report, clamped to the hard ceiling."""
+    raw = spec.get("max_bytes")
+    limit = int(raw) if isinstance(raw, (int, float)) and not isinstance(raw, bool) else 0
+    return max(1, min(limit or _DEFAULT_REPORTED_BYTES, _MAX_REPORTED_BYTES))
+
+
+def _reported_headers(headers: object, secret: str | None) -> dict[str, str]:
+    """The response headers as reported: credential-bearing ones masked.
+
+    The secret is stripped from every value as well - an API that echoes the key
+    it was given (in a 'WWW-Authenticate' challenge, say) must not have it stored
+    with the check result.
+    """
+    if not isinstance(headers, dict):
+        return {}
+    return {
+        str(name): (
+            _REDACTED
+            if str(name).lower() in _SENSITIVE_RESPONSE_HEADERS
+            else _redact_secret(str(value), secret)
+        )
+        for name, value in headers.items()
+    }
+
+
+def _store_report(
+    endpoint: dict, meta: dict, raw: bytes, secret: str | None, complete: bool = True
+) -> None:
+    """Put the reported body (and headers) for ``raw`` into ``meta``, if asked.
+
+    ``complete`` says whether ``raw`` is the whole body. It is not when the body
+    was read for the report alone and stopped at the limit, and then the real
+    length is unknown - the service says the body was cut off without claiming
+    a size it never measured.
+
+    Both are capped and stripped of the secret HERE, in the only function that
+    has the whole body, so the untruncated bytes never travel any further. A body
+    cut at the limit can split a multi-byte character, which decodes to U+FFFD
+    rather than failing the whole report.
+
+    Not stored in the response cache (see _cache_write): the report is derived
+    from the body, and the body IS cached, so it is rebuilt on a cache hit
+    against the settings in force now rather than the ones a previous check ran
+    with.
+    """
+    spec = _report_spec(endpoint)
+    if spec is None:
+        return
+    limit = _reported_limit(spec)
+    meta["body"] = _redact_secret(raw[:limit].decode("utf-8", "replace"), secret)
+    meta["body_truncated"] = len(raw) > limit or not complete
+    meta["body_size"] = len(raw) if complete else None
+    if spec.get("headers", True):
+        meta["headers_reported"] = _reported_headers(meta.get("headers"), secret)
 
 
 def _accepted_statuses(endpoint: dict) -> set[int]:
@@ -547,9 +643,22 @@ def _cache_write(endpoint: dict, body: bytes, meta: dict, secret: str | None = N
         "stored": time.time(),
         "body": body.decode("utf-8", "replace"),
         # Facts about the REQUEST, not about the body: replaying them on a cache
-        # hit would describe a request that never happened.
+        # hit would describe a request that never happened. The reported body and
+        # headers are dropped too - they are rebuilt from the cached body on a
+        # hit, so a rule that changed its reporting settings meanwhile is honoured.
         "meta": {
-            k: v for k, v in meta.items() if k not in ("from_cache", "cache_age", "attempts")
+            k: v
+            for k, v in meta.items()
+            if k
+            not in (
+                "from_cache",
+                "cache_age",
+                "attempts",
+                "body",
+                "body_truncated",
+                "body_size",
+                "headers_reported",
+            )
         },
     }
     try:
@@ -840,10 +949,16 @@ def _fetch(
         cached_body, cached_meta = hit
         _debug(debug, f"  served from cache ({cached_meta['cache_age']:.0f}s old)")
         try:
-            return json.loads(cached_body), None, cached_meta
+            document = json.loads(cached_body)
         except ValueError as exc:
             # Cached something unparseable: fall through and fetch fresh.
             _debug(debug, f"  cached body is not valid JSON ({exc}), fetching")
+        else:
+            # The body being served IS the cached one, so that is what gets
+            # reported - rebuilt here rather than replayed from the cache file,
+            # so it follows the settings in force now.
+            _store_report(endpoint, cached_meta, cached_body, secret)
+            return document, None, cached_meta
 
     retries, backoff = _retry_policy(endpoint)
     slept = 0.0
@@ -982,6 +1097,19 @@ def _attempt(
             # body) can still be read. Anything else fails, carrying the code.
             if not (200 <= status < 300 or status in accepted):
                 reason = getattr(response, "reason", "") or ""
+                # The body of a rejected response is where an API explains
+                # itself, and this is the case an operator most needs to see -
+                # so read it, but only when the rule asked for it (otherwise the
+                # status alone is the answer and the body is never touched).
+                if (report := _report_spec(endpoint)) is not None:
+                    try:
+                        partial, more = _read_reportable(response, _reported_limit(report))
+                    except requests.exceptions.RequestException as exc:
+                        # Reporting the body is a diagnostic nicety; failing to
+                        # read it must not change what the endpoint reports.
+                        _debug(debug, f"  could not read the error body: {exc}")
+                    else:
+                        _store_report(endpoint, meta, partial, secret, complete=not more)
                 _timed()
                 return (
                     None,
@@ -1010,6 +1138,7 @@ def _attempt(
         _debug(debug, f"  HTTP {response.status_code}, {len(raw)} bytes")
         _debug(debug, f"  body: {preview}{suffix}")
 
+    _store_report(endpoint, meta, raw, secret)
     try:
         document = json.loads(raw)
     except ValueError as exc:
@@ -1803,6 +1932,14 @@ def _endpoint_record(
         # How many attempts the request took (1 = no retry was needed). Reported
         # so a retry policy cannot silently hide an API that is degrading.
         "attempts": meta.get("attempts", 1),
+        # The raw response, for the endpoints that opted in: the body as it came
+        # off the wire (capped, secret-stripped) and the response headers
+        # (credential-bearing ones masked). None/absent means "not requested",
+        # which is the default.
+        "body": meta.get("body"),
+        "body_truncated": bool(meta.get("body_truncated")),
+        "body_size": meta.get("body_size"),
+        "headers": meta.get("headers_reported"),
     }
 
 

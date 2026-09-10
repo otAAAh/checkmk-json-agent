@@ -50,6 +50,8 @@ const FIXTURE = {
   // has to clamp, or the rule it prints will not import.
   retries: "9",
   retry_backoff: "99",
+  report_bytes: "4096",
+  report_headers: false,
   json: "",
   parsedRoot: null,
   parseErr: "",
@@ -204,6 +206,10 @@ src += `
     prefixWithName: servicePrefix({ name: "frontend", service_prefix: true }),
     prefixWithoutName: servicePrefix({ name: "  ", service_prefix: true }),
     prefixOff: servicePrefix({ name: "frontend", service_prefix: false }),
+    // An empty byte budget is how the Explorer says "do not report the raw
+    // response"; an oversized one is clamped to the ruleset's own maximum.
+    reportOff: reportObj({ report_bytes: "", report_headers: true }),
+    reportClamped: reportObj({ report_bytes: "999999", report_headers: true }),
   };
   console.log(JSON.stringify(out));
 })();
