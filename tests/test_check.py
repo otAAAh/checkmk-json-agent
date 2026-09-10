@@ -1540,3 +1540,98 @@ def test_inventory_node_segments_are_stripped(check):
         {"node": "software . applications . json_api", "key": "version"}
     )
     assert target.path == ("software", "applications", "json_api")
+
+
+# --- The raw response in the endpoint service's details -----------------------
+
+
+def test_endpoint_details_carry_the_reported_body_and_headers(check):
+    section = _section(
+        check,
+        [],
+        endpoints=[
+            _endpoint(
+                body='{\n  "status": "UP"\n}',
+                body_size=20,
+                headers={"content-type": "application/json", "x-req": "42"},
+            )
+        ],
+    )
+    details = _details(check.check_json_api_endpoint("api", {}, section))
+    assert "Response headers:" in details
+    assert "  content-type: application/json" in details
+    assert "Response body (20 bytes):" in details
+    # Verbatim, newlines and all - a pretty-printed body has to stay readable.
+    assert '{\n  "status": "UP"\n}' in details
+
+
+def test_endpoint_details_say_what_was_truncated(check):
+    section = _section(
+        check, [], endpoints=[_endpoint(body="0123", body_truncated=True, body_size=4096)]
+    )
+    details = _details(check.check_json_api_endpoint("api", {}, section))
+    assert "Response body (first 4 of 4096 bytes):" in details
+
+
+def test_endpoint_details_report_nothing_by_default(check):
+    # Nothing asked for it, so the details must not gain an empty section.
+    section = _section(check, [], endpoints=[_endpoint()])
+    details = _details(check.check_json_api_endpoint("api", {}, section))
+    assert "Response body" not in details
+    assert "Response headers" not in details
+
+
+def test_a_response_with_no_headers_at_all_says_so(check):
+    # An empty map is a real answer ("asked for, and there were none"), which is
+    # not the same as never having asked.
+    section = _section(check, [], endpoints=[_endpoint(headers={})])
+    details = _details(check.check_json_api_endpoint("api", {}, section))
+    assert "Response headers:\n  (none)" in details
+
+
+def test_a_failed_endpoint_still_reports_its_body(check):
+    # The whole point: this is the response an operator cannot fetch themselves
+    # any more, and the state at the time of the failure is what they need.
+    section = _section(
+        check,
+        [],
+        endpoints=[
+            _endpoint(
+                ok=False,
+                error="HTTP 403 Forbidden",
+                body='{"error": "tenant disabled"}',
+                body_size=28,
+            )
+        ],
+    )
+    (result,) = [
+        r for r in check.check_json_api_endpoint("api", {}, section) if isinstance(r, Result)
+    ]
+    assert result.state == State.CRIT
+    assert result.summary == "HTTP 403 Forbidden"
+    assert '{"error": "tenant disabled"}' in result.details
+
+
+def test_a_section_from_an_older_agent_reports_no_raw_response(check):
+    # The record simply has no such keys; parsing must not invent them.
+    section = _section(check, [], endpoints=[_endpoint()])
+    endpoint = section.endpoints["api"]
+    assert (endpoint.body, endpoint.headers, endpoint.body_size) == (None, None, None)
+    assert endpoint.body_truncated is False
+
+
+def test_reported_headers_are_only_read_from_a_map(check):
+    assert check._response_headers(None) is None
+    assert check._response_headers("Content-Type: text/plain") is None
+    assert check._response_headers({}) == {}
+    assert check._response_headers({"X-Req": 42}) == {"X-Req": "42"}
+
+
+def test_endpoint_details_do_not_claim_a_size_they_never_measured(check):
+    # The body was read for the report alone and reading stopped at the limit, so
+    # the full length is unknown - only the truncation is stated.
+    section = _section(
+        check, [], endpoints=[_endpoint(body="0123", body_truncated=True, body_size=None)]
+    )
+    details = _details(check.check_json_api_endpoint("api", {}, section))
+    assert "Response body (first 4 bytes, truncated):" in details

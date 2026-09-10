@@ -303,3 +303,17 @@ def test_explorer_never_emits_a_prefix_without_an_endpoint_name(explorer_output:
     assert explorer_output["prefixWithName"] is True
     assert explorer_output["prefixWithoutName"] is False
     assert explorer_output["prefixOff"] is False
+
+
+def test_explorer_emits_the_raw_response_report(rule_value: dict, explorer_output: dict):
+    # Both outputs must agree, or the Explorer's rule and its CLI command report
+    # different things about the same endpoint.
+    assert rule_value["endpoints"][0]["show_response"] == {"max_bytes": 4096, "headers": False}
+    assert explorer_output["cli"][0]["show_response"] == {"max_bytes": 4096, "headers": False}
+
+
+def test_explorer_clamps_or_omits_the_raw_response_report(explorer_output: dict):
+    # No byte budget = the option is off (an empty Dictionary would be rejected);
+    # too large a one is clamped to the ruleset's maximum rather than rejected.
+    assert explorer_output["reportOff"] is None
+    assert explorer_output["reportClamped"] == {"max_bytes": 65536, "headers": True}

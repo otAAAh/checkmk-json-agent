@@ -1326,6 +1326,62 @@ def _endpoint() -> Dictionary:
                     ),
                 ),
             ),
+            "show_response": DictElement(
+                required=False,
+                parameter_form=Dictionary(
+                    title=Title("Report the raw response"),
+                    help_text=Help(
+                        "Off by default. Put the response itself into the "
+                        "Details of this endpoint's own 'JSON API <name>' "
+                        "service, exactly as it came off the wire. The Details "
+                        "otherwise only link to the URL, which is often not "
+                        "reachable from the browser reading the service (the API "
+                        "may sit behind a firewall or in another network) and "
+                        "always shows the API as it is NOW rather than as it was "
+                        "when the check ran. The body of a REJECTED response is "
+                        "reported too - an unexpected HTTP status or a body that "
+                        "is not JSON - which is the case this exists for: it is "
+                        "where the API explains itself. Credentials are stripped "
+                        "first: 'Set-Cookie' and any authorization header are "
+                        "masked, and the endpoint's own secret is removed "
+                        "wherever it appears. Everything else in the response is "
+                        "reported verbatim, and a service's Details are stored "
+                        "with every check result and travel into notifications - "
+                        "so do not turn this on for a response carrying personal "
+                        "or otherwise sensitive data."
+                    ),
+                    elements={
+                        "max_bytes": DictElement(
+                            required=True,
+                            parameter_form=Integer(
+                                title=Title("Report at most (bytes)"),
+                                help_text=Help(
+                                    "Longer bodies are cut off at this many bytes "
+                                    "and the service says so. Keep it small: this "
+                                    "text is stored with every check result of "
+                                    "this service."
+                                ),
+                                prefill=DefaultValue(2048),
+                                custom_validate=(
+                                    validators.NumberInRange(min_value=1, max_value=65536),
+                                ),
+                            ),
+                        ),
+                        "headers": DictElement(
+                            required=True,
+                            parameter_form=BooleanChoice(
+                                label=Label("Report the response headers as well"),
+                                help_text=Help(
+                                    "On by default. The headers are what a rate "
+                                    "limit, a cache directive or a content type "
+                                    "is announced in, and they are small."
+                                ),
+                                prefill=DefaultValue(True),
+                            ),
+                        ),
+                    },
+                ),
+            ),
             "proxy": DictElement(
                 required=False,
                 parameter_form=Proxy(

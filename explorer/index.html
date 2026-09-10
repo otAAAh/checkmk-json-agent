@@ -208,6 +208,9 @@ function makeEndpoint(withSample) {
     verify_cert: true, follow_redirects: true, service_prefix: false,
     timeout: "", cache_ttl: "", accept_status: "",
     retries: "", retry_backoff: "0.5",
+    // Report the raw response in the endpoint service's details: how many bytes
+    // of the body ("" = off), and whether the headers come with it.
+    report_bytes: "", report_headers: true,
     proxy_mode: "default", proxy_url: "",   // default (env) | url | no_proxy
     ca_bundle: "", client_cert: "", client_key: "",
     json: withSample ? JSON.stringify(SAMPLE, null, 2) : "",
@@ -401,6 +404,7 @@ function renderConn() {
        <label>Accept status codes</label><input type="text" id="c-accept" value="${escAttr(e.accept_status)}" placeholder="e.g. 503, 202">
        <label>Retries</label><input type="text" id="c-retries" value="${escAttr(e.retries)}" placeholder="(optional) retry a connection error / 429 / 5xx, e.g. 2">
        <label>Retry backoff (s)</label><input type="text" id="c-retrybackoff" value="${escAttr(e.retry_backoff)}" placeholder="wait before the first retry, doubled each time">
+       <label>Report raw response</label><input type="text" id="c-reportbytes" value="${escAttr(e.report_bytes)}" placeholder="(optional) bytes of the body in the service details, e.g. 2048">
        <label>HTTP proxy</label>
        <select id="c-proxymode">
          <option value="default" ${e.proxy_mode === "default" ? "selected" : ""}>From environment</option>
@@ -416,6 +420,7 @@ function renderConn() {
        <label><input type="checkbox" id="c-verify" ${e.verify_cert ? "checked" : ""}> Verify TLS certificate</label>
        <label><input type="checkbox" id="c-redir" ${e.follow_redirects ? "checked" : ""}> Follow HTTP redirects</label>
        <label><input type="checkbox" id="c-svcprefix" ${e.service_prefix ? "checked" : ""}> Prefix service names with the endpoint name</label>
+       <label><input type="checkbox" id="c-reportheaders" ${e.report_headers ? "checked" : ""}> Report the response headers too</label>
      </div>
      <div class="subnote">URL, body and header values may contain Checkmk macros (<code>$HOSTNAME$</code>, <code>$HOSTADDRESS$</code>, …).</div>`;
 
@@ -430,6 +435,7 @@ function renderConn() {
   bind("c-accept", () => { e.accept_status = $("c-accept").value; renderOutputs(); });
   bind("c-retries", () => { e.retries = $("c-retries").value; renderOutputs(); });
   bind("c-retrybackoff", () => { e.retry_backoff = $("c-retrybackoff").value; renderOutputs(); });
+  bind("c-reportbytes", () => { e.report_bytes = $("c-reportbytes").value; renderOutputs(); });
   bind("c-proxyurl", () => { e.proxy_url = $("c-proxyurl").value; renderOutputs(); });
   bind("c-cabundle", () => { e.ca_bundle = $("c-cabundle").value; renderOutputs(); });
   bind("c-clientcert", () => { e.client_cert = $("c-clientcert").value; renderOutputs(); });
@@ -454,6 +460,7 @@ function renderConn() {
   $("c-redir").onchange = () => { e.follow_redirects = $("c-redir").checked; renderOutputs(); };
   // Renames every field service of this endpoint, so the preview has to reflect it.
   $("c-svcprefix").onchange = () => { e.service_prefix = $("c-svcprefix").checked; renderTabs(); renderOutputs(); };
+  $("c-reportheaders").onchange = () => { e.report_headers = $("c-reportheaders").checked; renderOutputs(); };
   $("c-addheader").onclick = () => { e.headers.push({ name: "", value: "" }); renderConn(); renderOutputs(); };
 }
 
@@ -866,6 +873,16 @@ function retryObj(e) {
   };
 }
 
+// The "report the raw response" object ({max_bytes, headers}), or null when the
+// byte budget is empty/unusable - that is how the Explorer says "off", matching
+// the ruleset's optional Dictionary. Clamped to the ruleset's own range
+// (1-65536 bytes), because what the Explorer prints has to import cleanly.
+function reportObj(e) {
+  const bytes = parseInt(e.report_bytes, 10);
+  if (Number.isNaN(bytes) || bytes < 1) return null;
+  return { max_bytes: Math.min(bytes, 65536), headers: !!e.report_headers };
+}
+
 // Parse the "accept status codes" text field into a de-duplicated int array,
 // mirroring the ruleset's List(Integer) and the agent's _accepted_statuses.
 function parseStatuses(s) {
@@ -940,6 +957,8 @@ function pyEndpoint(e, indent) {
   if (acc.length) lines.push(`${i}'accept_status': [${acc.join(", ")}],`);
   const rt = retryObj(e);
   if (rt) lines.push(`${i}'retry': {'attempts': ${rt.attempts}, 'backoff': ${floatPy(rt.backoff)}},`);
+  const rep = reportObj(e);
+  if (rep) lines.push(`${i}'show_response': {'max_bytes': ${rep.max_bytes}, 'headers': ${rep.headers ? "True" : "False"}},`);
   const px = proxyPy(e);
   if (px) lines.push(`${i}'proxy': ${px},`);
   const exLines = extractionObjs(e).map(o => `${ei}${pyExtraction(o)},`).join("\n");
@@ -971,6 +990,7 @@ function endpointCliObj(e) {
     cache_ttl: Number.isNaN(parseFloat(e.cache_ttl)) ? null : parseFloat(e.cache_ttl),
     accept_status: parseStatuses(e.accept_status),
     retry: retryObj(e),
+    show_response: reportObj(e),
     proxy: proxyCli(e),
     auth: AUTH_KIND[e.auth.type] || null,
     extractions: extractionObjs(e),
