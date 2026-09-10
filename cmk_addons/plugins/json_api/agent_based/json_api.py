@@ -231,6 +231,16 @@ class EndpointStatus:
     # means a retry policy absorbed a failure, which the service reports rather
     # than hides.
     attempts: int = 1
+    # The raw response, for an endpoint configured to report it: the body as it
+    # came off the wire (already capped and secret-stripped by the agent), how
+    # long it really was, and whether what is here is only its beginning. None
+    # means the rule did not ask for it, which is the default.
+    body: str | None = None
+    body_truncated: bool = False
+    body_size: int | None = None
+    # The response headers, credential-bearing ones already masked by the agent.
+    # None means they were not requested.
+    headers: Mapping[str, str] | None = None
 
 
 @dataclass(frozen=True)
@@ -410,6 +420,17 @@ def _unique_name(name: str, taken: Mapping[str, object]) -> str:
     return f"{name} ({suffix})"
 
 
+def _response_headers(raw: object) -> dict[str, str] | None:
+    """The reported response headers, or None when the endpoint reports none.
+
+    An empty map is a real answer ("asked for, and there were none"), so it is
+    kept distinct from None - the check says so rather than staying silent.
+    """
+    if not isinstance(raw, dict):
+        return None
+    return {str(name): str(value) for name, value in raw.items()}
+
+
 def _endpoint_statuses(raw: object) -> dict[str, EndpointStatus]:
     """The agent's ``endpoints`` list, keyed by name (the service item).
 
@@ -436,6 +457,10 @@ def _endpoint_statuses(raw: object) -> dict[str, EndpointStatus]:
             attempts=_optional_int(record.get("attempts")) or 1,
             from_cache=bool(record.get("from_cache")),
             cache_age=_optional_number(record.get("cache_age")),
+            body=_optional_str(record.get("body")),
+            body_truncated=bool(record.get("body_truncated")),
+            body_size=_optional_int(record.get("body_size")),
+            headers=_response_headers(record.get("headers")),
         )
     return statuses
 
@@ -1027,6 +1052,40 @@ def discover_json_api_endpoint(section: Section) -> DiscoveryResult:
         yield Service(item=name)
 
 
+def _raw_response_details(endpoint: EndpointStatus) -> list[str]:
+    """Details-only lines carrying the response headers and body verbatim.
+
+    Opt-in per endpoint, because a response body is the one thing here that can
+    be arbitrarily large and can hold anything the API returns. It is reported
+    at all because the alternative - the source URL - is often unreachable from
+    the browser reading the service, and always shows the API as it is NOW
+    rather than as it was when the check ran.
+    """
+    lines: list[str] = []
+    if endpoint.headers is not None:
+        lines.append("Response headers:")
+        lines += [f"  {name}: {value}" for name, value in endpoint.headers.items()] or ["  (none)"]
+    if endpoint.body is not None:
+        # Say what was cut off, or the reader has no way to tell a short response
+        # from the beginning of a long one. The full length is unknown where the
+        # body was read for this report alone and reading stopped at the limit,
+        # so it is not claimed - only the truncation is.
+        shown = len(endpoint.body.encode("utf-8", "replace"))
+        if endpoint.body_truncated and endpoint.body_size is not None:
+            about = f"first {shown} of {endpoint.body_size} bytes"
+        elif endpoint.body_truncated:
+            about = f"first {shown} bytes, truncated"
+        elif endpoint.body_size is not None:
+            about = f"{endpoint.body_size} bytes"
+        else:
+            about = f"{shown} bytes"
+        lines.append(f"Response body ({about}):")
+        # Verbatim, newlines and all: a pretty-printed body is far easier to read
+        # in the details than one folded onto a single line.
+        lines.append(endpoint.body)
+    return lines
+
+
 def check_json_api_endpoint(
     item: str, params: Mapping[str, object], section: Section
 ) -> CheckResult:
@@ -1057,7 +1116,7 @@ def check_json_api_endpoint(
         yield Result(
             state=state,
             summary=failure,
-            details="\n".join([failure, *details]),
+            details="\n".join([failure, *details, *_raw_response_details(endpoint)]),
         )
         return
 
@@ -1067,7 +1126,11 @@ def check_json_api_endpoint(
         # claim the API answered just now, when nothing was asked.
         age = f" ({_render_seconds(endpoint.cache_age)} old)" if endpoint.cache_age else ""
         status = f"{status}, from cache{age}"
-    yield Result(state=State.OK, summary=status, details="\n".join([status, *details]))
+    yield Result(
+        state=State.OK,
+        summary=status,
+        details="\n".join([status, *details, *_raw_response_details(endpoint)]),
+    )
 
     if retried:
         # Default OK: a retry doing its job is not itself a problem. A rule can

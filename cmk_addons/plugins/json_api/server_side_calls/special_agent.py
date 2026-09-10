@@ -161,6 +161,13 @@ class Retry(BaseModel, frozen=True):
     backoff: float = 0.5
 
 
+class ShowResponse(BaseModel, frozen=True):
+    # Report the response itself in the endpoint service's details: how much of
+    # the body, and whether the headers come too. The agent caps and redacts.
+    max_bytes: int = 2048
+    headers: bool = True
+
+
 class ClientCert(BaseModel, frozen=True):
     cert: str
     # Separate private-key file; omit when the key is bundled into the cert file.
@@ -193,6 +200,8 @@ class Endpoint(BaseModel, frozen=True):
     accept_status: Sequence[int] = ()
     # Retry policy for a transient failure. None = a single attempt.
     retry: Retry | None = None
+    # Report the raw response in the endpoint's own service details. None = no.
+    show_response: ShowResponse | None = None
     # HTTP proxy: the framework resolves the rule's Proxy choice into one of
     # these before parsing (stored_proxy ids are resolved to a URLProxy).
     proxy: URLProxy | NoProxy | EnvProxy | None = None
@@ -255,6 +264,7 @@ def _endpoint_json(endpoint: Endpoint, macros: Mapping[str, str]) -> str:
         "cache_ttl": endpoint.cache_ttl,
         "accept_status": list(endpoint.accept_status),
         "retry": endpoint.retry.model_dump() if endpoint.retry else None,
+        "show_response": (endpoint.show_response.model_dump() if endpoint.show_response else None),
         "proxy": _proxy_spec(endpoint.proxy),
         "auth": endpoint.auth[0] if endpoint.auth else None,
         "extractions": [e.model_dump() for e in endpoint.extractions],

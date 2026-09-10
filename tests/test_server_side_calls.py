@@ -915,3 +915,25 @@ def test_a_macro_in_the_endpoint_name_reaches_the_service_prefix(ssc):
     )
     (blob,) = _endpoints(ssc, args)
     assert (blob["name"], blob["service_prefix"]) == ("app1", True)
+
+
+def test_report_raw_response_rides_in_the_endpoint_blob(ssc):
+    args = _command_args(
+        ssc,
+        {
+            "endpoints": [
+                {
+                    "url": "https://app1/health",
+                    "show_response": {"max_bytes": 4096, "headers": False},
+                }
+            ]
+        },
+    )
+    (blob,) = _endpoints(ssc, args)
+    assert blob["show_response"] == {"max_bytes": 4096, "headers": False}
+
+
+def test_report_raw_response_is_absent_unless_configured(ssc):
+    args = _command_args(ssc, {"endpoints": [{"url": "https://app1/health"}]})
+    (blob,) = _endpoints(ssc, args)
+    assert blob["show_response"] is None
