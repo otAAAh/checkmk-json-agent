@@ -43,6 +43,7 @@ const FIXTURE = {
   auth: { type: "token", username: "", pwid: "pw-store-id" },
   verify_cert: true,
   follow_redirects: false,
+  service_prefix: true,
   timeout: "30",
   cache_ttl: "300",
   // Deliberately out of the ruleset's range (1-5 retries, 0-30s): the generator
@@ -197,6 +198,12 @@ src += `
       '{"status": "UP", "nodes": []}'
     ),
     headerService: defaultService("@header.X-RateLimit-Remaining"),
+    // The prefix mirrors the ruleset's own validation: it needs an endpoint
+    // name, so the checkbox on its own must not reach the generated rule (Setup
+    // would reject it on import).
+    prefixWithName: servicePrefix({ name: "frontend", service_prefix: true }),
+    prefixWithoutName: servicePrefix({ name: "  ", service_prefix: true }),
+    prefixOff: servicePrefix({ name: "frontend", service_prefix: false }),
   };
   console.log(JSON.stringify(out));
 })();

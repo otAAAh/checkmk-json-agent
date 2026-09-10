@@ -878,3 +878,40 @@ def test_inventory_spec_passed_through(ssc):
         "key": None,
         "keep_service": False,
     }
+
+
+def test_service_prefix_rides_in_the_endpoint_blob(ssc):
+    args = _command_args(
+        ssc,
+        {
+            "endpoints": [
+                {
+                    "url": "https://app1/health",
+                    "name": "app1-health",
+                    "service_prefix": True,
+                    "extractions": [{"path": "status", "service": "Status"}],
+                }
+            ]
+        },
+    )
+    (blob,) = _endpoints(ssc, args)
+    assert blob["service_prefix"] is True
+    assert blob["name"] == "app1-health"
+
+
+def test_service_prefix_defaults_to_off_for_a_rule_that_predates_it(ssc):
+    args = _command_args(ssc, {"endpoints": [{"url": "https://app1/health"}]})
+    (blob,) = _endpoints(ssc, args)
+    assert blob["service_prefix"] is False
+
+
+def test_a_macro_in_the_endpoint_name_reaches_the_service_prefix(ssc):
+    # The name becomes part of every service description, so it has to be the
+    # resolved one - not '$HOSTNAME$'.
+    args = _command_args(
+        ssc,
+        {"endpoints": [{"url": "https://x/health", "name": "$HOSTNAME$", "service_prefix": True}]},
+        host=_host({"$HOSTNAME$": "app1"}),
+    )
+    (blob,) = _endpoints(ssc, args)
+    assert (blob["name"], blob["service_prefix"]) == ("app1", True)
