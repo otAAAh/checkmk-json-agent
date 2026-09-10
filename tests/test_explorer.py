@@ -287,3 +287,19 @@ def test_explorer_clamps_the_retry_policy_to_the_rulesets_range(explorer_output:
         if retry:
             assert 1 <= retry["attempts"] <= 5
             assert 0.0 <= retry["backoff"] <= 30.0
+
+
+def test_explorer_emits_the_service_name_prefix(rule_value: dict, explorer_output: dict):
+    # The named endpoint prefixes its field services, so both outputs must carry
+    # the flag - otherwise the Explorer's rule and its CLI command produce
+    # differently named services from the same configuration.
+    assert rule_value["endpoints"][0]["service_prefix"] is True
+    assert explorer_output["cli"][0]["service_prefix"] is True
+
+
+def test_explorer_never_emits_a_prefix_without_an_endpoint_name(explorer_output: dict):
+    # _validate_endpoint rejects that combination, and the Explorer's contract is
+    # that what it prints imports cleanly.
+    assert explorer_output["prefixWithName"] is True
+    assert explorer_output["prefixWithoutName"] is False
+    assert explorer_output["prefixOff"] is False

@@ -405,3 +405,26 @@ def test_inventory_key_is_optional_but_validated(ruleset):
 def test_inventory_form_has_the_expected_keys(ruleset):
     form = ruleset._extraction().elements["inventory"].parameter_form
     assert set(form.elements) == {"node", "key", "keep_service"}
+
+
+def test_endpoint_form_offers_the_service_prefix(ruleset):
+    element = ruleset._endpoint().elements["service_prefix"]
+    # Required with a False prefill, like the other endpoint toggles: the form
+    # always shows it (that is how it gets discovered) and an existing rule that
+    # predates it keeps its plain service names.
+    assert element.required is True
+    assert element.parameter_form.prefill.value is False
+
+
+def test_service_prefix_without_an_endpoint_name_is_rejected(ruleset):
+    # It would be a silent no-op: the agent never falls back to the URL.
+    with pytest.raises(ValidationError):
+        ruleset._validate_endpoint({"url": "http://x", "service_prefix": True})
+    with pytest.raises(ValidationError):
+        ruleset._validate_endpoint({"url": "http://x", "service_prefix": True, "name": "  "})
+
+
+def test_service_prefix_with_a_name_passes(ruleset):
+    ruleset._validate_endpoint({"url": "http://x", "service_prefix": True, "name": "app1"})
+    # And an endpoint that does not prefix needs no name at all.
+    ruleset._validate_endpoint({"url": "http://x", "service_prefix": False})

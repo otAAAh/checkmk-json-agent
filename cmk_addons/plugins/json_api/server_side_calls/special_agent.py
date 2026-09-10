@@ -172,6 +172,10 @@ class Endpoint(BaseModel, frozen=True):
     # Optional short name; names the endpoint's own status service (item),
     # defaulting to the URL.
     name: str | None = None
+    # Put that name in front of this endpoint's FIELD service names too, so two
+    # endpoints extracting the same fields do not produce two identically named
+    # services. Needs a name (the agent never falls back to the URL here).
+    service_prefix: bool = False
     method: Literal["GET", "POST"] = "GET"
     body: str | None = None
     headers: Sequence[Header] = ()
@@ -239,6 +243,7 @@ def _endpoint_json(endpoint: Endpoint, macros: Mapping[str, str]) -> str:
         # The name becomes a service item, so resolve macros here too - that way
         # one shared rule can still name the endpoint per host.
         "name": replace_macros(endpoint.name, macros) if endpoint.name is not None else None,
+        "service_prefix": endpoint.service_prefix,
         "method": endpoint.method,
         "body": replace_macros(endpoint.body, macros) if endpoint.body is not None else None,
         "headers": [[h.name, replace_macros(h.value, macros)] for h in endpoint.headers],

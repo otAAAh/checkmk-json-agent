@@ -205,7 +205,8 @@ function makeEndpoint(withSample) {
       type: "none", username: "", pwid: "", field: "",
       tokenUrl: "", clientId: "", scope: "", audience: "", clientAuth: "basic",
     },
-    verify_cert: true, follow_redirects: true, timeout: "", cache_ttl: "", accept_status: "",
+    verify_cert: true, follow_redirects: true, service_prefix: false,
+    timeout: "", cache_ttl: "", accept_status: "",
     retries: "", retry_backoff: "0.5",
     proxy_mode: "default", proxy_url: "",   // default (env) | url | no_proxy
     ca_bundle: "", client_cert: "", client_key: "",
@@ -414,6 +415,7 @@ function renderConn() {
      <div class="toggles">
        <label><input type="checkbox" id="c-verify" ${e.verify_cert ? "checked" : ""}> Verify TLS certificate</label>
        <label><input type="checkbox" id="c-redir" ${e.follow_redirects ? "checked" : ""}> Follow HTTP redirects</label>
+       <label><input type="checkbox" id="c-svcprefix" ${e.service_prefix ? "checked" : ""}> Prefix service names with the endpoint name</label>
      </div>
      <div class="subnote">URL, body and header values may contain Checkmk macros (<code>$HOSTNAME$</code>, <code>$HOSTADDRESS$</code>, …).</div>`;
 
@@ -450,6 +452,8 @@ function renderConn() {
   $("c-proxymode").onchange = () => { e.proxy_mode = $("c-proxymode").value; renderConn(); renderOutputs(); };
   $("c-verify").onchange = () => { e.verify_cert = $("c-verify").checked; renderOutputs(); };
   $("c-redir").onchange = () => { e.follow_redirects = $("c-redir").checked; renderOutputs(); };
+  // Renames every field service of this endpoint, so the preview has to reflect it.
+  $("c-svcprefix").onchange = () => { e.service_prefix = $("c-svcprefix").checked; renderTabs(); renderOutputs(); };
   $("c-addheader").onclick = () => { e.headers.push({ name: "", value: "" }); renderConn(); renderOutputs(); };
 }
 
@@ -890,6 +894,14 @@ function proxyCli(e) {
   return null;
 }
 
+// Whether this endpoint prefixes its field service names with its own name.
+// Mirrors the ruleset's _validate_endpoint: the prefix needs a name, and a rule
+// claiming otherwise is REJECTED on import - so the checkbox alone is not
+// enough, it only counts once the endpoint is actually named.
+function servicePrefix(e) {
+  return !!e.service_prefix && !!(e.name && e.name.trim());
+}
+
 // The client-cert object ({cert, key?}), or null. Mirrors _client_cert / the
 // server-side call's ClientCert model.
 function clientCertObj(e) {
@@ -911,6 +923,7 @@ function pyEndpoint(e, indent) {
   if (hs.length) lines.push(`${i}'headers': [${hs.join(", ")}],`);
   const authPy = pyAuth(e.auth);
   if (authPy) lines.push(`${i}'auth': ${authPy},`);
+  lines.push(`${i}'service_prefix': ${servicePrefix(e) ? "True" : "False"},`);
   lines.push(`${i}'verify_cert': ${e.verify_cert ? "True" : "False"},`);
   if (e.ca_bundle && e.ca_bundle.trim()) lines.push(`${i}'ca_bundle': ${pyStr(e.ca_bundle.trim())},`);
   const cc = clientCertObj(e);
@@ -949,6 +962,7 @@ function endpointCliObj(e) {
     method: e.method || "GET",
     body: (e.body && e.body.trim()) ? e.body : null,
     headers: e.headers.filter(h => h.name).map(h => [h.name, h.value]),
+    service_prefix: servicePrefix(e),
     verify_cert: !!e.verify_cert,
     ca_bundle: (e.ca_bundle && e.ca_bundle.trim()) ? e.ca_bundle.trim() : null,
     client_cert: clientCertObj(e),

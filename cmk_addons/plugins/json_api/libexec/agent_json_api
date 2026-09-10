@@ -1415,8 +1415,37 @@ def _resolve_header(headers: object, path: str) -> tuple[bool, object]:
     return False, None
 
 
+def _service_prefix(endpoint: dict) -> str:
+    """The endpoint name to put in front of this endpoint's service names, or ''.
+
+    Opt-in per endpoint. Two endpoints extracting the same fields otherwise
+    produce two identically named services ('JSON Status' twice, the second
+    disambiguated to 'JSON Status (2)'), and nothing in the name says which
+    application each belongs to.
+
+    Deliberately no fall back to the URL: a URL in a service description travels
+    into notifications, availability reports and the metric paths on disk, where
+    it is both unreadable and - for a query string - a secret leak. Without a
+    configured name the option is simply a no-op (the ruleset rejects that
+    combination, so it can only reach here from a hand-written rule).
+    """
+    if not endpoint.get("service_prefix"):
+        return ""
+    name = endpoint.get("name")
+    return name.strip() if isinstance(name, str) and name.strip() else ""
+
+
+def _prefixed(prefix: str, service: str) -> str:
+    """``service`` behind the endpoint prefix, if there is one."""
+    return f"{prefix} {service}" if prefix else service
+
+
 def _extract(
-    document: object, extractions: list[dict], url: str, headers: object = None
+    document: object,
+    extractions: list[dict],
+    url: str,
+    headers: object = None,
+    prefix: str = "",
 ) -> list[dict]:
     results = []
     for spec in extractions:
@@ -1424,6 +1453,10 @@ def _extract(
         # Resolved in the same scope as the service labels: the current '[*]'
         # element, or the document root where there is no element.
         summary = spec.get("summary")
+        # This field's service name, endpoint prefix included. Every branch below
+        # names its service from this, so a prefixed endpoint cannot end up with
+        # some of its services prefixed and some not.
+        base = _prefixed(prefix, spec["service"])
         # A header is a single scalar off the response, so none of the body-only
         # machinery (wildcards, aggregation, filters) applies to it.
         if spec["path"].strip().startswith(_HEADER_PREFIX):
@@ -1431,7 +1464,7 @@ def _extract(
             results.append(
                 _result(
                     spec,
-                    spec["service"],
+                    base,
                     found,
                     value,
                     "header not in response",
@@ -1455,7 +1488,7 @@ def _extract(
             results.append(
                 _result(
                     spec,
-                    spec["service"],
+                    base,
                     found,
                     value,
                     error,
@@ -1479,7 +1512,7 @@ def _extract(
             results.append(
                 _result(
                     spec,
-                    spec["service"],
+                    base,
                     found,
                     value,
                     error,
@@ -1518,9 +1551,9 @@ def _extract(
             )
             label = " / ".join(label_segments)
             if host is not None:
-                service = spec["service"]
+                service = base
             else:
-                service = f"{spec['service']} {label}" if label else spec["service"]
+                service = f"{base} {label}" if label else base
             labels = _resolve_labels(label_specs, element)
             results.append(
                 _result(
@@ -1788,11 +1821,20 @@ def _process_endpoint(
     url = endpoint.get("url", "?")
     debug = getattr(args, "debug", False)
     _debug(debug, f"endpoint {index}: {url}")
+    prefix = _service_prefix(endpoint)
 
     def _fail(error: str, meta: dict | None = None) -> tuple[list[dict], dict, dict]:
+        # Prefixed exactly like the success path: a service that renamed itself
+        # while the endpoint was down would go stale and its replacement would
+        # be undiscovered, which is precisely when the monitoring is needed.
         results = [
             _result(
-                {"path": spec.get("path", "?")}, spec.get("service", "?"), False, None, error, url
+                {"path": spec.get("path", "?")},
+                _prefixed(prefix, spec.get("service", "?")),
+                False,
+                None,
+                error,
+                url,
             )
             for spec in endpoint.get("extractions", [])
             if isinstance(spec, dict)
@@ -1814,7 +1856,9 @@ def _process_endpoint(
         document, error, meta = _fetch(endpoint, secret, debug)
         if error is not None:
             return _fail(error, meta)
-        results = _extract(document, endpoint.get("extractions", []), url, meta.get("headers"))
+        results = _extract(
+            document, endpoint.get("extractions", []), url, meta.get("headers"), prefix
+        )
         host_labels = _resolve_host_labels(endpoint.get("host_labels", []), document)
         if debug:
             for result in results:

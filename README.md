@@ -34,7 +34,9 @@ Targets **Checkmk 2.4+** and the current stable plugin APIs
 - **Response headers** as a value source: prefix the name with `@header.`
   (e.g. `@header.X-RateLimit-Remaining`) to monitor an API quota, a
   `Retry-After` or the age of a `Last-Modified`
-- **One service per field**, named as you choose
+- **One service per field**, named as you choose - optionally prefixed with
+  the **endpoint's name**, so two endpoints monitoring the same fields do not
+  produce `JSON STATUS` and `JSON STATUS (2)`
 - **Array & object auto-discovery**: a `[*]` wildcard (e.g. `nodes[*].health`)
   creates one service per array element - or per key when it lands on a JSON
   object/map, such as a Spring Boot Actuator `/health` `components[*].status` -
@@ -153,12 +155,13 @@ Each endpoint has:
 
 | Field | Purpose |
 |---|---|
-| **Endpoint name** | Optional short name (e.g. `frontend`). Names the endpoint's own `JSON API <name>` service; without it the URL is used. Macros are resolved here too. It does not change the field service names |
+| **Endpoint name** | Optional short name (e.g. `frontend`). Names the endpoint's own `JSON API <name>` service; without it the URL is used. Macros are resolved here too. The field service names keep their plain names unless *Prefix the field service names* is on |
 | **URL** | Full endpoint URL incl. scheme, e.g. `https://app.example.com/actuator/health`. Checkmk macros (`$HOSTNAME$`, `$HOSTADDRESS$`, custom host macros, ...) are resolved against the monitored host, so one rule can be shared across many hosts. |
 | **HTTP method** | `GET` or `POST` |
 | **Request body** | Optional body for `POST` (defaults `Content-Type: application/json` unless you set one). Macros are resolved here too. |
 | **Additional request headers** | Name/value pairs; macros are resolved in the values. Stored in clear text — an API key belongs under *Authentication* instead |
 | **Authentication** | None, basic (username/password), bearer token, an API key in a request header (you name the header, e.g. `X-API-Key`), or an API key in a query parameter. All secrets come from the password store; the query-parameter key is appended for the request only and is redacted from every URL the agent reports |
+| **Prefix the field service names with the endpoint name** | Off by default. Names this endpoint's field services after it — `JSON Status` becomes `JSON <name> Status` — so two endpoints extracting the same fields stay distinguishable. Needs an endpoint name; see [Naming services per endpoint](#naming-services-per-endpoint) |
 | **Verify the TLS certificate** | On by default |
 | **Custom CA bundle file** | Optional; path on the Checkmk server to a PEM file with the CA(s) to verify the server against — trust a private CA without disabling verification. Ignored when verification is off |
 | **Client certificate (mutual TLS)** | Optional; paths on the Checkmk server to the client certificate (PEM) and, if separate, the private key. The key must be unencrypted |
@@ -171,7 +174,9 @@ Each endpoint has:
 | **Fields to monitor** | One entry per service (see below) |
 
 Service names must be unique across the whole rule; if two endpoints produce the
-same name, the check disambiguates the later one with a ` (2)` suffix.
+same name, the check disambiguates the later one with a ` (2)` suffix. Rather
+than living with that, name the endpoints and let them prefix their services —
+see [Naming services per endpoint](#naming-services-per-endpoint).
 
 Each **field to monitor** has:
 
@@ -229,6 +234,58 @@ endpoints with **certificate verification enabled**. Otherwise nothing about the
 certificate is reported (which is *absent*, not *expired*, and never alerts): a
 plain-HTTP endpoint has no certificate, `verify_cert` off yields none, and a
 connection reused from the pool may not expose one either.
+
+### Naming services per endpoint
+
+Two endpoints of the same shape — say a health endpoint on each of two
+applications — extract the same fields, so they produce the same service names
+and the second copy is disambiguated with a ` (2)` suffix:
+
+```text
+JSON API my_app1_health
+JSON API my_app2_health
+JSON STATUS
+JSON STATUS (2)
+JSON TIMESTAMP
+JSON TIMESTAMP (2)
+```
+
+Nothing in `JSON STATUS (2)` says which application it belongs to, and which
+endpoint gets the suffix depends on the order of the endpoints in the rule.
+
+Give each endpoint a **name** and tick **Prefix the field service names with the
+endpoint name**, and that endpoint's services are named after it:
+
+```text
+JSON API my_app1_health
+JSON my_app1_health STATUS
+JSON my_app1_health TIMESTAMP
+JSON API my_app2_health
+JSON my_app2_health STATUS
+JSON my_app2_health TIMESTAMP
+```
+
+Every service of one application now shares a prefix, which sorts them together
+in the service list and makes them addressable as a group in service rules and
+notification conditions. The leading `JSON ` stays: it is part of the check
+plugin's service name and is the same for every service the plugin creates.
+
+Notes:
+
+- It is **per endpoint**, so one rule can prefix the endpoints that collide and
+  leave a single-endpoint one alone.
+- The endpoint's own `JSON API <name>` service is already named after the
+  endpoint and does not change.
+- The prefix needs an endpoint name — Setup rejects the combination without one
+  rather than silently doing nothing. The URL is deliberately never used as a
+  prefix: it would carry a query string (and any key in it) into every service
+  description.
+- With **one host per element** the element is its own host, so the service
+  keeps its plain per-element name and only gains the endpoint prefix.
+- Turning it on **renames** services: the old ones go stale and the renamed ones
+  have to be discovered. Re-run a service discovery on the affected hosts
+  afterwards, and expect to move any check-parameters rule that matched the old
+  names.
 
 ### Caching responses
 

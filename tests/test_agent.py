@@ -2388,3 +2388,98 @@ def test_an_empty_wildcard_label_still_gets_an_inventory_row(agent):
     }
     results = agent._extract(document, [spec], "u")
     assert [r["inventory"]["row_key"] for r in results] == ["0", "n2"]
+
+
+# --- Endpoint name as a service-name prefix ---------------------------------
+
+
+def test_service_prefix_needs_both_the_option_and_a_name(agent):
+    assert agent._service_prefix({"service_prefix": True, "name": "app1"}) == "app1"
+    assert agent._service_prefix({"service_prefix": True, "name": "  app1  "}) == "app1"
+    # Off, or on without a name: no prefix. A URL is deliberately never used -
+    # it would carry a query string into every service description.
+    assert agent._service_prefix({"name": "app1"}) == ""
+    assert agent._service_prefix({"service_prefix": True}) == ""
+    assert agent._service_prefix({"service_prefix": True, "name": "   "}) == ""
+    assert agent._service_prefix({"service_prefix": True, "name": 5}) == ""
+
+
+def test_extract_prefixes_a_plain_field(agent):
+    results = agent._extract(
+        {"status": "UP"}, [{"path": "status", "service": "Status"}], "u", None, "app1"
+    )
+    assert [r["service"] for r in results] == ["app1 Status"]
+
+
+def test_extract_prefixes_every_kind_of_service_name(agent):
+    document = {"status": "UP", "nodes": [{"name": "n1", "load": 1}, {"name": "n2", "load": 2}]}
+    specs = [
+        {"path": "status", "service": "Status"},
+        {"path": "@header.x-version", "service": "Version"},
+        {"path": "nodes[*].load", "service": "Load", "label_path": "name"},
+        {"path": "nodes[*].load", "service": "Total load", "aggregate": "sum"},
+    ]
+    results = agent._extract(document, specs, "u", {"X-Version": "4.2"}, "app1")
+    assert [r["service"] for r in results] == [
+        "app1 Status",
+        "app1 Version",
+        "app1 Load n1",
+        "app1 Load n2",
+        "app1 Total load",
+    ]
+
+
+def test_extract_without_a_prefix_is_unchanged(agent):
+    document = {"nodes": [{"name": "n1", "load": 1}]}
+    specs = [{"path": "nodes[*].load", "service": "Load", "label_path": "name"}]
+    assert [r["service"] for r in agent._extract(document, specs, "u")] == ["Load n1"]
+
+
+def test_a_piggyback_service_is_prefixed_but_not_labelled(agent):
+    # The element is its own host, so the element's identity is the HOST - but
+    # which endpoint the service came from is still worth saying.
+    document = {"nodes": [{"host": "n1", "load": 1}]}
+    specs = [{"path": "nodes[*].load", "service": "Load", "piggyback_host": "host"}]
+    results = agent._extract(document, specs, "u", None, "app1")
+    assert [(r["service"], r["host"]) for r in results] == [("app1 Load", "n1")]
+
+
+def test_a_failed_endpoint_keeps_the_prefixed_service_names(agent, monkeypatch):
+    # A service that renamed itself while the endpoint was down would go stale
+    # and its replacement would be undiscovered - exactly when it is needed.
+    monkeypatch.setattr(
+        agent, "_fetch", lambda endpoint, secret, debug=False: (None, "Request failed", {})
+    )
+    endpoint = {
+        "url": "http://x",
+        "name": "app1",
+        "service_prefix": True,
+        "extractions": [{"path": "status", "service": "Status"}],
+    }
+    results, _labels, record = agent._process_endpoint(
+        agent.parse_arguments(["--endpoint", "{}"]), 0, endpoint
+    )
+    assert [r["service"] for r in results] == ["app1 Status"]
+    assert record["ok"] is False
+
+
+def test_two_endpoints_extracting_the_same_field_stay_distinguishable(agent, monkeypatch):
+    # The whole point: without the prefix these collide and the second becomes
+    # 'Status (2)', which says nothing about which application it belongs to.
+    monkeypatch.setattr(
+        agent,
+        "_fetch",
+        lambda endpoint, secret, debug=False: ({"status": "UP"}, None, {"status": 200}),
+    )
+    args = agent.parse_arguments(["--endpoint", "{}"])
+    names = []
+    for index, name in enumerate(("app1", "app2")):
+        endpoint = {
+            "url": f"http://{name}/health",
+            "name": name,
+            "service_prefix": True,
+            "extractions": [{"path": "status", "service": "Status"}],
+        }
+        results, _labels, _record = agent._process_endpoint(args, index, endpoint)
+        names += [r["service"] for r in results]
+    assert names == ["app1 Status", "app2 Status"]

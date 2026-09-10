@@ -168,13 +168,26 @@ def _validate_query_parameter(value: str) -> None:
 
 
 def _validate_endpoint(value: object) -> None:
+    if not isinstance(value, dict):
+        return
+    # Prefixing needs something to prefix WITH. The agent deliberately does not
+    # fall back to the URL (it would put a URL, query string and all, into every
+    # service description), so the option would silently do nothing - report it
+    # here instead of letting the rule save and look enabled.
+    if value.get("service_prefix"):
+        name = value.get("name")
+        if not (isinstance(name, str) and name.strip()):
+            raise validators.ValidationError(
+                Message(
+                    "Prefixing the field service names needs an endpoint name. "
+                    "Set 'Endpoint name', or turn the prefix off."
+                )
+            )
     # An API key header configured *twice* - once as authentication, once as a
     # plain additional header - is ambiguous: one silently overwrites the other,
     # and which one wins is an implementation detail. Rejecting it here also
     # stops the clear-text copy this feature exists to remove from being left
     # behind next to the password-store one.
-    if not isinstance(value, dict):
-        return
     auth = value.get("auth")
     if not (isinstance(auth, (tuple, list)) and len(auth) == 2 and auth[0] == "auth_header"):
         return
@@ -1059,10 +1072,33 @@ def _endpoint() -> Dictionary:
                         "Optional short name for this endpoint, e.g. 'frontend'. It "
                         "names the endpoint's own service - 'JSON API <name>', which "
                         "reports the HTTP status and the response time of the "
-                        "request. Without a name the URL is used. It does not change "
-                        "the field service names."
+                        "request. Without a name the URL is used. The field service "
+                        "names keep their plain names unless 'Prefix the field "
+                        "service names' below is enabled."
                     ),
                     custom_validate=(validators.LengthInRange(min_value=1),),
+                ),
+            ),
+            "service_prefix": DictElement(
+                required=True,
+                parameter_form=BooleanChoice(
+                    label=Label("Prefix the field service names with the endpoint name"),
+                    help_text=Help(
+                        "Off by default. Two endpoints extracting the same fields "
+                        "produce two services with the same name - 'JSON Status' "
+                        "twice, the second one disambiguated to 'JSON Status (2)' - "
+                        "and nothing in either name says which application it "
+                        "belongs to. Turn this on and this endpoint's field "
+                        "services are named after it instead: with the endpoint "
+                        "named 'app1-health', 'JSON Status' becomes 'JSON "
+                        "app1-health Status'. Requires an endpoint name; the "
+                        "endpoint's own 'JSON API <name>' service is already named "
+                        "after it and does not change. Enabling this RENAMES this "
+                        "endpoint's services: the old ones become stale and the "
+                        "renamed ones have to be discovered, so do it deliberately "
+                        "and re-run a service discovery afterwards."
+                    ),
+                    prefill=DefaultValue(False),
                 ),
             ),
             "url": DictElement(

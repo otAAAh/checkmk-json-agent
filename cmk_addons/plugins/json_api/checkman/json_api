@@ -72,11 +72,21 @@ description:
  API} (Setup > Service monitoring rules > Applications) without touching the
  agent's connection settings.
 
+ Two endpoints extracting the same fields would produce two services with the
+ same name, the later one disambiguated with a {(2)} suffix that says nothing
+ about which endpoint it came from. An endpoint can therefore be configured to
+ prefix its field service names with its own name, so that {JSON Status} becomes
+ {JSON <endpoint> Status} for that endpoint - including while the endpoint is
+ failing, so a service does not rename itself when it goes bad. It needs an
+ endpoint name; the URL is never used as a prefix. Enabling it renames the
+ endpoint's services, which have to be discovered again.
+
  Every endpoint additionally gets a service of its own, {JSON API <name>}, which
  reports the request itself rather than the data in it - see its own man page.
 
 item:
- The service name configured for the extracted field.
+ The service name configured for the extracted field, behind the endpoint's
+ name when the endpoint is configured to prefix its service names.
 
 discovery:
  One service is created for each field configured in the special agent rule.
