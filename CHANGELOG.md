@@ -3,6 +3,21 @@
 All notable changes to this project, one section per released version.
 Generated from the git history by `scripts/gen_changelog.py`.
 
+## [0.16.0] - 2026-09-10
+
+### Features
+
+- Report the raw response in the endpoint service's details ([#181](https://github.com/otAAAh/checkmk-json-agent/pull/181)) ([`93f0fdb`](https://github.com/otAAAh/checkmk-json-agent/commit/93f0fdb))
+- Name an endpoint's services after the endpoint ([#179](https://github.com/otAAAh/checkmk-json-agent/pull/179)) ([`aba4ff4`](https://github.com/otAAAh/checkmk-json-agent/commit/aba4ff4))
+
+### Other
+
+- Prepare 0.16.0 - announcement and refreshed Exchange listings ([#182](https://github.com/otAAAh/checkmk-json-agent/pull/182)) ([`a67c89b`](https://github.com/otAAAh/checkmk-json-agent/commit/a67c89b))
+- Bump js-yaml from 4.3.1 to 4.3.2 in /frontend ([#178](https://github.com/otAAAh/checkmk-json-agent/pull/178)) ([`c6e8021`](https://github.com/otAAAh/checkmk-json-agent/commit/c6e8021))
+- Deps: Bump ruff from 0.16.5 to 0.16.6 ([#176](https://github.com/otAAAh/checkmk-json-agent/pull/176)) ([`473e435`](https://github.com/otAAAh/checkmk-json-agent/commit/473e435))
+- Deps: Bump pydantic from 2.13.4 to 2.13.5 ([#177](https://github.com/otAAAh/checkmk-json-agent/pull/177)) ([`8a02747`](https://github.com/otAAAh/checkmk-json-agent/commit/8a02747))
+- Bump fast-uri from 3.1.5 to 3.1.7 in /frontend ([#175](https://github.com/otAAAh/checkmk-json-agent/pull/175)) ([`97f7c54`](https://github.com/otAAAh/checkmk-json-agent/commit/97f7c54))
+
 ## [0.15.0] - 2026-08-31
 
 ### Features
