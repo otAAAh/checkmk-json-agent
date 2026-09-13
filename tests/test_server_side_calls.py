@@ -57,6 +57,7 @@ def test_basic_command_line(ssc):
         {
             "path": "status",
             "service": "Health",
+            "group": None,
             "label_path": None,
             "piggyback_host": None,
             "piggyback_labels": [],
@@ -937,3 +938,27 @@ def test_report_raw_response_is_absent_unless_configured(ssc):
     args = _command_args(ssc, {"endpoints": [{"url": "https://app1/health"}]})
     (blob,) = _endpoints(ssc, args)
     assert blob["show_response"] is None
+
+
+def test_the_shared_service_rides_in_the_endpoint_blob(ssc):
+    args = _command_args(
+        ssc,
+        {
+            "endpoints": [
+                {
+                    "url": "https://app1/health",
+                    "extractions": [
+                        {"path": "status", "service": "Status", "group": "Health"},
+                        {"path": "component", "service": "Component", "group": "Health"},
+                        {"path": "other", "service": "Other"},
+                    ],
+                }
+            ]
+        },
+    )
+    (blob,) = _endpoints(ssc, args)
+    assert [(e["service"], e["group"]) for e in blob["extractions"]] == [
+        ("Status", "Health"),
+        ("Component", "Health"),
+        ("Other", None),
+    ]

@@ -127,6 +127,7 @@ const FIXTURE = {
     {
       service: "Requests",
       path: "requests_total",
+      group: "Traffic",
       label_path: "",
       aggregate: "",
       valueAs: "counter",

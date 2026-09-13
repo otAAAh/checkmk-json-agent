@@ -1695,3 +1695,220 @@ def test_a_section_from_an_older_agent_has_no_prefixed_endpoints(check):
     # The record simply has no 'prefixed' key; every endpoint keeps its service.
     section = _section(check, [], endpoints=[_endpoint("app1")])
     assert section.endpoints["app1"].prefixed is False
+
+
+# --- Several fields in one service, worst state wins ---------------------------
+
+
+def _grouped(service, label, **kw):
+    return _entry(service, label=label, **kw)
+
+
+def test_grouped_entries_become_one_service_with_one_line_each(check):
+    section = _section(
+        check,
+        [
+            _grouped("Health", "Status", value="UP"),
+            _grouped("Health", "Component", value="nginx"),
+        ],
+    )
+    assert list(section.items) == ["Health"]
+    assert [s.item for s in check.discover_json_api(section)] == ["Health"]
+    summaries = [
+        r.summary
+        for r in check.check_json_api("Health", {}, section)
+        if isinstance(r, Result) and r.summary
+    ]
+    # Each line names itself; the generic 'Value' would say nothing here.
+    assert summaries == ["Status: UP", "Component: nginx"]
+
+
+def test_the_service_state_is_the_worst_of_its_lines(check):
+    # Nothing combines the states here - each line is its own result and Checkmk
+    # aggregates them, which is the whole point.
+    section = _section(
+        check,
+        [
+            _grouped("Health", "Status", value="DOWN", match=["must_match", {"pattern": "UP"}]),
+            _grouped("Health", "Component", value="nginx"),
+        ],
+    )
+    states = [r.state for r in check.check_json_api("Health", {}, section) if isinstance(r, Result)]
+    assert State.worst(*states) == State.CRIT
+    assert State.OK in states
+
+
+def test_an_ungrouped_service_is_untouched(check):
+    # The single-entry path must render exactly as before.
+    section = _section(check, [_entry("X", value="5")])
+    summaries = [
+        r.summary
+        for r in check.check_json_api("X", {}, section)
+        if isinstance(r, Result) and r.summary
+    ]
+    assert summaries == ["Value: 5"]
+
+
+def test_a_missing_path_says_which_line_it_was(check):
+    section = _section(
+        check,
+        [
+            _grouped("Health", "Status", found=False, value=None, error="path not found"),
+            _grouped("Health", "Component", value="nginx"),
+        ],
+    )
+    (missing,) = [
+        r
+        for r in check.check_json_api("Health", {}, section)
+        if isinstance(r, Result) and r.state == State.UNKNOWN
+    ]
+    assert missing.summary == "Status: path not found"
+
+
+def test_each_line_keeps_its_own_levels(check):
+    section = _section(
+        check,
+        [
+            _grouped("Load", "CPU", value=95, levels_upper=["fixed", [90, 99]]),
+            _grouped("Load", "Disk", value=95, levels_upper=["fixed", [10, 20]]),
+        ],
+    )
+    states = {
+        r.summary.split(":")[0]: r.state
+        for r in check.check_json_api("Load", {}, section)
+        if isinstance(r, Result) and r.summary
+    }
+    assert states == {"CPU": State.WARN, "Disk": State.CRIT}
+
+
+def test_lines_get_metric_names_of_their_own(check):
+    # Metric names must be unique within a service, and fields routinely share a
+    # unit - two byte counts would otherwise both be 'json_api_bytes'.
+    section = _section(
+        check,
+        [
+            _grouped("Disks", "Root used", value=1024, unit="bytes"),
+            _grouped("Disks", "Data used", value=2048, unit="bytes"),
+        ],
+    )
+    metrics = [m.name for m in check.check_json_api("Disks", {}, section) if isinstance(m, Metric)]
+    assert metrics == ["json_api_bytes_root_used", "json_api_bytes_data_used"]
+
+
+def test_an_ungrouped_metric_keeps_its_declared_name(check):
+    section = _section(check, [_entry("Used", value=1024, unit="bytes")])
+    metrics = [m.name for m in check.check_json_api("Used", {}, section) if isinstance(m, Metric)]
+    assert metrics == ["json_api_bytes"]
+
+
+def test_metric_slugs_are_identifiers(check):
+    assert check._metric_slug("Root used") == "root_used"
+    assert check._metric_slug("CPU / core 0") == "cpu_core_0"
+    assert check._metric_slug("  ...  ") == "value"
+
+
+def test_a_combined_service_ignores_the_check_parameters_rule(check):
+    # One set of levels cannot describe several fields, so the rule is not
+    # applied to such a service: the lines keep what the agent rule gave them.
+    section = _section(
+        check,
+        [
+            _grouped("Load", "CPU", value=95, levels_upper=["fixed", [90, 99]]),
+            _grouped("Load", "Disk", value=5),
+        ],
+    )
+    params = {"levels_upper": ("fixed", (1.0, 2.0))}
+    states = {
+        r.summary.split(":")[0]: r.state
+        for r in check.check_json_api("Load", params, section)
+        if isinstance(r, Result) and r.summary
+    }
+    assert states == {"CPU": State.WARN, "Disk": State.OK}
+
+
+def test_a_single_field_service_still_takes_the_rule(check):
+    section = _section(check, [_entry("CPU", value=95, levels_upper=["fixed", [90, 99]])])
+    params = {"levels_upper": ("fixed", (1.0, 2.0))}
+    (result,) = [
+        r
+        for r in check.check_json_api("CPU", params, section)
+        if isinstance(r, Result) and r.summary.startswith("Value")
+    ]
+    assert result.state == State.CRIT
+
+
+def test_a_combined_service_seeds_no_discovered_parameters(check):
+    section = _section(
+        check,
+        [
+            _grouped("Load", "CPU", value=95, levels_upper=["fixed", [90, 99]]),
+            _grouped("Load", "Disk", value=5),
+        ],
+    )
+    (service,) = list(check.discover_json_api(section))
+    assert service.parameters == {}
+
+
+def test_the_details_say_which_line_they_describe(check):
+    section = _section(
+        check,
+        [
+            _grouped("Health", "Status", value="UP", path="status"),
+            _grouped("Health", "Component", value="nginx", path="component"),
+        ],
+    )
+    details = _details(check.check_json_api("Health", {}, section))
+    assert "[Status]" in details
+    assert "[Component]" in details
+
+
+def test_service_labels_of_every_line_reach_the_service(check):
+    section = _section(
+        check,
+        [
+            _grouped("Health", "Status", value="UP", labels=[{"key": "env", "value": "prod"}]),
+            _grouped("Health", "Component", value="n", labels=[{"key": "tier", "value": "web"}]),
+        ],
+    )
+    (service,) = list(check.discover_json_api(section))
+    assert {label.name: label.value for label in service.labels} == {
+        "json_api/env": "prod",
+        "json_api/tier": "web",
+    }
+
+
+def test_an_inventory_only_line_neither_shows_nor_hides_the_service(check):
+    section = _section(
+        check,
+        [
+            _grouped("Health", "Status", value="UP"),
+            _grouped(
+                "Health",
+                "Version",
+                value="4.2",
+                inventory={"node": "software.applications.x", "key": "version"},
+            ),
+        ],
+    )
+    (service,) = list(check.discover_json_api(section))
+    assert service.item == "Health"
+    summaries = [
+        r.summary
+        for r in check.check_json_api("Health", {}, section)
+        if isinstance(r, Result) and r.summary
+    ]
+    assert summaries == ["Status: UP"]
+
+
+def test_an_inventory_only_service_still_creates_none(check):
+    section = _section(
+        check,
+        [
+            _entry(
+                "Version",
+                value="4.2",
+                inventory={"node": "software.applications.x", "key": "version"},
+            )
+        ],
+    )
+    assert not list(check.discover_json_api(section))

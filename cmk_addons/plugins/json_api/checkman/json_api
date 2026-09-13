@@ -72,6 +72,18 @@ description:
  API} (Setup > Service monitoring rules > Applications) without touching the
  agent's connection settings.
 
+ Several fields can also report into ONE service instead of one each: a field
+ that names a shared service contributes a LINE to it rather than becoming a
+ service, and the service's state is the worst of its lines - Checkmk's ordinary
+ aggregation over the results a check yields. The field's own service name then
+ names its line, and each line keeps its own levels, string matching, transform
+ and unit. Because one service then holds several fields, a check parameters rule
+ is not applied to such a service (one set of levels cannot describe several
+ fields; the thresholds stay in the agent rule) and each line's metric is named
+ after the line, which keeps their histories apart at the cost of the declared
+ unit. A field written to the inventory instead of a service cannot report into a
+ shared one.
+
  Two endpoints extracting the same fields would produce two services with the
  same name, the later one disambiguated with a {(2)} suffix that says nothing
  about which endpoint it came from. An endpoint can therefore be configured to
@@ -85,8 +97,9 @@ description:
  reports the request itself rather than the data in it - see its own man page.
 
 item:
- The service name configured for the extracted field, behind the endpoint's
- name when the endpoint is configured to prefix its service names.
+ The service name configured for the extracted field - or the name of the shared
+ service, where fields report into one - behind the endpoint's name when the
+ endpoint is configured to prefix its service names.
 
 discovery:
  One service is created for each field configured in the special agent rule.
