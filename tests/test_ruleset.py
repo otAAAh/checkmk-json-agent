@@ -184,6 +184,7 @@ def test_extraction_form_has_the_expected_keys(ruleset):
     # carries the counter / timestamp interpretation.
     assert set(ruleset._extraction().elements) == {
         "service",
+        "group",
         "path",
         "label_path",
         "piggyback_host",
@@ -441,3 +442,36 @@ def test_report_raw_response_form_has_the_expected_keys(ruleset):
 
 def test_reporting_the_raw_response_is_optional(ruleset):
     assert ruleset._endpoint().elements["show_response"].required is False
+
+
+def test_extraction_offers_a_shared_service(ruleset):
+    element = ruleset._extraction().elements["group"]
+    # Optional: the default stays one service per field.
+    assert element.required is False
+
+
+def test_an_inventory_only_field_cannot_join_a_shared_service(ruleset):
+    # It creates no service at all, so there is no line to contribute - silently
+    # ignoring one half of that would be worse than rejecting it.
+    with pytest.raises(ValidationError):
+        ruleset._validate_extraction(
+            {
+                "service": "Version",
+                "path": "version",
+                "group": "Health",
+                "inventory": {"node": "software.applications.x"},
+            }
+        )
+
+
+def test_an_inventory_field_that_keeps_its_service_may_join_one(ruleset):
+    ruleset._validate_extraction(
+        {
+            "service": "Version",
+            "path": "version",
+            "group": "Health",
+            "inventory": {"node": "software.applications.x", "keep_service": True},
+        }
+    )
+    # ... and so may an ordinary field.
+    ruleset._validate_extraction({"service": "Status", "path": "status", "group": "Health"})
