@@ -12,6 +12,29 @@ this list needs none.
 `scripts/gen_changelog.py --version X.Y.Z` appends the matching section to the
 GitHub Release body, so these notes travel with the release people actually read.
 
+## [0.17.0]
+
+### A prefixed endpoint's own service is renamed to sort with its group
+
+Only affects endpoints with **Prefix the field service names with the endpoint
+name** turned on — the option added in 0.16.0. Nothing else changes.
+
+Such an endpoint's fields already read `JSON <name> Status`. Its own service kept
+the old shape, `JSON API <name>`, which sorted it away from every service it
+describes: all the `JSON API ...` services clustered together, and none of them
+sat with its own group. It is now `JSON <name> API`.
+
+**Effect:** on the next discovery, `JSON API <name>` goes stale for those
+endpoints and `JSON <name> API` appears. It is the same check with the same
+**Generic JSON API endpoint** check-parameters rule, but Checkmk needs a second
+check plugin to render a different service name, so the two are discovered
+separately — which is why this is a rename rather than a relabel. Re-run a
+service discovery on the affected hosts, and move any check-parameters rule or
+notification condition that matched the old name.
+
+Endpoints without the prefix keep `JSON API <name>` exactly as before, and an
+endpoint always has exactly one of the two services — never both.
+
 ## [0.14.0]
 
 ### A timestamp field with format `auto` now reads HTTP-dates

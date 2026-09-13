@@ -6,7 +6,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: checkmk-json-agent\n"
 "Report-Msgid-Bugs-To: https://github.com/otAAAh/checkmk-json-agent/issues\n"
-"POT-Creation-Date: 2026-09-10 09:06+0200\n"
+"POT-Creation-Date: 2026-09-13 09:04+0200\n"
 "PO-Revision-Date: 2026-07-06 12:00+0000\n"
 "Last-Translator: checkmk-json-agent contributors\n"
 "Language-Team: Dutch\n"
@@ -401,7 +401,7 @@ msgid "API key in a request header"
 msgstr "API-sleutel in een request-header"
 
 #: cmk_addons/plugins/json_api/rulesets/special_agent.py:528
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:1145
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:1147
 msgid "Header name"
 msgstr "Headernaam"
 
@@ -479,7 +479,7 @@ msgstr "Wordt de Checkmk-servicebeschrijving voor dit veld."
 #: cmk_addons/plugins/json_api/rulesets/special_agent.py:649
 #: cmk_addons/plugins/json_api/rulesets/special_agent.py:734
 #: cmk_addons/plugins/json_api/rulesets/special_agent.py:775
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:1432
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:1434
 msgid "JSON path"
 msgstr "JSON-pad"
 
@@ -598,7 +598,7 @@ msgstr "Relatief ten opzichte van elk '[*]'-element, bijvoorbeeld 'region'."
 
 #: cmk_addons/plugins/json_api/rulesets/special_agent.py:744
 #: cmk_addons/plugins/json_api/rulesets/special_agent.py:787
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:1444
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:1446
 msgid "Label key (optional)"
 msgstr "Labelsleutel (optioneel)"
 
@@ -978,11 +978,12 @@ msgid ""
 "disambiguated to 'JSON Status (2)' - and nothing in either name says which "
 "application it belongs to. Turn this on and this endpoint's field services "
 "are named after it instead: with the endpoint named 'app1-health', 'JSON "
-"Status' becomes 'JSON app1-health Status'. Requires an endpoint name; the "
-"endpoint's own 'JSON API <name>' service is already named after it and does "
-"not change. Enabling this RENAMES this endpoint's services: the old ones "
-"become stale and the renamed ones have to be discovered, so do it "
-"deliberately and re-run a service discovery afterwards."
+"Status' becomes 'JSON app1-health Status'. Requires an endpoint name. The "
+"endpoint's own service follows, from 'JSON API <name>' to 'JSON <name> API', "
+"so that it sorts together with the services it describes instead of with "
+"every other endpoint's status service. Enabling this RENAMES this endpoint's "
+"services: the old ones become stale and the renamed ones have to be "
+"discovered, so do it deliberately and re-run a service discovery afterwards."
 msgstr ""
 "Standaard uit. Twee endpoints die dezelfde velden uitlezen leveren twee "
 "services met dezelfde naam op – twee keer 'JSON Status', waarvan de tweede "
@@ -990,17 +991,19 @@ msgstr ""
 "welke applicatie hij hoort. Met deze optie worden de veldservices van dit "
 "endpoint in plaats daarvan naar het endpoint genoemd: heet het endpoint "
 "'app1-health', dan wordt 'JSON Status' tot 'JSON app1-health Status'. "
-"Vereist een endpointnaam; de eigen service van het endpoint, 'JSON API "
-"<naam>', is al naar het endpoint genoemd en verandert niet. Aanzetten "
-"WIJZIGT DE NAAM van de services van dit endpoint: de oude worden overbodig "
-"en de omgenoemde moeten worden gedetecteerd. Doe het dus bewust en voer "
-"daarna opnieuw een servicedetectie uit."
+"Vereist een endpointnaam. De eigen service van het endpoint gaat mee, van "
+"'JSON API <naam>' naar 'JSON <naam> API', zodat hij samen met de services "
+"wordt gesorteerd die hij beschrijft in plaats van met de statusservices van "
+"alle andere endpoints. Aanzetten WIJZIGT DE NAAM van de services van dit "
+"endpoint: de oude worden overbodig en de omgenoemde moeten worden "
+"gedetecteerd. Doe het dus bewust en voer daarna opnieuw een servicedetectie "
+"uit."
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:1107
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:1109
 msgid "URL"
 msgstr "URL"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:1109
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:1111
 msgid ""
 "Full URL of the JSON endpoint, including scheme, e.g. 'https://app.example."
 "com/actuator/health'."
@@ -1008,27 +1011,27 @@ msgstr ""
 "Volledige URL van het JSON-endpoint, inclusief schema, bijv. 'https://app."
 "example.com/actuator/health'."
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:1118
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:1120
 msgid "HTTP method"
 msgstr "HTTP-methode"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:1120
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:1122
 msgid "GET"
 msgstr "GET"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:1121
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:1123
 msgid "POST"
 msgstr "POST"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:1129
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:1131
 msgid "Request body (for POST)"
 msgstr "Request-body (voor POST)"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:1135
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:1137
 msgid "Additional request headers"
 msgstr "Aanvullende request-headers"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:1137
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:1139
 msgid ""
 "Sent with every request to this endpoint. Values are stored in clear text "
 "and travel on the agent's command line, so an API key belongs under "
@@ -1038,23 +1041,23 @@ msgstr ""
 "leesbare tekst opgeslagen en staan op de commandoregel van de agent, dus een "
 "API-sleutel hoort onder 'Authenticatie' - niet hier."
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:1149
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:1151
 msgid "Header value"
 msgstr "Headerwaarde"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:1162
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:1164
 msgid "Verify the TLS certificate"
 msgstr "Verifieer het TLS-certificaat"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:1163
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:1165
 msgid "Disabling certificate verification is insecure."
 msgstr "Het uitschakelen van certificaatverificatie is onveilig."
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:1170
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:1172
 msgid "Custom CA bundle file"
 msgstr "Aangepast CA-bundelbestand"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:1172
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:1174
 msgid ""
 "Path on the Checkmk server to a PEM file holding the CA certificate(s) to "
 "verify the server's certificate against. Use this to trust an internal or "
@@ -1066,11 +1069,11 @@ msgstr ""
 "om een interne of privé-CA te vertrouwen zonder verificatie uit te "
 "schakelen. Wordt genegeerd wanneer TLS-verificatie is uitgeschakeld."
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:1183
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:1185
 msgid "Client certificate (mutual TLS)"
 msgstr "Clientcertificaat (wederzijdse TLS)"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:1185
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:1187
 msgid ""
 "Present a client certificate to the server (mutual TLS). The files must "
 "exist on the Checkmk server. The private key must be unencrypted."
@@ -1079,11 +1082,11 @@ msgstr ""
 "moeten op de Checkmk-server aanwezig zijn. De privésleutel moet "
 "onversleuteld zijn."
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:1193
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:1195
 msgid "Client certificate file"
 msgstr "Clientcertificaatbestand"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:1195
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:1197
 msgid ""
 "Path to the client certificate (PEM). If the file also contains the private "
 "key, leave the key field empty."
@@ -1091,11 +1094,11 @@ msgstr ""
 "Pad naar het clientcertificaat (PEM). Als het bestand ook de privésleutel "
 "bevat, laat u het sleutelveld leeg."
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:1205
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:1207
 msgid "Private key file"
 msgstr "Privésleutelbestand"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:1207
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:1209
 msgid ""
 "Path to the client private key (PEM), if it is not bundled with the "
 "certificate."
@@ -1103,11 +1106,11 @@ msgstr ""
 "Pad naar de privésleutel van de client (PEM), als deze niet in het "
 "certificaat is opgenomen."
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:1219
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:1221
 msgid "Follow HTTP redirects"
 msgstr "HTTP-redirects volgen"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:1221
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:1223
 msgid ""
 "On by default. Disable in locked-down environments to harden against SSRF: a "
 "target that redirects (e.g. 3xx to an internal address) will then fail "
@@ -1118,19 +1121,19 @@ msgstr ""
 "intern adres) mislukt dan in plaats van dat de redirect-locatie wordt "
 "gevolgd."
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:1232
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:1234
 msgid "Request timeout (seconds)"
 msgstr "Request-timeout (seconden)"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:1233
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:1235
 msgid "Per-request timeout. Defaults to 30 seconds."
 msgstr "Timeout per request. Standaard 30 seconden."
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:1241
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:1243
 msgid "Re-read at most every (seconds)"
 msgstr "Hoogstens opnieuw lezen elke (seconden)"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:1243
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:1245
 msgid ""
 "Reuse the last response for this endpoint instead of requesting it again, as "
 "long as it is younger than this. For APIs with a request quota, expensive "
@@ -1157,11 +1160,11 @@ msgstr ""
 "responstijd, omdat er geen aanvraag is gedaan. Laat leeg om altijd nieuw op "
 "te halen."
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:1265
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:1267
 msgid "Retry a failed request"
 msgstr "Een mislukt verzoek opnieuw proberen"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:1267
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:1269
 msgid ""
 "Repeat this endpoint's request when it fails in a way a repeat could fix - a "
 "connection error, a timeout, or an HTTP 429 / 5xx - so a load balancer "
@@ -1184,19 +1187,19 @@ msgstr ""
 "slechtste geval (1 + herhalingen) maal de request-time-out, plus de "
 "wachttijden tussen de pogingen. Standaard uit."
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:1284
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:1286
 msgid "Number of retries"
 msgstr "Aantal herhalingen"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:1285
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:1287
 msgid "Extra attempts after the first one failed."
 msgstr "Extra pogingen nadat de eerste is mislukt."
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:1295
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:1297
 msgid "Wait before retrying (seconds)"
 msgstr "Wachten voor het opnieuw proberen (seconden)"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:1297
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:1299
 msgid ""
 "Waiting time before the first retry, doubled for each further one. The total "
 "waiting time is capped at 30 seconds however many retries are configured."
@@ -1205,11 +1208,11 @@ msgstr ""
 "wachttijd is begrensd op 30 seconden, hoeveel herhalingen er ook zijn "
 "ingesteld."
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:1314
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:1316
 msgid "Additional accepted HTTP status codes"
 msgstr "Extra geaccepteerde HTTP-statuscodes"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:1316
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:1318
 msgid ""
 "By default only 2xx responses are read; any other status makes the "
 "endpoint's services UNKNOWN. Add extra status codes to accept here - for "
@@ -1224,15 +1227,15 @@ msgstr ""
 "antwoord wordt zoals gebruikelijk geparseerd en geëxtraheerd. 2xx wordt "
 "altijd geaccepteerd."
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:1324
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:1326
 msgid "Status code"
 msgstr "Statuscode"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:1332
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:1334
 msgid "Report the raw response"
 msgstr "De ruwe respons rapporteren"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:1334
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:1336
 msgid ""
 "Off by default. Put the response itself into the Details of this endpoint's "
 "own 'JSON API <name>' service, exactly as it came off the wire. The Details "
@@ -1263,11 +1266,11 @@ msgstr ""
 "opgeslagen en gaan mee in meldingen – zet dit dus niet aan voor een respons "
 "met persoonlijke of anderszins gevoelige gegevens."
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:1357
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:1359
 msgid "Report at most (bytes)"
 msgstr "Maximaal rapporteren (bytes)"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:1359
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:1361
 msgid ""
 "Longer bodies are cut off at this many bytes and the service says so. Keep "
 "it small: this text is stored with every check result of this service."
@@ -1276,11 +1279,11 @@ msgstr ""
 "Houd het klein: deze tekst wordt bij elk checkresultaat van deze service "
 "opgeslagen."
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:1373
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:1375
 msgid "Report the response headers as well"
 msgstr "Ook de responsheaders rapporteren"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:1375
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:1377
 msgid ""
 "On by default. The headers are what a rate limit, a cache directive or a "
 "content type is announced in, and they are small."
@@ -1288,11 +1291,11 @@ msgstr ""
 "Standaard aan. In de headers worden een rate limit, een cache-instructie of "
 "een content type aangekondigd, en ze zijn klein."
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:1388
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:1390
 msgid "HTTP proxy"
 msgstr "HTTP-proxy"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:1390
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:1392
 msgid ""
 "Route this endpoint's request through an HTTP proxy - useful when the "
 "Checkmk server reaches the API only via a corporate egress proxy. Choose the "
@@ -1306,11 +1309,11 @@ msgstr ""
 "'geen proxy' om een in de omgeving ingestelde proxy te omzeilen. Zonder deze "
 "instelling worden de proxyvariabelen van de omgeving gebruikt."
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:1404
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:1406
 msgid "Fields to monitor"
 msgstr "Te monitoren velden"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:1406
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:1408
 msgid ""
 "Each entry becomes one Checkmk service, built from the value found at the "
 "given JSON path."
@@ -1318,11 +1321,11 @@ msgstr ""
 "Elke vermelding wordt één Checkmk-service, opgebouwd uit de waarde die op "
 "het opgegeven JSON-pad wordt gevonden."
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:1415
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:1417
 msgid "Host labels"
 msgstr "Hostlabels"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:1417
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:1419
 msgid ""
 "Attach Checkmk host labels to the monitored host, built from fields in this "
 "endpoint's response. Each key is prefixed with 'json_api/' and the value is "
@@ -1341,7 +1344,7 @@ msgstr ""
 "zodat de sleutels uniek blijven. Ingesteld tijdens de detectie, dus kies "
 "stabiele velden met lage kardinaliteit."
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:1434
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:1436
 msgid ""
 "From the response root, e.g. 'version', 'cluster.region', or a '[*]' "
 "wildcard like 'components[*]' for one label per element."
@@ -1349,7 +1352,7 @@ msgstr ""
 "Vanaf de wortel van de respons, bijv. 'version', 'cluster.region', of een "
 "'[*]'-jokerteken zoals 'components[*]' voor één label per element."
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:1446
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:1448
 msgid ""
 "Defaults to the path's last segment. For a '[*]' path the element id is "
 "appended ('<key>/<element>'). The 'json_api/' prefix is added automatically."
@@ -1358,11 +1361,11 @@ msgstr ""
 "element-id toegevoegd ('<key>/<element>'). Het voorvoegsel 'json_api/' wordt "
 "automatisch toegevoegd."
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:1456
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:1458
 msgid "Value field (for '[*]' wildcards)"
 msgstr "Waardeveld (voor '[*]'-jokertekens)"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:1458
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:1460
 msgid ""
 "For a '[*]' path: a path within each element for the label value (e.g. "
 "'status'). Defaults to 'true' (a set-membership tag). Ignored without a "
@@ -1372,11 +1375,11 @@ msgstr ""
 "'status'). Standaard 'true' (een lidmaatschapslabel). Zonder jokerteken "
 "wordt het genegeerd."
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:1496
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:1498
 msgid "Endpoints"
 msgstr "Endpoints"
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:1498
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:1500
 msgid ""
 "One or more HTTP/JSON endpoints. Each is fetched with its own connection "
 "settings and extractions; all results are merged into one section. An "
@@ -1387,7 +1390,7 @@ msgstr ""
 "tot één sectie. Een endpoint dat niet bereikbaar is, beïnvloedt alleen zijn "
 "eigen services."
 
-#: cmk_addons/plugins/json_api/rulesets/special_agent.py:1513
+#: cmk_addons/plugins/json_api/rulesets/special_agent.py:1515
 #: cmk_addons/plugins/json_api/rulesets/check_parameters.py:129
 msgid "Generic JSON API"
 msgstr "Generieke JSON-API"

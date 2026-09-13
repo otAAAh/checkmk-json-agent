@@ -241,6 +241,10 @@ class EndpointStatus:
     # The response headers, credential-bearing ones already masked by the agent.
     # None means they were not requested.
     headers: Mapping[str, str] | None = None
+    # Whether this endpoint prefixes its field service names. It decides which of
+    # the two endpoint check plugins discovers this record, and therefore how the
+    # endpoint's own service is named - see check_plugin_json_api_endpoint.
+    prefixed: bool = False
 
 
 @dataclass(frozen=True)
@@ -432,20 +436,28 @@ def _response_headers(raw: object) -> dict[str, str] | None:
 
 
 def _endpoint_statuses(raw: object) -> dict[str, EndpointStatus]:
-    """The agent's ``endpoints`` list, keyed by name (the service item).
+    """The agent's ``endpoints`` list, keyed by the service item.
 
     A duplicated name (two endpoints configured with the same one) is
     disambiguated the same way a duplicated service name is, so no endpoint can
     silently disappear from the service list.
+
+    The key is the SERVICE ITEM, which is the endpoint name - or, for an endpoint
+    that prefixes its field services, that name followed by ' API'. The two
+    endpoint check plugins render their item into different service names, so
+    each record has exactly one item and one plugin that discovers it.
     """
     statuses: dict[str, EndpointStatus] = {}
     for record in raw if isinstance(raw, list) else []:
         if not isinstance(record, dict):
             continue
         url = _optional_str(record.get("url")) or "?"
-        name = _unique_name(_optional_str(record.get("name")) or url, statuses)
-        statuses[name] = EndpointStatus(
+        name = _optional_str(record.get("name")) or url
+        prefixed = bool(record.get("prefixed"))
+        item = _unique_name(f"{name} API" if prefixed else name, statuses)
+        statuses[item] = EndpointStatus(
             name=name,
+            prefixed=prefixed,
             url=url,
             ok=bool(record.get("ok")),
             error=_optional_str(record.get("error")),
@@ -1047,9 +1059,28 @@ def discover_json_api_endpoint(section: Section) -> DiscoveryResult:
     These come for free with any rule: whether the API answered at all, with
     which status, and how long it took. Unwanted ones are removed the standard
     way, with a "Disabled services" rule.
+
+    Only the endpoints that do NOT prefix their field service names: the others
+    are discovered by the sibling plugin below, which names them differently.
     """
-    for name in section.endpoints:
-        yield Service(item=name)
+    for item, endpoint in section.endpoints.items():
+        if not endpoint.prefixed:
+            yield Service(item=item)
+
+
+def discover_json_api_endpoint_prefixed(section: Section) -> DiscoveryResult:
+    """The same service, for an endpoint that prefixes its field service names.
+
+    Such an endpoint's fields read 'JSON <name> Status'. Leaving its own service
+    as 'JSON API <name>' would sort the one service describing the request away
+    from every service it describes - all the 'JSON API ...' services cluster
+    together, and none of them sits with its own group. The item already carries
+    the ' API' suffix (see _endpoint_statuses), so this plugin's 'JSON %s' renders
+    it as 'JSON <name> API'.
+    """
+    for item, endpoint in section.endpoints.items():
+        if endpoint.prefixed:
+            yield Service(item=item)
 
 
 def _raw_response_details(endpoint: EndpointStatus) -> list[str]:
@@ -1245,6 +1276,24 @@ check_plugin_json_api_endpoint = CheckPlugin(
     sections=["json_api"],
     service_name="JSON API %s",
     discovery_function=discover_json_api_endpoint,
+    check_function=check_json_api_endpoint,
+    check_ruleset_name="json_api_endpoint",
+    check_default_parameters={},
+)
+
+# The same service for an endpoint that prefixes its field service names, under a
+# name that sorts WITH the services it describes ('JSON <name> API', next to
+# 'JSON <name> Status') instead of with every other endpoint's status service.
+# A service_name template is fixed at registration and no item can turn
+# 'JSON API %s' into 'JSON <name> API', so this needs a plugin of its own - which
+# also keeps the rename confined to the endpoints that opted into prefixing.
+# Same check function and same check group: it is the same service, differently
+# named, and its response-time and unreachable-state rules must keep working.
+check_plugin_json_api_endpoint_prefixed = CheckPlugin(
+    name="json_api_endpoint_prefixed",
+    sections=["json_api"],
+    service_name="JSON %s",
+    discovery_function=discover_json_api_endpoint_prefixed,
     check_function=check_json_api_endpoint,
     check_ruleset_name="json_api_endpoint",
     check_default_parameters={},

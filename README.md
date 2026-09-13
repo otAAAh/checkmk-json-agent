@@ -262,10 +262,10 @@ Give each endpoint a **name** and tick **Prefix the field service names with the
 endpoint name**, and that endpoint's services are named after it:
 
 ```text
-JSON API my_app1_health
+JSON my_app1_health API
 JSON my_app1_health STATUS
 JSON my_app1_health TIMESTAMP
-JSON API my_app2_health
+JSON my_app2_health API
 JSON my_app2_health STATUS
 JSON my_app2_health TIMESTAMP
 ```
@@ -279,8 +279,12 @@ Notes:
 
 - It is **per endpoint**, so one rule can prefix the endpoints that collide and
   leave a single-endpoint one alone.
-- The endpoint's own `JSON API <name>` service is already named after the
-  endpoint and does not change.
+- The endpoint's own service follows: `JSON API <name>` becomes
+  `JSON <name> API`, so it sorts with the services it describes rather than
+  clustering with every other endpoint's status service. It is the same service
+  with the same check-parameters rule — Checkmk just needs a second check plugin
+  to render the other name, so the two are discovered separately and an endpoint
+  always has exactly one of them.
 - The prefix needs an endpoint name — Setup rejects the combination without one
   rather than silently doing nothing. The URL is deliberately never used as a
   prefix: it would carry a query string (and any key in it) into every service
