@@ -70,12 +70,20 @@ included. One rule. Any API. Done.
   the service reports when a retry *was* needed — it cannot hide a degrading API.
 - 🔗 **Many endpoints, one rule** — poll several APIs together, each with its own
   method, auth, and fields; an unreachable one only affects its own services.
+- 🧩 **One service for several fields** — where a service per field is too much:
+  name a shared service on each field and they become **lines** of one service,
+  which takes the **worst** of their states. `status`, `component` and
+  `timestamp` become one service that is OK while all three are fine, each line
+  keeping its own levels, matching, transform and unit. A `[*]` wildcard fans out
+  into lines too, so a whole collection can be one service that goes CRIT if any
+  element does.
 - 🔖 **Services named after the endpoint** — two endpoints of the same shape
   extract the same fields, which would give you `JSON STATUS` and
   `JSON STATUS (2)`. Name the endpoints instead and every service of one
   application shares its prefix — `JSON app1-health STATUS` — which sorts them
   together and makes them addressable as a **group** in service rules and
-  notification conditions.
+  notification conditions. The endpoint's own status service joins that group
+  too, as `JSON app1-health API`.
 - 📈 **Thresholds & graphs in Checkmk** — WARN/CRIT and metrics live in *your*
   rule, not upstream in the API, and can be retuned per folder, host or service
   from a normal check-parameters rule without touching the connection.
