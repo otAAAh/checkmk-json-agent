@@ -3,6 +3,17 @@
 All notable changes to this project, one section per released version.
 Generated from the git history by `scripts/gen_changelog.py`.
 
+## [0.17.0] - 2026-09-13
+
+### Features
+
+- Report several fields in one service, worst state wins ([#185](https://github.com/otAAAh/checkmk-json-agent/pull/185)) ([`94936c4`](https://github.com/otAAAh/checkmk-json-agent/commit/94936c4))
+- Sort a prefixed endpoint's own service with its group ([#183](https://github.com/otAAAh/checkmk-json-agent/pull/183)) ([`17d50be`](https://github.com/otAAAh/checkmk-json-agent/commit/17d50be))
+
+### Other
+
+- Prepare 0.17.0 - announcement and refreshed Exchange listings ([#186](https://github.com/otAAAh/checkmk-json-agent/pull/186)) ([`12fdc2a`](https://github.com/otAAAh/checkmk-json-agent/commit/12fdc2a))
+
 ## [0.16.0] - 2026-09-10
 
 ### Features
