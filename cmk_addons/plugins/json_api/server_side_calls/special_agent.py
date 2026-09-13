@@ -102,6 +102,10 @@ class InventorySpec(BaseModel, frozen=True):
 class Extraction(BaseModel, frozen=True):
     path: str
     service: str
+    # Report this field into a shared service of this name instead of one of its
+    # own; 'service' then names its LINE within that service. The check yields
+    # one result per line and Checkmk's aggregation takes the worst state.
+    group: str | None = None
     label_path: str | None = None
     # Field within each '[*]' element supplying a PIGGYBACK HOST name: the element
     # becomes its own Checkmk host carrying this service, instead of one

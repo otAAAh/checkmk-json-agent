@@ -202,6 +202,10 @@ class Item:
     # left here because only the check knows what the summary already says.
     summary: str | None = None
     summary_fields: Mapping[str, str] = field(default_factory=dict)
+    # This value's name WITHIN its service, when several fields share one. None
+    # for the ordinary case, where the field IS the service and the generic
+    # 'Value' label is right.
+    label: str | None = None
     # Set when this field belongs in the inventory tree rather than (or as well
     # as) in a service.
     inventory: "InventoryTarget | None" = None
@@ -250,7 +254,11 @@ class EndpointStatus:
 @dataclass(frozen=True)
 class Section:
     error: str | None
-    items: Mapping[str, Item]
+    # Service name -> its entries, in configuration order. Exactly one for the
+    # ordinary one-field-one-service case; several where fields were configured
+    # to share a service, which is what lets the check yield one result per field
+    # and leave the worst-state aggregation to Checkmk.
+    items: Mapping[str, tuple[Item, ...]]
     # Host labels (key -> value) aggregated across all results on this host,
     # last value wins per key. Emitted by the section's host_label_function.
     host_labels: Mapping[str, str] = field(default_factory=dict)
@@ -481,12 +489,20 @@ def parse_json_api(string_table: StringTable) -> Section | None:
     if not string_table:
         return None
     payload = json.loads(string_table[0][0])
-    items: dict[str, Item] = {}
+    items: dict[str, list[Item]] = {}
     for result in payload["results"]:
-        # The agent already makes wildcard labels unique; this is a defensive
-        # backstop so a duplicate service name can never silently drop a service.
-        name = _unique_name(result["service"], items)
-        items[name] = Item(
+        # A field reported into a shared service carries the name of its line;
+        # it JOINS that service rather than becoming one, so it is appended
+        # instead of being disambiguated.
+        #
+        # A field of its own still gets the defensive uniqueness backstop (the
+        # agent already makes wildcard labels unique), so a duplicate service
+        # name can never silently drop a service - and so an accidental
+        # duplicate is never quietly merged into a combined service, which is
+        # something the rule has to ask for.
+        label = _optional_str(result.get("label"))
+        name = result["service"] if label is not None else _unique_name(result["service"], items)
+        entry = Item(
             found=result["found"],
             value=result["value"],
             error=result["error"],
@@ -506,10 +522,12 @@ def parse_json_api(string_table: StringTable) -> Section | None:
             summary=_optional_str(result.get("summary")),
             summary_fields=_summary_fields(result.get("summary_fields")),
             inventory=_inventory_target(result.get("inventory")),
+            label=label,
         )
+        items.setdefault(name, []).append(entry)
     return Section(
         error=payload.get("error"),
-        items=items,
+        items={name: tuple(entries) for name, entries in items.items()},
         host_labels=_coerce_host_labels(payload.get("host_labels")),
         endpoints=_endpoint_statuses(payload.get("endpoints")),
     )
@@ -526,13 +544,21 @@ def host_label_json_api(section: Section) -> HostLabelGenerator:
         yield HostLabel(f"{_LABEL_NS}{key}", value)
 
 
+def _visible_entries(entries: tuple[Item, ...]) -> list[Item]:
+    """The entries of a service that actually create one.
+
+    A field written to the inventory is a fact, not a state: by default it
+    creates NO service, which is the whole point - it must not consume a service
+    slot and a check interval to report something that changes twice a year. A
+    shared service exists as long as at least one of its fields is visible.
+    """
+    return [e for e in entries if e.inventory is None or e.inventory.keep_service]
+
+
 def discover_json_api(section: Section) -> DiscoveryResult:
-    for name, entry in section.items.items():
-        # A field written to the inventory is a fact, not a state: by default it
-        # creates NO service, which is the whole point - it must not consume a
-        # service slot and a check interval to report something that changes
-        # twice a year.
-        if entry.inventory is not None and not entry.inventory.keep_service:
+    for name, entries in section.items.items():
+        visible = _visible_entries(entries)
+        if not visible:
             continue
         # Seed each service's discovered parameters with the thresholds / match
         # configured in the special-agent rule. These become the service's
@@ -541,17 +567,31 @@ def discover_json_api(section: Section) -> DiscoveryResult:
         # Only carry the keys that are actually set, so an unset level stays
         # absent (and the check falls back to the section for pre-upgrade
         # autochecks that have no discovered parameters at all).
+        #
+        # A service several fields share gets NONE of this: one set of levels
+        # cannot describe several fields, and seeding it from whichever field
+        # happened to be first would apply that field's thresholds to all of
+        # them. Those services keep their per-field configuration from the agent
+        # rule instead, which is where it was written.
         params: dict[str, object] = {}
-        if entry.levels_upper is not None:
-            params["levels_upper"] = entry.levels_upper
-        if entry.levels_lower is not None:
-            params["levels_lower"] = entry.levels_lower
-        if entry.match is not None:
-            params["match"] = entry.match
+        if len(visible) == 1:
+            entry = visible[0]
+            if entry.levels_upper is not None:
+                params["levels_upper"] = entry.levels_upper
+            if entry.levels_lower is not None:
+                params["levels_lower"] = entry.levels_lower
+            if entry.match is not None:
+                params["match"] = entry.match
         # Service labels the agent resolved for this service, namespaced. Attached
-        # at discovery, so they update when the service is re-discovered.
-        labels = [ServiceLabel(f"{_LABEL_NS}{key}", value) for key, value in entry.service_labels]
-        yield Service(item=name, parameters=params, labels=labels)
+        # at discovery, so they update when the service is re-discovered. Where
+        # fields share a service they contribute to one label set (later wins per
+        # key), because the labels describe the SERVICE, not the line.
+        labels = {key: value for entry in visible for key, value in entry.service_labels}
+        yield Service(
+            item=name,
+            parameters=params,
+            labels=[ServiceLabel(f"{_LABEL_NS}{key}", value) for key, value in labels.items()],
+        )
 
 
 def _render_value(value: object) -> str:
@@ -861,8 +901,37 @@ def _derive(entry: Item) -> tuple[float | None, str, Callable[[float], str] | No
 _VALUE_LABEL = {"counter": "Rate", "timestamp": "Age"}
 
 
-def _value_label(value_as: _ValueAs) -> str:
+def _value_label(value_as: _ValueAs, line: str | None = None) -> str:
+    """What this value is called in the summary.
+
+    A field of its own is just 'Value' (or 'Rate'/'Age' once derived) - the
+    service name already says what it is. A field sharing a service has to say
+    which of them it is, so it uses its own name instead.
+    """
+    if line:
+        return line
     return _VALUE_LABEL.get(value_as[0], "Value") if value_as is not None else "Value"
+
+
+def _metric_slug(line: str) -> str:
+    """``line`` as a metric-name suffix: lower-case, underscores, nothing else."""
+    slug = re.sub(r"[^a-z0-9]+", "_", line.lower()).strip("_")
+    return slug or "value"
+
+
+def _line_metric_name(metric_name: str, line: str | None) -> str:
+    """The metric name for one line of a shared service.
+
+    Metric names have to be unique within a service, and a service's fields
+    routinely share a unit - two byte counts would otherwise both be
+    'json_api_bytes' and collide. The line's own name disambiguates them.
+
+    The result is not one of the metrics the graphing module declares, so
+    Checkmk titles it after the name itself and renders it as a plain number.
+    That is the price of a service holding an open set of fields; a field that
+    needs its declared unit and colour keeps a service of its own.
+    """
+    return metric_name if line is None else f"{metric_name}_{_metric_slug(line)}"
 
 
 def _value_results(
@@ -872,10 +941,11 @@ def _value_results(
     match: _Match,
 ) -> CheckResult:
     number, metric_name, render_func, extra = _derive(entry)
+    metric_name = _line_metric_name(metric_name, entry.label)
     yield from extra
     if entry.value_as is not None and number is None:
         return  # _derive already explained why (UNKNOWN / no rate yet)
-    label = _value_label(entry.value_as)
+    label = _value_label(entry.value_as, entry.label)
     # Once derived, the summary shows the derived number, not the raw JSON value.
     derived = entry.value_as is not None
     if derived and match is not None:
@@ -935,7 +1005,7 @@ def _value_results(
         note = misconfig_note if misconfigured_levels else ""
         if misconfigured_levels:
             state = State.worst(state, State.WARN)
-        summary = f"Value: {text}"
+        summary = f"{label}: {text}"
         if description:
             summary += f" ({description})"
         yield Result(state=state, summary=summary + note)
@@ -943,7 +1013,7 @@ def _value_results(
 
     if misconfigured_levels:
         yield Result(
-            state=State.WARN, summary=f"Value: {_render_value(entry.value)}{misconfig_note}"
+            state=State.WARN, summary=f"{label}: {_render_value(entry.value)}{misconfig_note}"
         )
         return
 
@@ -959,7 +1029,7 @@ def _value_results(
         yield Result(state=State.OK, summary=f"{label}: {shown}")
         yield Metric(metric_name, number)
     else:
-        yield Result(state=State.OK, summary=f"Value: {_render_value(entry.value)}")
+        yield Result(state=State.OK, summary=f"{label}: {_render_value(entry.value)}")
 
 
 # One '{path}' placeholder of a summary template; mirrors the agent's own regex.
@@ -1021,36 +1091,69 @@ def check_json_api(item: str, params: Mapping[str, object], section: Section) ->
     if section.error:
         yield Result(state=State.CRIT, summary=f"API error: {section.error}")
         return
-    entry = section.items.get(item)
-    if entry is None:
+    entries = section.items.get(item)
+    if not entries:
         return
 
-    # Effective parameters: a check-parameters rule (or the discovered defaults)
-    # wins per key; where a key is absent we fall back to the value the agent
-    # embedded in the section, so services discovered by a pre-parameters
-    # version keep their thresholds until they are re-discovered.
-    levels_upper = (
-        _coerce_levels(params["levels_upper"]) if "levels_upper" in params else entry.levels_upper
-    )
-    levels_lower = (
-        _coerce_levels(params["levels_lower"]) if "levels_lower" in params else entry.levels_lower
-    )
-    match = _coerce_match(params["match"]) if "match" in params else entry.match
-
-    # The extra summary text applies to the value line either way: on a missing
-    # path the context ("(n/a)" or whatever the API did return) is arguably the
-    # more useful half of the message.
-    extra = _render_summary(entry)
-
-    if not entry.found:
-        yield from _with_summary(
-            iter([Result(state=State.UNKNOWN, summary=entry.error or "not found")]), extra
+    # Several fields sharing one service each get their own result, and Checkmk's
+    # own aggregation makes the service's state the worst of them - there is no
+    # combining to do here beyond yielding them all.
+    #
+    # A check-parameters rule cannot describe such a service (one set of levels,
+    # several fields), so it is not applied to one: those fields keep the levels
+    # and matching the agent rule gave them, which the details spell out.
+    combined = len(entries) > 1
+    for entry in entries:
+        if entry.inventory is not None and not entry.inventory.keep_service:
+            continue  # an inventory-only field of a shared service
+        # Effective parameters: a check-parameters rule (or the discovered
+        # defaults) wins per key; where a key is absent we fall back to the value
+        # the agent embedded in the section, so services discovered by a
+        # pre-parameters version keep their thresholds until re-discovered.
+        levels_upper = (
+            _coerce_levels(params["levels_upper"])
+            if "levels_upper" in params and not combined
+            else entry.levels_upper
         )
-        yield from _context(entry, match)
-        return
+        levels_lower = (
+            _coerce_levels(params["levels_lower"])
+            if "levels_lower" in params and not combined
+            else entry.levels_lower
+        )
+        match = (
+            _coerce_match(params["match"]) if "match" in params and not combined else entry.match
+        )
 
-    yield from _with_summary(_value_results(entry, levels_upper, levels_lower, match), extra)
-    yield from _context(entry, match)
+        # Several fields share this service's Details, so each one opens with a
+        # header saying which field the lines below belong to. Emitted before the
+        # value and its context, which is what makes the Details readable as one
+        # block per field rather than an undifferentiated list.
+        if entry.label:
+            yield Result(state=State.OK, notice=f"[{entry.label}]")
+
+        # The extra summary text applies to the value line either way: on a
+        # missing path the context ("(n/a)" or whatever the API did return) is
+        # arguably the more useful half of the message.
+        extra = _render_summary(entry)
+
+        if not entry.found:
+            missing = entry.error or "not found"
+            yield from _with_summary(
+                iter(
+                    [
+                        Result(
+                            state=State.UNKNOWN,
+                            summary=f"{entry.label}: {missing}" if entry.label else missing,
+                        )
+                    ]
+                ),
+                extra,
+            )
+            yield from _context(entry, match)
+            continue
+
+        yield from _with_summary(_value_results(entry, levels_upper, levels_lower, match), extra)
+        yield from _context(entry, match)
 
 
 def discover_json_api_endpoint(section: Section) -> DiscoveryResult:
@@ -1224,7 +1327,7 @@ def inventory_json_api(section: Section) -> InventoryResult:
     A field whose path was not in the response contributes nothing: the tree
     keeps what it learned last time rather than recording a hole.
     """
-    for entry in section.items.values():
+    for entry in (entry for entries in section.items.values() for entry in entries):
         target = entry.inventory
         if target is None or not entry.found:
             continue

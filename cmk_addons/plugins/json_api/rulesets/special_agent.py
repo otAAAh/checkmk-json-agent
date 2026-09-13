@@ -235,6 +235,19 @@ def _validate_extraction(value: object) -> None:
     """
     if not isinstance(value, dict):
         return
+    # A field sent to the inventory INSTEAD of a service has no line to
+    # contribute: it is written to the tree and creates nothing. Reporting it
+    # into a shared service is therefore a contradiction rather than a
+    # combination, and silently ignoring one half of it would be worse.
+    inventory = value.get("inventory")
+    if value.get("group") and isinstance(inventory, dict) and not inventory.get("keep_service"):
+        raise validators.ValidationError(
+            Message(
+                "A field written to the inventory creates no service, so it cannot "
+                "report into a shared one. Tick 'Also create a service for this "
+                "field', or clear 'Report in a shared service named'."
+            )
+        )
     # Host labels for a host this extraction never creates would land nowhere:
     # they are resolved per '[*]' element and attached to the host that element
     # becomes, so without a piggyback host name there is nothing to attach to.
@@ -639,7 +652,39 @@ def _extraction() -> Dictionary:
                 required=True,
                 parameter_form=String(
                     title=Title("Service name"),
-                    help_text=Help("Becomes the Checkmk service description for this field."),
+                    help_text=Help(
+                        "Becomes the Checkmk service description for this field - "
+                        "or, where the field reports into a shared service, the "
+                        "name of its line within that service."
+                    ),
+                    custom_validate=(validators.LengthInRange(min_value=1),),
+                ),
+            ),
+            "group": DictElement(
+                required=False,
+                parameter_form=String(
+                    title=Title("Report in a shared service named"),
+                    help_text=Help(
+                        "By default every field becomes a service of its own. "
+                        "Name a shared service here and this field reports into "
+                        "that one service as a LINE instead, alongside the other "
+                        "fields naming it - so a small API of 'status', "
+                        "'component' and 'timestamp' can be one service rather "
+                        "than three. The service's state is the WORST of its "
+                        "lines, which is how Checkmk aggregates any check, and "
+                        "'Service name' above then names the line rather than the "
+                        "service. Each line keeps its own levels, string matching "
+                        "and transform from this rule. Two things change, both "
+                        "because one service now holds several fields: a "
+                        "'Generic JSON API' check-parameters rule cannot describe "
+                        "it and is not applied to it, so thresholds for these "
+                        "fields live here; and each line's metric is named after "
+                        "the line, which keeps the history of several fields "
+                        "apart but renders as a plain number rather than in the "
+                        "field's unit. A field that needs its unit on the graph, "
+                        "or per-service thresholds, is better off with a service "
+                        "of its own."
+                    ),
                     custom_validate=(validators.LengthInRange(min_value=1),),
                 ),
             ),

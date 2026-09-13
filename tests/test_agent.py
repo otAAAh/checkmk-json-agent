@@ -2739,3 +2739,83 @@ def test_a_failed_endpoint_still_says_whether_it_prefixes(agent, monkeypatch):
         {"url": "http://x", "name": "app1", "service_prefix": True},
     )
     assert (record["ok"], record["prefixed"]) == (False, True)
+
+
+# --- Several fields reported into one shared service --------------------------
+
+
+def test_shared_service_reads_the_group_name(agent):
+    assert agent._shared_service({"group": "Health"}) == "Health"
+    assert agent._shared_service({"group": "  Health  "}) == "Health"
+    assert agent._shared_service({}) is None
+    assert agent._shared_service({"group": ""}) is None
+    assert agent._shared_service({"group": "   "}) is None
+    assert agent._shared_service({"group": 5}) is None
+
+
+def test_grouped_fields_share_a_service_and_name_their_lines(agent):
+    document = {"status": "UP", "component": "nginx", "timestamp": 17}
+    specs = [
+        {"path": "status", "service": "Status", "group": "Health"},
+        {"path": "component", "service": "Component", "group": "Health"},
+        {"path": "timestamp", "service": "Timestamp", "group": "Health"},
+    ]
+    results = agent._extract(document, specs, "u")
+    assert {r["service"] for r in results} == {"Health"}
+    assert [r["label"] for r in results] == ["Status", "Component", "Timestamp"]
+
+
+def test_an_ungrouped_field_carries_no_line_label(agent):
+    (result,) = agent._extract({"status": "UP"}, [{"path": "status", "service": "Status"}], "u")
+    assert (result["service"], result["label"]) == ("Status", None)
+
+
+def test_a_grouped_wildcard_fans_out_into_lines_not_services(agent):
+    document = {"nodes": [{"name": "n1", "load": 1}, {"name": "n2", "load": 2}]}
+    specs = [{"path": "nodes[*].load", "service": "Load", "label_path": "name", "group": "Nodes"}]
+    results = agent._extract(document, specs, "u")
+    assert {r["service"] for r in results} == {"Nodes"}
+    assert [r["label"] for r in results] == ["Load n1", "Load n2"]
+
+
+def test_a_grouped_header_and_aggregate_keep_the_shared_service(agent):
+    document = {"nodes": [{"load": 1}, {"load": 2}]}
+    specs = [
+        {"path": "@header.x-version", "service": "Version", "group": "Health"},
+        {"path": "nodes[*].load", "service": "Total", "aggregate": "sum", "group": "Health"},
+    ]
+    results = agent._extract(document, specs, "u", {"X-Version": "4.2"}, "")
+    assert {r["service"] for r in results} == {"Health"}
+    assert [r["label"] for r in results] == ["Version", "Total"]
+
+
+def test_the_endpoint_prefix_applies_to_the_shared_service(agent):
+    # The prefix names the SERVICE, so it lands on the group - not on every line
+    # inside it, which would repeat the endpoint name three times per service.
+    specs = [{"path": "status", "service": "Status", "group": "Health"}]
+    (result,) = agent._extract({"status": "UP"}, specs, "u", None, "app1")
+    assert (result["service"], result["label"]) == ("app1 Health", "Status")
+
+
+def test_a_failed_endpoint_keeps_its_shared_services(agent, monkeypatch):
+    # The lines of a combined service must not scatter into services of their own
+    # the moment the endpoint goes down.
+    monkeypatch.setattr(
+        agent, "_fetch", lambda endpoint, secret, debug=False: (None, "Request failed", {})
+    )
+    endpoint = {
+        "url": "http://x",
+        "extractions": [
+            {"path": "status", "service": "Status", "group": "Health"},
+            {"path": "component", "service": "Component", "group": "Health"},
+            {"path": "other", "service": "Other"},
+        ],
+    }
+    results, _labels, _record = agent._process_endpoint(
+        agent.parse_arguments(["--endpoint", "{}"]), 0, endpoint
+    )
+    assert [(r["service"], r["label"]) for r in results] == [
+        ("Health", "Status"),
+        ("Health", "Component"),
+        ("Other", None),
+    ]

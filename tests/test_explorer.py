@@ -317,3 +317,16 @@ def test_explorer_clamps_or_omits_the_raw_response_report(explorer_output: dict)
     # too large a one is clamped to the ruleset's maximum rather than rejected.
     assert explorer_output["reportOff"] is None
     assert explorer_output["reportClamped"] == {"max_bytes": 65536, "headers": True}
+
+
+def test_explorer_emits_the_shared_service(rule_value: dict, explorer_output: dict):
+    # A field reported into a shared service must carry it into both the rule and
+    # the agent command line, or the Explorer's two outputs describe different
+    # service layouts.
+    by_service = {x["service"]: x for x in rule_value["endpoints"][0]["extractions"]}
+    assert by_service["Requests"]["group"] == "Traffic"
+    cli = {x["service"]: x for x in explorer_output["cli"][0]["extractions"]}
+    assert cli["Requests"]["group"] == "Traffic"
+    # A field of its own emits nothing, matching the ruleset's optional field.
+    assert "group" not in by_service["Health"]
+    assert "group" not in cli["Health"]
