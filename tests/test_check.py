@@ -1635,3 +1635,63 @@ def test_endpoint_details_do_not_claim_a_size_they_never_measured(check):
     )
     details = _details(check.check_json_api_endpoint("api", {}, section))
     assert "Response body (first 4 bytes, truncated):" in details
+
+
+# --- The endpoint's own service, named with its group -------------------------
+
+
+def test_a_prefixed_endpoint_gets_its_service_from_the_other_plugin(check):
+    # 'JSON API <name>' would sort away from the 'JSON <name> ...' services it
+    # describes, so a prefixed endpoint is discovered by the sibling plugin, whose
+    # 'JSON %s' renders the ' API' item as 'JSON <name> API'.
+    section = _section(check, [], endpoints=[_endpoint("app1", prefixed=True)])
+    assert [s.item for s in check.discover_json_api_endpoint_prefixed(section)] == ["app1 API"]
+    # ... and NOT by the plain one, or the endpoint would get two services.
+    assert not list(check.discover_json_api_endpoint(section))
+
+
+def test_an_unprefixed_endpoint_keeps_the_plain_plugin(check):
+    section = _section(check, [], endpoints=[_endpoint("app1")])
+    assert [s.item for s in check.discover_json_api_endpoint(section)] == ["app1"]
+    assert not list(check.discover_json_api_endpoint_prefixed(section))
+
+
+def test_both_kinds_of_endpoint_coexist_in_one_rule(check):
+    # One rule can prefix the endpoints that collide and leave another alone.
+    section = _section(
+        check,
+        [],
+        endpoints=[_endpoint("app1", prefixed=True), _endpoint("legacy", url="https://l/h")],
+    )
+    assert [s.item for s in check.discover_json_api_endpoint_prefixed(section)] == ["app1 API"]
+    assert [s.item for s in check.discover_json_api_endpoint(section)] == ["legacy"]
+
+
+def test_the_prefixed_endpoint_service_checks_like_any_other(check):
+    # Same check function, same check group: only the name differs.
+    section = _section(check, [], endpoints=[_endpoint("app1", prefixed=True)])
+    results = list(check.check_json_api_endpoint("app1 API", {}, section))
+    summaries = [r.summary for r in results if isinstance(r, Result) and r.summary]
+    assert "HTTP 200" in summaries
+    assert "URL: https://app/health" in _details(results)
+
+
+def test_two_prefixed_endpoints_with_one_name_stay_two_services(check):
+    section = _section(
+        check,
+        [],
+        endpoints=[
+            _endpoint("app1", prefixed=True),
+            _endpoint("app1", prefixed=True, url="https://other/h"),
+        ],
+    )
+    assert [s.item for s in check.discover_json_api_endpoint_prefixed(section)] == [
+        "app1 API",
+        "app1 API (2)",
+    ]
+
+
+def test_a_section_from_an_older_agent_has_no_prefixed_endpoints(check):
+    # The record simply has no 'prefixed' key; every endpoint keeps its service.
+    section = _section(check, [], endpoints=[_endpoint("app1")])
+    assert section.endpoints["app1"].prefixed is False

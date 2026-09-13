@@ -1424,6 +1424,7 @@ def test_process_endpoint_returns_a_record(agent, monkeypatch):
     )
     assert record == {
         "name": "frontend",
+        "prefixed": False,
         "url": "http://x",
         "ok": True,
         "error": None,
@@ -2711,3 +2712,30 @@ def test_the_endpoint_record_reports_nothing_by_default(agent, monkeypatch):
     assert record["body"] is None
     assert record["headers"] is None
     assert record["body_truncated"] is False
+
+
+def test_the_endpoint_record_says_whether_it_prefixes(agent, monkeypatch):
+    # The check needs it to name the endpoint's OWN service; the agent is the
+    # only side that sees the rule.
+    monkeypatch.setattr(
+        agent, "_fetch", lambda endpoint, secret, debug=False: ({}, None, {"status": 200})
+    )
+    args = agent.parse_arguments(["--endpoint", "{}"])
+    _r, _l, plain = agent._process_endpoint(args, 0, {"url": "http://x", "name": "app1"})
+    _r, _l, prefixed = agent._process_endpoint(
+        args, 1, {"url": "http://x", "name": "app1", "service_prefix": True}
+    )
+    assert plain["prefixed"] is False
+    assert prefixed["prefixed"] is True
+
+
+def test_a_failed_endpoint_still_says_whether_it_prefixes(agent, monkeypatch):
+    # Otherwise the endpoint's own service would change its name whenever the
+    # request failed, which is exactly when it must not move.
+    monkeypatch.setattr(agent, "_fetch", lambda endpoint, secret, debug=False: (None, "boom", {}))
+    _r, _l, record = agent._process_endpoint(
+        agent.parse_arguments(["--endpoint", "{}"]),
+        0,
+        {"url": "http://x", "name": "app1", "service_prefix": True},
+    )
+    assert (record["ok"], record["prefixed"]) == (False, True)

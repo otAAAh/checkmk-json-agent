@@ -54,6 +54,11 @@ description:
  If you do not want these services, remove them the standard way with a
  "Disabled services" rule.
 
+ An endpoint that prefixes its field service names with its own name gets this
+ same service under a name that sorts with the services it describes, {JSON
+ <endpoint> API}, from the sibling plugin {json_api_endpoint_prefixed}. Every
+ endpoint is discovered by exactly one of the two.
+
 item:
  The name configured for the endpoint, or its URL when it has no name. The URL
  is used without its query string, so a credential passed as a query parameter

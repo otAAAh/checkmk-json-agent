@@ -1919,6 +1919,12 @@ def _endpoint_record(
     meta = meta or {}
     return {
         "name": _endpoint_name(endpoint, url),
+        # Whether this endpoint prefixes its field service names. The check needs
+        # it to name the endpoint's OWN service: an endpoint whose fields read
+        # 'JSON <name> Status' wants 'JSON <name> API' rather than 'JSON API
+        # <name>', or the one service describing the request sorts away from
+        # every service it describes.
+        "prefixed": bool(_service_prefix(endpoint)),
         "url": url,
         "ok": ok,
         "error": error,

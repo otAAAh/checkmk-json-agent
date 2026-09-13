@@ -1,0 +1,32 @@
+title: Generic JSON API: status and response time of a named endpoint
+agents: json_api
+catalog: app
+license: GPLv2
+distribution: https://github.com/otAAAh/checkmk-json-agent
+description:
+ This is the same check as {Generic JSON API: status and response time of an
+ endpoint} - it reports the request rather than the data in the response, with
+ the same HTTP status, response time, response size, certificate validity,
+ cache and retry reporting, the optional raw response, and the same check
+ parameters rule. See that man page for what it monitors; only the service NAME
+ differs, and this page exists because a service name is fixed per check plugin.
+
+ An endpoint can be configured to prefix its field service names with its own
+ name, so that its fields read {JSON <endpoint> Status}. Its own service is then
+ discovered here and named {JSON <endpoint> API}, which sorts it together with
+ the services it describes. Left as {JSON API <endpoint>} it would sort with
+ every other endpoint's status service instead, far away from its own group -
+ which defeats the point of prefixing in the first place.
+
+ Every endpoint is discovered by exactly one of the two plugins, so an endpoint
+ never gets both services. Turning the prefix on (or off) therefore moves the
+ endpoint's own service between them: the old service goes stale and the new one
+ has to be discovered, which is the same rename the field services undergo.
+
+item:
+ The endpoint's name followed by {API} - or its URL followed by {API} when it has
+ no name, though the prefix cannot be enabled without a name.
+
+discovery:
+ One service is created for each endpoint that prefixes its field service names.
+ Endpoints that do not are discovered as {JSON API <name>} by the sibling plugin.
