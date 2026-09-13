@@ -38,6 +38,10 @@ Targets **Checkmk 2.4+** and the current stable plugin APIs
 - **Response headers** as a value source: prefix the name with `@header.`
   (e.g. `@header.X-RateLimit-Remaining`) to monitor an API quota, a
   `Retry-After` or the age of a `Last-Modified`
+- **One service for several fields**, where a service per field is too much:
+  name a shared service on each field and they become lines of it, the service
+  taking the **worst** of their states - so `status`, `component` and
+  `timestamp` can be one service that is OK while all three are fine
 - **One service per field**, named as you choose - optionally prefixed with
   the **endpoint's name**, so two endpoints monitoring the same fields do not
   produce `JSON STATUS` and `JSON STATUS (2)`
@@ -187,7 +191,8 @@ Each **field to monitor** has:
 
 | Field | Purpose |
 |---|---|
-| **Service name** | Becomes the service (shown as `JSON <name>`) |
+| **Service name** | Becomes the service (shown as `JSON <name>`) — or, with a shared service set below, the name of this field's *line* inside it |
+| **Report in a shared service named** | Optional: report this field into one shared service alongside the other fields naming it, instead of creating one of its own. The service's state is the **worst** of its lines. See [One service for several fields](#one-service-for-several-fields) |
 | **JSON path** | Dotted path; use `[*]` for array discovery |
 | **Per-element name suffix** | For `[*]`: field within each element, appended to the service name to tell the per-element services apart (defaults to the array index); it does not replace the service name |
 | **Create one host per element, named by this field** | Optional, for `[*]`: field within each element holding a **Checkmk host name**. Each element then becomes a piggyback host carrying this service under its plain name (the host says which element it is, so no name suffix is added). Set the same field on several fields of the endpoint to collect them on the same hosts. Only host-name-safe characters are kept (letters, digits, `-`, `_`, `.`); anything else becomes `_`. An element whose field is missing keeps its service on the polling host. **The hosts must exist in Checkmk** or the data is held and never monitored — see [One host per element](#one-host-per-element) |
@@ -380,6 +385,53 @@ same multi-tenant URL with a different API key each — without it they would sh
 one entry and serve each other's data for the whole TTL. The credential itself
 reaches neither the agent's endpoint blob nor the disk. Stale files from edited
 rules are pruned automatically.
+
+### One service for several fields
+
+Not every API deserves a service per field. A small health endpoint —
+
+```json
+{"status": "UP", "component": "nginx", "timestamp": "2026-08-29T18:14:55+00:00"}
+```
+
+— produces three services by default, when what you wanted was one service that
+is OK while all three are fine.
+
+Set **Report in a shared service named** to the same name on each of those
+fields (e.g. `Health`) and they report into that one service as lines:
+
+```text
+JSON Health    OK    Status: UP, Component: nginx, Timestamp: 12 m
+```
+
+The service's state is the **worst of its lines** — that is Checkmk's own
+aggregation, the same rule that makes any check with several results take the
+worst one. If `status` goes to `DOWN` and its string matching says that is CRIT,
+the service is CRIT and the summary still shows the other two.
+
+Each line keeps its own **levels, string matching, transform, unit and
+timestamp/counter handling** from the agent rule — they are independent fields
+that happen to share a service. **Service name** names the line; the shared name
+names the service.
+
+A `[*]` wildcard inside a shared service fans out into *lines*, not services, so
+`nodes[*].load` with a name suffix of `name` adds `Load n1`, `Load n2`, … to the
+service — one service for a whole collection, going CRIT if any element does.
+
+Two things change, both because one service now holds several fields:
+
+- **A check-parameters rule does not apply to it.** One set of levels cannot
+  describe several fields, so thresholds for these fields live in the agent rule.
+  A service with a single field is unaffected and still takes the rule.
+- **Each line's metric is named after the line** (`json_api_bytes_root_used`),
+  which keeps the history of several fields apart — but it is not one of the
+  metrics the plugin declares, so it renders as a plain number rather than in the
+  field's unit. A field that needs its unit on the graph is better off with a
+  service of its own.
+
+A field written to the **inventory** creates no service, so it cannot report into
+a shared one either; Setup rejects that combination unless *Also create a service
+for this field* is ticked.
 
 ### Overriding thresholds per folder / host / service
 

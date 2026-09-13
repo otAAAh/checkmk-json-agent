@@ -1416,12 +1416,18 @@ def _result(
     row_key: str | None = None,
     calc_other: object = None,
     host_labels: dict[str, str] | None = None,
+    label: str | None = None,
 ) -> dict:
     # Values that are not JSON scalars (dict/list) are reported as strings.
     if found and isinstance(value, (dict, list)):
         value = json.dumps(value)
     return {
         "service": service,
+        # This value's own name WITHIN that service, for a field reported in a
+        # shared service; None for the ordinary one-field-one-service case. The
+        # check turns it into the line's label, so several fields can share a
+        # service and still say which is which.
+        "label": label,
         # Which host this result belongs to: None is the polling host (its
         # services go into the plain section), a name means a piggyback host and
         # is stripped back out before the section is written.
@@ -1569,6 +1575,18 @@ def _prefixed(prefix: str, service: str) -> str:
     return f"{prefix} {service}" if prefix else service
 
 
+def _shared_service(spec: dict) -> str | None:
+    """The shared service this field reports into, or None for one of its own.
+
+    A field that names one puts its value into that service as a LINE rather than
+    becoming a service itself: the check yields one result per line and Checkmk's
+    own aggregation makes the service's state the worst of them. The field's own
+    'service' name then names the line instead of the service.
+    """
+    group = spec.get("group")
+    return group.strip() if isinstance(group, str) and group.strip() else None
+
+
 def _extract(
     document: object,
     extractions: list[dict],
@@ -1585,7 +1603,13 @@ def _extract(
         # This field's service name, endpoint prefix included. Every branch below
         # names its service from this, so a prefixed endpoint cannot end up with
         # some of its services prefixed and some not.
-        base = _prefixed(prefix, spec["service"])
+        #
+        # Naming a shared service moves the names one step along: that service is
+        # what the field reports into, and the field's own name becomes the label
+        # of its line inside it.
+        shared = _shared_service(spec)
+        base = _prefixed(prefix, shared if shared is not None else spec["service"])
+        line = spec["service"] if shared is not None else None
         # A header is a single scalar off the response, so none of the body-only
         # machinery (wildcards, aggregation, filters) applies to it.
         if spec["path"].strip().startswith(_HEADER_PREFIX):
@@ -1600,6 +1624,7 @@ def _extract(
                     url,
                     _resolve_labels(label_specs, document),
                     summary_fields=_resolve_summary(summary, document),
+                    label=line,
                 )
             )
             continue
@@ -1625,6 +1650,7 @@ def _extract(
                     labels,
                     summary_fields=_resolve_summary(summary, document),
                     calc_other=_resolve_calc_other(spec, document),
+                    label=line,
                 )
             )
             continue
@@ -1649,6 +1675,7 @@ def _extract(
                     labels,
                     summary_fields=_resolve_summary(summary, document),
                     calc_other=_resolve_calc_other(spec, document),
+                    label=line,
                 )
             )
             continue
@@ -1679,10 +1706,18 @@ def _extract(
                 else {}
             )
             label = " / ".join(label_segments)
-            if host is not None:
+            # With a shared service the expansion fans out into LINES of that one
+            # service, not into services - so the element label lands on the line
+            # and the service name stays put.
+            if line is not None:
                 service = base
+                element_line = f"{line} {label}" if label else line
+            elif host is not None:
+                service = base
+                element_line = None
             else:
                 service = f"{base} {label}" if label else base
+                element_line = None
             labels = _resolve_labels(label_specs, element)
             results.append(
                 _result(
@@ -1703,6 +1738,7 @@ def _extract(
                     # otherwise a table, and several such elements would then
                     # overwrite each other under one key.
                     row_key=label or str(index),
+                    label=element_line,
                 )
             )
     return results
@@ -1973,11 +2009,12 @@ def _process_endpoint(
         results = [
             _result(
                 {"path": spec.get("path", "?")},
-                _prefixed(prefix, spec.get("service", "?")),
+                _prefixed(prefix, _shared_service(spec) or spec.get("service", "?")),
                 False,
                 None,
                 error,
                 url,
+                label=spec.get("service", "?") if _shared_service(spec) else None,
             )
             for spec in endpoint.get("extractions", [])
             if isinstance(spec, dict)
