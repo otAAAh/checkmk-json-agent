@@ -211,6 +211,10 @@ function makeEndpoint(withSample) {
     // Report the raw response in the endpoint service's details: how many bytes
     // of the body ("" = off), and whether the headers come with it.
     report_bytes: "", report_headers: true,
+    // Endpoint-level HOST labels: [{path, key, value, flPath, flOp, flValue}].
+    // 'value' is the literal label value; the fl* triple is the condition that
+    // decides which elements produce a label (the ruleset's shared filter).
+    host_labels: [],
     proxy_mode: "default", proxy_url: "",   // default (env) | url | no_proxy
     ca_bundle: "", client_cert: "", client_key: "",
     json: withSample ? JSON.stringify(SAMPLE, null, 2) : "",
@@ -398,6 +402,9 @@ function renderConn() {
      <div class="muted" style="margin-bottom:6px;">Additional request headers</div>
      <div id="c-headers"></div>
      <button class="ghost" id="c-addheader" style="margin-bottom:10px;">+ header</button>
+     <div class="muted" style="margin-bottom:6px;">Host labels — attached to the monitored host as <code>json_api/&lt;key&gt;</code>, no service needed</div>
+     <div id="c-hostlabels"></div>
+     <button class="ghost" id="c-addhostlabel" style="margin-bottom:10px;">+ host label</button>
      <div class="grid2">
        <label>Timeout (s)</label><input type="text" id="c-timeout" value="${escAttr(e.timeout)}" placeholder="30">
        <label>Cache TTL (s)</label><input type="text" id="c-cachettl" value="${escAttr(e.cache_ttl)}" placeholder="(optional) reuse the last response for N seconds">
@@ -424,7 +431,8 @@ function renderConn() {
      </div>
      <div class="subnote">URL, body and header values may contain Checkmk macros (<code>$HOSTNAME$</code>, <code>$HOSTADDRESS$</code>, …).</div>`;
 
-  renderHeaders();
+  renderRequestHeaders();
+  renderHostLabels();
 
   // text/select bindings (no re-render → keep focus)
   const bind = (id, fn) => { const el = $(id); if (el) el.oninput = fn; };
@@ -462,9 +470,14 @@ function renderConn() {
   $("c-svcprefix").onchange = () => { e.service_prefix = $("c-svcprefix").checked; renderTabs(); renderOutputs(); };
   $("c-reportheaders").onchange = () => { e.report_headers = $("c-reportheaders").checked; renderOutputs(); };
   $("c-addheader").onclick = () => { e.headers.push({ name: "", value: "" }); renderConn(); renderOutputs(); };
+  $("c-addhostlabel").onclick = () => {
+    e.host_labels.push({ path: "", key: "", value: "", flPath: "", flOp: "equals", flValue: "" });
+    renderConn();
+    renderOutputs();
+  };
 }
 
-function renderHeaders() {
+function renderRequestHeaders() {
   const e = ep();
   const box = $("c-headers");
   box.innerHTML = "";
@@ -482,6 +495,45 @@ function renderHeaders() {
   });
   box.querySelectorAll("[data-rmh]").forEach(b => {
     b.onclick = () => { e.headers.splice(+b.dataset.rmh, 1); renderConn(); renderOutputs(); };
+  });
+}
+
+// One row per endpoint host label: where the value comes from (or the literal
+// value that replaces it), the key, and the condition deciding which elements
+// produce a label at all. Mirrors the ruleset's host_labels element.
+function renderHostLabels() {
+  const e = ep();
+  const box = $("c-hostlabels");
+  box.innerHTML = "";
+  e.host_labels.forEach((l, i) => {
+    const row = document.createElement("div");
+    row.className = "hrow";
+    row.innerHTML =
+      `<input type="text" data-l="path" data-i="${i}" value="${escAttr(l.path)}" placeholder="JSON path, e.g. version or services[*]">` +
+      `<input type="text" data-l="key" data-i="${i}" value="${escAttr(l.key)}" placeholder="key (defaults to the path's last segment)">` +
+      `<input type="text" data-l="value" data-i="${i}" value="${escAttr(l.value)}" placeholder="literal value, e.g. yes">` +
+      `<button class="ghost rm" data-rml="${i}">×</button>`;
+    const cond = document.createElement("div");
+    cond.className = "hrow";
+    cond.innerHTML =
+      `<input type="text" data-l="flPath" data-i="${i}" value="${escAttr(l.flPath)}" placeholder="only elements whose field ...">` +
+      `<select data-l="flOp" data-i="${i}">` +
+      [["equals", "equals"], ["not_equals", "does not equal"], ["regex", "matches regex"],
+       ["not_regex", "does not match regex"]].map(([v, lbl]) =>
+        `<option value="${v}"${l.flOp === v ? " selected" : ""}>${lbl}</option>`).join("") +
+      `</select>` +
+      `<input type="text" data-l="flValue" data-i="${i}" value="${escAttr(l.flValue)}" placeholder="value / regex">`;
+    box.appendChild(row);
+    box.appendChild(cond);
+  });
+  box.querySelectorAll("input[data-l]").forEach(inp => {
+    inp.oninput = () => { e.host_labels[+inp.dataset.i][inp.dataset.l] = inp.value; renderOutputs(); };
+  });
+  box.querySelectorAll("select[data-l]").forEach(sel => {
+    sel.onchange = () => { e.host_labels[+sel.dataset.i][sel.dataset.l] = sel.value; renderOutputs(); };
+  });
+  box.querySelectorAll("[data-rml]").forEach(b => {
+    b.onclick = () => { e.host_labels.splice(+b.dataset.rml, 1); renderConn(); renderOutputs(); };
   });
 }
 
@@ -787,6 +839,16 @@ function extractionObjs(e) {
   });
 }
 
+function pyHostLabel(o) {
+  const p = [];
+  if (o.path) p.push(`'path': ${pyStr(o.path)}`);
+  if (o.key) p.push(`'key': ${pyStr(o.key)}`);
+  if (o.value) p.push(`'value': ${pyStr(o.value)}`);
+  if (o.filter)
+    p.push(`'filter': {'path': ${pyStr(o.filter.path)}, 'op': ${pyStr(o.filter.op)}, 'value': ${pyStr(o.filter.value)}}`);
+  return `{${p.join(", ")}}`;
+}
+
 function pyExtraction(o) {
   const p = [`'service': ${pyStr(o.service)}`, `'path': ${pyStr(o.path)}`];
   if (o.group) p.push(`'group': ${pyStr(o.group)}`);
@@ -889,6 +951,29 @@ function reportObj(e) {
   return { max_bytes: Math.min(bytes, 65536), headers: !!e.report_headers };
 }
 
+// The endpoint's host labels as the agent/ruleset shape: {path?, key?, value?,
+// filter?}. A row is kept only where it can produce both halves of a label -
+// a path (which supplies the value and, by default, the key), or a key plus a
+// literal value - mirroring the ruleset's _validate_label_spec, so what the
+// Explorer prints imports cleanly.
+function hostLabelObjs(e) {
+  const out = [];
+  for (const l of e.host_labels || []) {
+    const path = (l.path || "").trim();
+    const key = (l.key || "").trim();
+    const value = (l.value || "").trim();
+    if (!path && !(key && value)) continue;
+    const o = {};
+    if (path) o.path = path;
+    if (key) o.key = key;
+    if (value) o.value = value;
+    const flPath = (l.flPath || "").trim();
+    if (flPath) o.filter = { path: flPath, op: l.flOp || "equals", value: l.flValue || "" };
+    out.push(o);
+  }
+  return out;
+}
+
 // Parse the "accept status codes" text field into a de-duplicated int array,
 // mirroring the ruleset's List(Integer) and the agent's _accepted_statuses.
 function parseStatuses(s) {
@@ -967,6 +1052,8 @@ function pyEndpoint(e, indent) {
   if (rep) lines.push(`${i}'show_response': {'max_bytes': ${rep.max_bytes}, 'headers': ${rep.headers ? "True" : "False"}},`);
   const px = proxyPy(e);
   if (px) lines.push(`${i}'proxy': ${px},`);
+  const hls = hostLabelObjs(e).map(pyHostLabel);
+  if (hls.length) lines.push(`${i}'host_labels': [${hls.join(", ")}],`);
   const exLines = extractionObjs(e).map(o => `${ei}${pyExtraction(o)},`).join("\n");
   lines.push(`${i}'extractions': [` + (exLines ? `\n${exLines}\n${i}]` : "]") + ",");
   return lines.join("\n");
@@ -1000,6 +1087,7 @@ function endpointCliObj(e) {
     proxy: proxyCli(e),
     auth: AUTH_KIND[e.auth.type] || null,
     extractions: extractionObjs(e),
+    host_labels: hostLabelObjs(e),
   };
   if (e.auth.type === "login") o.username = e.auth.username || "";
   if (e.auth.type === "header") o.auth_header = e.auth.field || "X-API-Key";

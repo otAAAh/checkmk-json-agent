@@ -281,6 +281,35 @@ def _validate_extraction(value: object) -> None:
         )
 
 
+def _validate_label_spec(value: object) -> None:
+    """A label spec has to be able to produce both halves of its label.
+
+    A path supplies the value and, by default, the key. Without one the label is
+    described entirely by the rule - the 'if this matches, tag the host' case -
+    and then both halves have to be written down, or there is nothing to emit.
+    """
+    if not isinstance(value, dict) or value.get("path"):
+        return
+    if not value.get("key") or not value.get("value"):
+        raise validators.ValidationError(
+            Message(
+                "Without a 'JSON path' the label is described by the rule alone, so "
+                "both a 'Label key' and a literal 'Label value' are needed."
+            )
+        )
+
+
+def _validate_host_label(value: object) -> None:
+    """A host-label spec: the label-spec rules, plus one value source only."""
+    _validate_label_spec(value)
+    if isinstance(value, dict) and value.get("value") and value.get("value_field"):
+        raise validators.ValidationError(
+            Message(
+                "Set either a literal 'Label value' or a 'Value field' to read it from, not both."
+            )
+        )
+
+
 # A summary template: literal text with '{path}' placeholders, no nesting. The
 # same shape the agent's _SUMMARY_PLACEHOLDER resolves, checked here so a stray
 # brace is a form error rather than a placeholder that silently never renders.
@@ -642,6 +671,55 @@ def _migrate_extraction(value: object) -> dict[str, object]:
     return migrated
 
 
+def _element_filter(title: Title, help_text: Help) -> Dictionary:
+    """The 'only the elements matching a condition' predicate.
+
+    Shared by a field's own element filter and by the label specs, which select
+    the elements that produce a label with exactly the same three fields. Title
+    and help come from the caller, because what the condition selects - services
+    or labels - is what differs between them.
+    """
+    return Dictionary(
+        title=title,
+        help_text=help_text,
+        elements={
+            "path": DictElement(
+                required=True,
+                parameter_form=String(
+                    title=Title("Field path (within each element)"),
+                    help_text=Help(
+                        "Resolved within each element, e.g. 'status' or 'metadata.phase'."
+                    ),
+                    custom_validate=(validators.LengthInRange(min_value=1),),
+                ),
+            ),
+            "op": DictElement(
+                required=True,
+                parameter_form=SingleChoice(
+                    title=Title("Condition"),
+                    elements=[
+                        SingleChoiceElement("equals", Title("equals")),
+                        SingleChoiceElement("not_equals", Title("does not equal")),
+                        SingleChoiceElement("regex", Title("matches regex")),
+                        SingleChoiceElement("not_regex", Title("does not match regex")),
+                    ],
+                    prefill=DefaultValue("not_equals"),
+                ),
+            ),
+            "value": DictElement(
+                required=True,
+                parameter_form=String(
+                    title=Title("Comparison value / pattern"),
+                    help_text=Help(
+                        "The value to compare against, or the regular "
+                        "expression for the regex conditions."
+                    ),
+                ),
+            ),
+        },
+    )
+
+
 def _extraction() -> Dictionary:
     return Dictionary(
         title=Title("Field to monitor"),
@@ -767,20 +845,25 @@ def _extraction() -> Dictionary:
                         "tier and be targeted by folder rules, views and filters. "
                         "Needs 'Create one host per element' above; without it the "
                         "element stays a service on this host and there is nothing "
-                        "to label. Each key is prefixed with 'json_api/'. These are "
-                        "HOST labels, unlike 'Service labels' below, which describe "
-                        "the individual service."
+                        "to label. Each key is prefixed with 'json_api/'. A label can "
+                        "also be a classification rather than a field: a condition on "
+                        "the element plus a literal value tags only the hosts the "
+                        "condition holds for. These are HOST labels, unlike 'Service "
+                        "labels' below, which describe the individual service."
                     ),
                     element_template=Dictionary(
+                        custom_validate=(_validate_label_spec,),
                         elements={
                             "path": DictElement(
-                                required=True,
+                                required=False,
                                 parameter_form=String(
                                     title=Title("JSON path"),
                                     help_text=Help(
-                                        "Relative to each '[*]' element, e.g. 'region'."
+                                        "Relative to each '[*]' element, e.g. "
+                                        "'region'. Can be left empty only where a "
+                                        "condition and a literal value describe the "
+                                        "label on their own."
                                     ),
-                                    custom_validate=(validators.LengthInRange(min_value=1),),
                                 ),
                             ),
                             "key": DictElement(
@@ -793,7 +876,42 @@ def _extraction() -> Dictionary:
                                     ),
                                 ),
                             ),
-                        }
+                            "value": DictElement(
+                                required=False,
+                                parameter_form=String(
+                                    title=Title("Label value (literal)"),
+                                    help_text=Help(
+                                        "A value written here instead of read from "
+                                        "the response ('yes', 'production', ...). "
+                                        "With it a '[*]' path produces ONE label for "
+                                        "the whole collection rather than one per "
+                                        "element, so the key is used exactly as "
+                                        "given - no '<key>/<element>' suffix. "
+                                        "Combined with the condition below this is "
+                                        "the classification case: 'if any element "
+                                        "matches, tag the host'."
+                                    ),
+                                ),
+                            ),
+                            "filter": DictElement(
+                                required=False,
+                                parameter_form=_element_filter(
+                                    Title("Only elements matching a condition"),
+                                    Help(
+                                        "Emit the label only for the elements whose "
+                                        "sub-field matches this condition - e.g. "
+                                        "'name' matching '^MyApp' over a "
+                                        "'services[*]' path. The field path is "
+                                        "resolved within each element; an element "
+                                        "whose field is missing or is not a scalar "
+                                        "never matches. Without a '[*]' wildcard the "
+                                        "condition is checked once, in the same "
+                                        "scope the path is read from, so the label "
+                                        "is set only when it holds."
+                                    ),
+                                ),
+                            ),
+                        },
                     ),
                 ),
             ),
@@ -869,9 +987,9 @@ def _extraction() -> Dictionary:
             ),
             "filter": DictElement(
                 required=False,
-                parameter_form=Dictionary(
-                    title=Title("Only elements matching a condition"),
-                    help_text=Help(
+                parameter_form=_element_filter(
+                    Title("Only elements matching a condition"),
+                    Help(
                         "For a '[*]' wildcard or an aggregated path: keep only the "
                         "elements whose sub-field matches this condition - e.g. one "
                         "service per node whose 'status' is not 'ok', or count only "
@@ -880,42 +998,6 @@ def _extraction() -> Dictionary:
                         "is not a scalar is dropped. Without a '[*]' wildcard or an "
                         "aggregation this has no effect."
                     ),
-                    elements={
-                        "path": DictElement(
-                            required=True,
-                            parameter_form=String(
-                                title=Title("Field path (within each element)"),
-                                help_text=Help(
-                                    "Resolved within each element, e.g. 'status' or "
-                                    "'metadata.phase'."
-                                ),
-                                custom_validate=(validators.LengthInRange(min_value=1),),
-                            ),
-                        ),
-                        "op": DictElement(
-                            required=True,
-                            parameter_form=SingleChoice(
-                                title=Title("Condition"),
-                                elements=[
-                                    SingleChoiceElement("equals", Title("equals")),
-                                    SingleChoiceElement("not_equals", Title("does not equal")),
-                                    SingleChoiceElement("regex", Title("matches regex")),
-                                    SingleChoiceElement("not_regex", Title("does not match regex")),
-                                ],
-                                prefill=DefaultValue("not_equals"),
-                            ),
-                        ),
-                        "value": DictElement(
-                            required=True,
-                            parameter_form=String(
-                                title=Title("Comparison value / pattern"),
-                                help_text=Help(
-                                    "The value to compare against, or the regular "
-                                    "expression for the regex conditions."
-                                ),
-                            ),
-                        ),
-                    },
                 ),
             ),
             "value_as": DictElement(
@@ -1468,21 +1550,29 @@ def _endpoint() -> Dictionary:
                         "environment, region or version) and need NO service. A "
                         "path may contain a '[*]' wildcard (e.g. 'components[*]') "
                         "to emit one label per element, keyed "
-                        "'<key>/<element>' so keys stay unique. Set at discovery, "
-                        "so pick stable, low-cardinality fields."
+                        "'<key>/<element>' so keys stay unique. Or classify the "
+                        "host from a collection instead: a condition plus a literal "
+                        "value turns 'any element of services[*] whose name matches "
+                        "^MyApp' into the single label 'json_api/MyApp: yes', which "
+                        "folder rules, thresholds, contact groups and views can then "
+                        "target. Set at discovery, so pick stable, low-cardinality "
+                        "fields."
                     ),
                     element_template=Dictionary(
+                        custom_validate=(_validate_host_label,),
                         elements={
                             "path": DictElement(
-                                required=True,
+                                required=False,
                                 parameter_form=String(
                                     title=Title("JSON path"),
                                     help_text=Help(
                                         "From the response root, e.g. 'version', "
                                         "'cluster.region', or a '[*]' wildcard like "
-                                        "'components[*]' for one label per element."
+                                        "'components[*]' for one label per element. "
+                                        "Can be left empty only where a condition "
+                                        "and a literal value describe the label on "
+                                        "their own."
                                     ),
-                                    custom_validate=(validators.LengthInRange(min_value=1),),
                                 ),
                             ),
                             "key": DictElement(
@@ -1510,7 +1600,42 @@ def _endpoint() -> Dictionary:
                                     ),
                                 ),
                             ),
-                        }
+                            "value": DictElement(
+                                required=False,
+                                parameter_form=String(
+                                    title=Title("Label value (literal)"),
+                                    help_text=Help(
+                                        "A value written here instead of read from "
+                                        "the response ('yes', 'production', ...). "
+                                        "With it a '[*]' path produces ONE label for "
+                                        "the whole collection rather than one per "
+                                        "element, so the key is used exactly as "
+                                        "given - no '<key>/<element>' suffix. "
+                                        "Combined with the condition below this is "
+                                        "the classification case: 'if any element "
+                                        "matches, tag the host'."
+                                    ),
+                                ),
+                            ),
+                            "filter": DictElement(
+                                required=False,
+                                parameter_form=_element_filter(
+                                    Title("Only elements matching a condition"),
+                                    Help(
+                                        "Emit the label only for the elements whose "
+                                        "sub-field matches this condition - e.g. "
+                                        "'name' matching '^MyApp' over a "
+                                        "'services[*]' path. The field path is "
+                                        "resolved within each element; an element "
+                                        "whose field is missing or is not a scalar "
+                                        "never matches. Without a '[*]' wildcard the "
+                                        "condition is checked once, in the same "
+                                        "scope the path is read from, so the label "
+                                        "is set only when it holds."
+                                    ),
+                                ),
+                            ),
+                        },
                     ),
                 ),
             ),

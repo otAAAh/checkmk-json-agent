@@ -203,8 +203,88 @@ def test_host_labels_passed_through(ssc):
     )
     (endpoint,) = _endpoints(ssc, args)
     assert endpoint["host_labels"] == [
-        {"path": "version", "key": None, "value_field": None},
-        {"path": "cluster.region", "key": "region", "value_field": None},
+        {"path": "version", "key": None, "value_field": None, "value": None, "filter": None},
+        {
+            "path": "cluster.region",
+            "key": "region",
+            "value_field": None,
+            "value": None,
+            "filter": None,
+        },
+    ]
+
+
+def test_host_label_filter_and_literal_value_passed_through(ssc):
+    """The classification shape: a condition over a collection, one literal label."""
+    args = _command_args(
+        ssc,
+        {
+            "endpoints": [
+                {
+                    "url": "http://x",
+                    "verify_cert": True,
+                    "extractions": [{"path": "status", "service": "S"}],
+                    "host_labels": [
+                        {
+                            "path": "services[*]",
+                            "key": "MyApp",
+                            "value": "yes",
+                            "filter": {"path": "name", "op": "regex", "value": "^MyApp"},
+                        }
+                    ],
+                }
+            ]
+        },
+    )
+    (endpoint,) = _endpoints(ssc, args)
+    assert endpoint["host_labels"] == [
+        {
+            "path": "services[*]",
+            "key": "MyApp",
+            "value_field": None,
+            "value": "yes",
+            "filter": {"path": "name", "op": "regex", "value": "^MyApp"},
+        }
+    ]
+
+
+def test_piggyback_labels_carry_a_filter_and_a_literal_value(ssc):
+    """The same two fields on the labels of a host an element becomes."""
+    args = _command_args(
+        ssc,
+        {
+            "endpoints": [
+                {
+                    "url": "http://x",
+                    "verify_cert": True,
+                    "extractions": [
+                        {
+                            "path": "nodes[*].health",
+                            "service": "S",
+                            "piggyback_host": "name",
+                            "piggyback_labels": [
+                                {"path": "region"},
+                                {
+                                    "key": "db",
+                                    "value": "yes",
+                                    "filter": {"path": "role", "op": "equals", "value": "db"},
+                                },
+                            ],
+                        }
+                    ],
+                }
+            ]
+        },
+    )
+    (endpoint,) = _endpoints(ssc, args)
+    assert endpoint["extractions"][0]["piggyback_labels"] == [
+        {"path": "region", "key": None, "value": None, "filter": None},
+        {
+            "path": None,
+            "key": "db",
+            "value": "yes",
+            "filter": {"path": "role", "op": "equals", "value": "db"},
+        },
     ]
 
 

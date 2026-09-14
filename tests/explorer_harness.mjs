@@ -52,6 +52,21 @@ const FIXTURE = {
   retry_backoff: "99",
   report_bytes: "4096",
   report_headers: false,
+  // Endpoint host labels: a plain mirror of a field, the "classify the host from
+  // a filtered collection" shape (condition + literal value), and a blank row
+  // that must be dropped rather than emitted as an empty label.
+  host_labels: [
+    { path: "version", key: "", value: "", flPath: "", flOp: "equals", flValue: "" },
+    {
+      path: "services[*]",
+      key: "MyApp",
+      value: "yes",
+      flPath: "name",
+      flOp: "regex",
+      flValue: "^MyApp.*",
+    },
+    { path: "", key: "", value: "", flPath: "", flOp: "equals", flValue: "" },
+  ],
   json: "",
   parsedRoot: null,
   parseErr: "",

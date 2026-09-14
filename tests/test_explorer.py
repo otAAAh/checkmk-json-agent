@@ -330,3 +330,22 @@ def test_explorer_emits_the_shared_service(rule_value: dict, explorer_output: di
     # A field of its own emits nothing, matching the ruleset's optional field.
     assert "group" not in by_service["Health"]
     assert "group" not in cli["Health"]
+
+
+def test_explorer_emits_the_host_labels(rule_value: dict, explorer_output: dict):
+    """The endpoint's host labels, including the filtered/literal classification.
+
+    A blank row is dropped: an empty label spec is rejected by the ruleset, and
+    the Explorer's contract is that what it prints imports cleanly.
+    """
+    endpoint = rule_value["endpoints"][0]
+    assert endpoint["host_labels"] == [
+        {"path": "version"},
+        {
+            "path": "services[*]",
+            "key": "MyApp",
+            "value": "yes",
+            "filter": {"path": "name", "op": "regex", "value": "^MyApp.*"},
+        },
+    ]
+    assert explorer_output["cli"][0]["host_labels"] == endpoint["host_labels"]

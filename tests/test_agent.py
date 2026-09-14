@@ -369,6 +369,111 @@ def test_resolve_host_labels_wildcard_value_field(agent):
     }
 
 
+def test_resolve_host_labels_filtered_collection_yields_one_label(agent):
+    """The classification case from issue #189: any element matching -> one label."""
+    doc = {"services": [{"name": "Other"}, {"name": "MyAppWeb"}, {"name": "MyAppDb"}]}
+    specs = [
+        {
+            "path": "services[*]",
+            "key": "MyApp",
+            "value": "yes",
+            "filter": {"path": "name", "op": "regex", "value": "^MyApp.*"},
+        }
+    ]
+    # One label, keyed exactly as configured - no '<key>/<element>' suffixing,
+    # and not one label per matching element.
+    assert agent._resolve_host_labels(specs, doc) == {"MyApp": "yes"}
+
+
+def test_resolve_host_labels_filter_matching_nothing_emits_no_label(agent):
+    doc = {"services": [{"name": "Other"}]}
+    specs = [
+        {
+            "path": "services[*]",
+            "key": "MyApp",
+            "value": "yes",
+            "filter": {"path": "name", "op": "regex", "value": "^MyApp.*"},
+        }
+    ]
+    assert agent._resolve_host_labels(specs, doc) == {}
+
+
+def test_resolve_host_labels_filter_without_a_literal_value_keeps_one_label_per_element(agent):
+    # No literal value: the filter only narrows the per-element labels.
+    doc = {"nodes": [{"name": "a", "role": "db"}, {"name": "b", "role": "web"}]}
+    specs = [
+        {
+            "path": "nodes[*]",
+            "key": "node",
+            "value_field": "name",
+            "filter": {"path": "role", "op": "equals", "value": "db"},
+        }
+    ]
+    assert agent._resolve_host_labels(specs, doc) == {"node/0": "a"}
+
+
+def test_resolve_host_labels_plain_path_filter_is_checked_once(agent):
+    """Without a wildcard the condition is checked in the label's own scope."""
+    doc = {"version": "2.4.0", "mode": "production"}
+    keep = [{"path": "version", "filter": {"path": "mode", "op": "equals", "value": "production"}}]
+    drop = [{"path": "version", "filter": {"path": "mode", "op": "equals", "value": "staging"}}]
+    assert agent._resolve_host_labels(keep, doc) == {"version": "2.4.0"}
+    assert agent._resolve_host_labels(drop, doc) == {}
+
+
+def test_resolve_host_labels_literal_value_without_a_path(agent):
+    """A label described by the rule alone: the filter is all that is read."""
+    doc = {"mode": "production"}
+    specs = [
+        {
+            "key": "prod",
+            "value": "yes",
+            "filter": {"path": "mode", "op": "equals", "value": "production"},
+        },
+        {
+            "key": "staging",
+            "value": "yes",
+            "filter": {"path": "mode", "op": "equals", "value": "staging"},
+        },
+        {"value": "yes"},  # no key and no path -> nothing to emit
+    ]
+    assert agent._resolve_host_labels(specs, doc) == {"prod": "yes"}
+
+
+def test_resolve_host_labels_literal_value_beats_the_value_field(agent):
+    doc = {"components": {"db": {"status": "ok"}}}
+    specs = [{"path": "components[*]", "key": "c", "value_field": "status", "value": "yes"}]
+    assert agent._resolve_host_labels(specs, doc) == {"c": "yes"}
+
+
+def test_resolve_host_labels_missing_collection_is_not_an_element(agent):
+    """A collection that is absent must not be labelled as if it had one element."""
+    specs = [{"path": "components[*]", "key": "component"}]
+    assert agent._resolve_host_labels(specs, {}) == {}
+
+
+def test_piggyback_labels_classify_the_created_host(agent):
+    """The same two fields on a piggyback host's labels (issue #189, symmetry)."""
+    doc = {"nodes": [{"name": "n1", "role": "db"}, {"name": "n2", "role": "web"}]}
+    specs = [
+        {
+            "path": "nodes[*].name",
+            "service": "Node",
+            "piggyback_host": "name",
+            "piggyback_labels": [
+                {
+                    "key": "db",
+                    "value": "yes",
+                    "filter": {"path": "role", "op": "equals", "value": "db"},
+                }
+            ],
+        }
+    ]
+    n1, n2 = agent._extract(doc, specs, "http://test/h")
+    assert n1["host_labels"] == {"db": "yes"}
+    assert n2["host_labels"] == {}
+
+
 def test_process_endpoint_emits_host_labels(agent, monkeypatch):
     # _process_endpoint returns (results, host_labels); stub the fetch (no HTTP).
     doc = {"version": "9.9", "nodes": [{"health": "ok"}]}
