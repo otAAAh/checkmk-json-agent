@@ -349,3 +349,19 @@ def test_explorer_emits_the_host_labels(rule_value: dict, explorer_output: dict)
         },
     ]
     assert explorer_output["cli"][0]["host_labels"] == endpoint["host_labels"]
+
+
+def test_explorer_emits_the_field_context_report(rule_value: dict, explorer_output: dict):
+    endpoint = rule_value["endpoints"][0]
+    # Clamped to the ruleset's own ceiling, or the rule would not import.
+    assert endpoint["field_context"] == {"source": "element", "max_bytes": 65536}
+    assert explorer_output["cli"][0]["field_context"] == endpoint["field_context"]
+
+
+def test_explorer_omits_the_field_context_when_off(rule_value: dict, explorer_output: dict):
+    # The Explorer says "off" the same way the ruleset does - by omitting the
+    # optional Dictionary - so an empty byte budget must emit nothing at all.
+    off = rule_value["endpoints"][3]
+    assert off["name"] == "oauth2"
+    assert "field_context" not in off
+    assert explorer_output["cli"][3]["field_context"] is None

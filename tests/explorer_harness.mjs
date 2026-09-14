@@ -67,6 +67,10 @@ const FIXTURE = {
     },
     { path: "", key: "", value: "", flPath: "", flOp: "equals", flValue: "" },
   ],
+  // Deliberately out of the ruleset's range (1-65536): the generator has to
+  // clamp, or the rule it prints will not import.
+  context_bytes: "999999",
+  context_source: "element",
   json: "",
   parsedRoot: null,
   parseErr: "",
@@ -184,6 +188,9 @@ const FIXTURE_OAUTH2 = {
   ...FIXTURE,
   name: "oauth2",
   url: "https://app.example.com/v4/health",
+  // Context reporting off (an empty byte budget), so the generators are pinned
+  // on both sides of the optional Dictionary.
+  context_bytes: "",
   auth: {
     type: "oauth2", username: "", pwid: "pw-store-id", field: "",
     tokenUrl: "https://login.example.com/oauth2/v2.0/token",

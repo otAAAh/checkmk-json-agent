@@ -191,6 +191,14 @@ class ShowResponse(BaseModel, frozen=True):
     headers: bool = True
 
 
+class FieldContext(BaseModel, frozen=True):
+    # Report the JSON a value was read from in the FIELD services' details (the
+    # ones that alert), not just on the endpoint's own service: the element the
+    # value came from, or the whole response body. The agent caps and redacts.
+    source: Literal["element", "response"] = "element"
+    max_bytes: int = 1024
+
+
 class ClientCert(BaseModel, frozen=True):
     cert: str
     # Separate private-key file; omit when the key is bundled into the cert file.
@@ -225,6 +233,8 @@ class Endpoint(BaseModel, frozen=True):
     retry: Retry | None = None
     # Report the raw response in the endpoint's own service details. None = no.
     show_response: ShowResponse | None = None
+    # Report the JSON context in this endpoint's FIELD services. None = no.
+    field_context: FieldContext | None = None
     # HTTP proxy: the framework resolves the rule's Proxy choice into one of
     # these before parsing (stored_proxy ids are resolved to a URLProxy).
     proxy: URLProxy | NoProxy | EnvProxy | None = None
@@ -288,6 +298,7 @@ def _endpoint_json(endpoint: Endpoint, macros: Mapping[str, str]) -> str:
         "accept_status": list(endpoint.accept_status),
         "retry": endpoint.retry.model_dump() if endpoint.retry else None,
         "show_response": (endpoint.show_response.model_dump() if endpoint.show_response else None),
+        "field_context": (endpoint.field_context.model_dump() if endpoint.field_context else None),
         "proxy": _proxy_spec(endpoint.proxy),
         "auth": endpoint.auth[0] if endpoint.auth else None,
         "extractions": [e.model_dump() for e in endpoint.extractions],

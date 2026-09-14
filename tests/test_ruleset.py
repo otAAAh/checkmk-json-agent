@@ -507,3 +507,21 @@ def test_a_host_label_takes_its_value_from_one_place_only(ruleset):
         ruleset._validate_host_label({"path": "c[*]", "value": "yes", "value_field": "status"})
     ruleset._validate_host_label({"path": "c[*]", "value_field": "status"})
     ruleset._validate_host_label({"path": "c[*]", "value": "yes"})
+
+
+def test_field_context_form_has_the_expected_keys(ruleset):
+    form = ruleset._endpoint().elements["field_context"].parameter_form
+    assert set(form.elements) == {"source", "max_bytes"}
+    # The targeted form is the default: the element the value came from, not the
+    # whole body repeated on every field service.
+    assert form.elements["source"].parameter_form.prefill.value == "element"
+    assert [e.name for e in form.elements["source"].parameter_form.elements] == [
+        "element",
+        "response",
+    ]
+    # Smaller than the raw response's 2048: this text is stored once per FIELD.
+    assert form.elements["max_bytes"].parameter_form.prefill.value == 1024
+
+
+def test_reporting_the_field_context_is_optional(ruleset):
+    assert ruleset._endpoint().elements["field_context"].required is False

@@ -209,6 +209,11 @@ class Item:
     # Set when this field belongs in the inventory tree rather than (or as well
     # as) in a service.
     inventory: "InventoryTarget | None" = None
+    # The JSON this value was read from - the '[*]' element, the object holding
+    # it, or the whole response - already pretty-printed, capped and stripped of
+    # the endpoint's secret by the agent. None means the rule did not ask for it,
+    # which is the default.
+    context: str | None = None
 
 
 @dataclass(frozen=True)
@@ -523,6 +528,7 @@ def parse_json_api(string_table: StringTable) -> Section | None:
             summary_fields=_summary_fields(result.get("summary_fields")),
             inventory=_inventory_target(result.get("inventory")),
             label=label,
+            context=_optional_str(result.get("context")),
         )
         items.setdefault(name, []).append(entry)
     return Section(
@@ -665,6 +671,22 @@ def _context(entry: Item, match: _Match) -> CheckResult:
                 lines.append("State map: " + ", ".join(parts))
     if lines:
         yield Result(state=State.OK, notice="\n".join(lines))
+
+
+def _response_context(entry: Item) -> CheckResult:
+    """The JSON the value came from, as a details-only block.
+
+    The service that goes CRIT is the one that notifies, and its details are what
+    reach the notification as $LONGSERVICEOUTPUT$ - so this is where the API's
+    own answer has to be for the person reading the alert, who often cannot
+    reach the endpoint at all (wrong network, no credentials) and could otherwise
+    only see it on the endpoint's own service, which stayed OK and said nothing.
+
+    Emitted last, after the value and the context lines: the first line of the
+    details stays the one an operator scans.
+    """
+    if entry.context:
+        yield Result(state=State.OK, notice=f"Response context:\n{entry.context}")
 
 
 _STATE_MAP_ORDER = (("ok", State.OK), ("warn", State.WARN), ("crit", State.CRIT))
@@ -1150,10 +1172,12 @@ def check_json_api(item: str, params: Mapping[str, object], section: Section) ->
                 extra,
             )
             yield from _context(entry, match)
+            yield from _response_context(entry)
             continue
 
         yield from _with_summary(_value_results(entry, levels_upper, levels_lower, match), extra)
         yield from _context(entry, match)
+        yield from _response_context(entry)
 
 
 def discover_json_api_endpoint(section: Section) -> DiscoveryResult:
