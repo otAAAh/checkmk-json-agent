@@ -1854,7 +1854,11 @@ def _resolve_host_labels(label_specs: list[dict], document: object) -> dict:
     """Resolve HOST-label specs from the ``document`` root into ``{key: value}``.
 
     Host labels are host-wide, so they attach to no service and are resolved once
-    per endpoint response. Two shapes are supported:
+    per endpoint response. ``document`` is the scope the paths are read from: the
+    response root for an endpoint's own host labels, one '[*]' element for the
+    labels of the piggyback host that element becomes.
+
+    Three shapes are supported:
 
     * plain path (no '[*]'): one label ``<key>: <scalar at path>`` where ``key``
       is the given key or the path's last segment.
@@ -1862,29 +1866,56 @@ def _resolve_host_labels(label_specs: list[dict], document: object) -> dict:
       element, keyed ``<key>/<element-id>`` so keys stay unique (a host label map
       cannot repeat a key); the value comes from ``value_field`` resolved within
       each element, defaulting to ``'true'`` (set-membership tags).
+    * a literal ``value``: the value is typed in the rule rather than read from
+      the response, and a wildcard path then collapses to ONE label - keyed once,
+      not once per element - emitted as soon as an element survives the filter.
+      This is the classification case: "if any of these elements matches, tag the
+      host". A path is optional here; without one only the filter is evaluated.
+
+    An optional ``filter`` (the same predicate an extraction uses) decides which
+    elements produce a label. It is resolved in the same scope as the label path:
+    per element for a wildcard path, against ``document`` itself otherwise - so a
+    plain-path label can be made conditional too ("only in production").
 
     Later keys win on collision. The 'json_api/' namespace is added by the check.
     """
     labels: dict[str, str] = {}
     for spec in label_specs:
         path = spec.get("path")
+        filt = spec.get("filter")
+        raw_literal = spec.get("value")
+        literal = raw_literal if isinstance(raw_literal, str) and raw_literal else None
+        base_key = spec.get("key") or (_label_key_from_path(path) if path else "")
+        if not base_key:
+            continue  # nothing to key the label by (a path-less spec without a key)
         if not path:
+            # Keyed and valued entirely by the rule: the only thing read from the
+            # response is the filter's verdict on this scope.
+            if literal is not None and _matches_filter(document, filt):
+                labels[base_key] = literal
             continue
-        base_key = spec.get("key") or _label_key_from_path(path)
         value_field = spec.get("value_field") or ""
         segments = _split_wildcards(path)
         if len(segments) == 1:
             found, value = _resolve_path(document, path)
-            text = _label_value(value) if found else None
+            if not found or not _matches_filter(document, filt):
+                continue
+            text = literal if literal is not None else _label_value(value)
             if text is not None:
                 labels[base_key] = text
             continue
-        # Wildcard: one unique label per element.
+        # Wildcard: one unique label per element - or, with a literal value, one
+        # label for the whole collection, as soon as an element matches.
         for label_segments, _found, _value, _error, element in _expand_wildcards(
             document, segments, None
         ):
-            if element is None:
+            # The sentinel means the collection itself was missing, which is not
+            # an element and must not be labelled as one.
+            if element is _NO_ELEMENT or not _matches_filter(element, filt):
                 continue
+            if literal is not None:
+                labels[base_key] = literal
+                break
             suffix = "/".join(str(part) for part in label_segments)
             key = f"{base_key}/{suffix}" if suffix else base_key
             if value_field:

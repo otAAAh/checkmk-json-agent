@@ -54,6 +54,13 @@ Targets **Checkmk 2.4+** and the current stable plugin APIs
 - **Host labels on the created hosts**: a piggyback host can carry labels
   resolved from its own element (`region`, `role`, …), so folder rules and views
   can target the hosts a `[*]` rule created
+- **Classify the host from a collection**: a host label can be a *conclusion*
+  rather than a copied field — "if any element of `services[*]` has a `name`
+  matching `^MyApp`, put `json_api/MyApp: yes` on the host". A condition picks
+  the elements, a literal value is typed in the rule, and the whole collection
+  collapses to **one** label instead of one per element — so thresholds, contact
+  groups, folder rules and views attach themselves from what the API actually
+  reports
 - **One Checkmk host per element** (piggyback): instead of many services on the
   polling host, name a field within each `[*]` element and every element becomes
   a host of its own — so an API describing a fleet gives you hosts, each with its
@@ -208,7 +215,7 @@ Each **field to monitor** has:
 | **Upper / lower levels** | WARN/CRIT for numeric values |
 | **String matching** | Either *must match a regex* (choose the state when it does **not** match, default CRIT) or *map the value to a state* (separate OK / WARN / CRIT regexes, first full match wins; choose the state when nothing matches, default OK) |
 
-Each **endpoint** also has an optional **Host labels** list: fields resolved from the response root and attached to the monitored *host* (e.g. `version`, `cluster.region`) as `json_api/<key>` — host-wide, needing no service. A path may contain a `[*]` wildcard (e.g. `components[*]`) to emit **one label per element**, keyed `json_api/<key>/<element>` (unique keys), with the value taken from an optional per-element **value field** (default `true`, i.e. set-membership tags). In the wizard, the JSON picker's **`+ host label`** button adds these.
+Each **endpoint** also has an optional **Host labels** list: fields resolved from the response root and attached to the monitored *host* (e.g. `version`, `cluster.region`) as `json_api/<key>` — host-wide, needing no service. A path may contain a `[*]` wildcard (e.g. `components[*]`) to emit **one label per element**, keyed `json_api/<key>/<element>` (unique keys), with the value taken from an optional per-element **value field** (default `true`, i.e. set-membership tags). Two more fields turn that into a *classification* — a **label value** typed in the rule instead of read from the response, and **only elements matching a condition** (the same path + operator + value predicate a field's filter uses) — see [Classifying the host from a collection](#classifying-the-host-from-a-collection). In the wizard, the JSON picker's **`+ host label`** button adds these.
 
 ### The endpoint's own service
 
@@ -630,6 +637,49 @@ labels* (which are resolved from the response root and stay on the polling host,
 because they describe the API rather than any element of it). Setup rejects them
 without a piggyback host name — there would be no host to attach them to.
 
+### Classifying the host from a collection
+
+Host labels normally *mirror* a field: `version` becomes `json_api/version`. The
+other common need is a **conclusion drawn from a collection** — the host should
+be classified by what it actually runs, so that thresholds, contact groups,
+folder rules, additional checks and views attach themselves to it automatically.
+
+Given `GET /status` → `{"services": [{"name": "MyAppWeb", "state": "running"},
+{"name": "postgres", "state": "running"}]}`, an endpoint **Host label**:
+
+| Field | Value |
+|---|---|
+| JSON path | `services[*]` |
+| Only elements matching a condition | `name` *matches regex* `^MyApp.*` |
+| Label key | `MyApp` |
+| Label value (literal) | `yes` |
+
+→ the host gets **one** label, `json_api/MyApp:yes`, and nothing at all when no
+element matches. Two things make that work:
+
+- the **condition** is the same predicate a field's filter uses (path within the
+  element + equals / not-equals / regex / not-regex), and
+- the **literal value** replaces the per-element value *and* the
+  `<key>/<element>` suffixing — the key is unique on its own, so the whole
+  collection collapses to one label rather than one per element.
+
+Without the literal value the condition simply narrows the per-element labels
+(`json_api/<key>/<element>`), which is the right shape when you want to see
+*which* elements matched rather than *that* any did.
+
+The condition also works without a wildcard, where it is checked once in the
+same scope the path is read from — `version` with the condition `mode` *equals*
+`production` sets the label only on the production hosts. And a label needs no
+path at all when the condition and the literal value describe it entirely; give
+it a key and a value and it becomes a pure "if this holds, tag the host".
+
+The same two fields exist on the **Labels for the created host** of a `[*]`
+field, where the scope is the element that becomes the host: a condition on
+`role` plus the literal `yes` tags only the created hosts it holds for.
+
+Labels are set at **discovery**, so a filtered label is more stable than the
+per-element form, not less — but re-discovery is still what updates it.
+
 ### Aggregating a collection
 
 When you care about the collection as a whole, not each element, pick an
@@ -761,7 +811,8 @@ There are two Explorers — a standalone browser page and an in-site wizard.
 dependency-free web page (open it directly in a browser — nothing is uploaded
 anywhere). Configure one or more endpoints (URL, method, auth, request body,
 headers, timeout, cache TTL, TLS/redirect toggles), paste each endpoint's sample JSON
-response, click the fields to monitor, set thresholds/labels, and it generates:
+response, click the fields to monitor, set thresholds/labels/host labels, and it
+generates:
 the agent `--endpoint` command line for CLI testing, the rule value for
 `rules.mk`, and a REST API request body + `curl` to create the rule on a site.
 Auth is emitted as a password-store reference (create the entry under **Setup →

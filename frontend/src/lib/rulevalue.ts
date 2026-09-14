@@ -15,9 +15,20 @@ export type ConnectionValue = Record<string, unknown>
 /** One entry of an endpoint's `extractions` `List` value (service/path/...). */
 export type ExtractionValue = Record<string, unknown>
 
-/** One endpoint `host_labels` entry ({path, optional key, optional value field
- * for '[*]' paths}). */
-export type LabelValue = { path: string; key?: string; value_field?: string }
+/** A label spec's element condition (the ruleset's shared filter form). */
+export type FilterValue = { path?: string; op?: string; value?: string }
+
+/** One endpoint `host_labels` entry: a path (optional where a condition and a
+ * literal value describe the label on their own), an optional key, an optional
+ * value field for '[*]' paths, an optional literal value and an optional
+ * condition deciding which elements produce a label. */
+export type LabelValue = {
+  path?: string
+  key?: string
+  value_field?: string
+  value?: string
+  filter?: FilterValue
+}
 
 /** Per-endpoint state that is NOT part of the connection FormSpec. */
 export interface EndpointServices {

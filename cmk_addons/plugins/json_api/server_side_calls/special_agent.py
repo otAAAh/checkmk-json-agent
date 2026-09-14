@@ -76,18 +76,37 @@ class LabelSpec(BaseModel, frozen=True):
     key: str | None = None
 
 
-class HostLabelSpec(BaseModel, frozen=True):
-    path: str
-    key: str | None = None
-    # For a '[*]' path: field within each element for the value (default 'true').
-    value_field: str | None = None
-
-
 class FilterSpec(BaseModel, frozen=True):
-    # Restrict a '[*]'/count extraction to elements whose sub-path matches.
+    # Restrict a '[*]'/count extraction - or a host label - to elements whose
+    # sub-path matches.
     path: str
     op: Literal["equals", "not_equals", "regex", "not_regex"] = "equals"
     value: str = ""
+
+
+class HostLabelSpec(BaseModel, frozen=True):
+    # A path is optional only because a filter plus a literal value can describe
+    # a label entirely on their own ("if any element matches, tag the host").
+    path: str | None = None
+    key: str | None = None
+    # For a '[*]' path: field within each element for the value (default 'true').
+    value_field: str | None = None
+    # A value typed in the rule instead of read from the response. It also makes
+    # a '[*]' path emit ONE label for the whole collection rather than one per
+    # element, so the key needs no per-element suffix to stay unique.
+    value: str | None = None
+    # Which elements produce a label (opaque here; the agent applies it).
+    filter: FilterSpec | None = None
+
+
+class PiggybackLabelSpec(BaseModel, frozen=True):
+    # Host labels for the host one '[*]' element becomes: the same shape as
+    # HostLabelSpec minus 'value_field', which needs a wildcard to read from and
+    # the element is already one level below it.
+    path: str | None = None
+    key: str | None = None
+    value: str | None = None
+    filter: FilterSpec | None = None
 
 
 class InventorySpec(BaseModel, frozen=True):
@@ -115,7 +134,7 @@ class Extraction(BaseModel, frozen=True):
     # HOST labels for the piggyback host this element becomes, resolved by the
     # agent within the element. Distinct from `labels`, which are SERVICE labels
     # on the service itself.
-    piggyback_labels: Sequence[LabelSpec] = ()
+    piggyback_labels: Sequence[PiggybackLabelSpec] = ()
     # Keep only wildcard/count elements matching this predicate (opaque to the
     # server-side call; the agent applies it). Serialized via model_dump below.
     filter: FilterSpec | None = None

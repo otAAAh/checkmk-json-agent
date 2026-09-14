@@ -25,6 +25,7 @@ import {
   extractionPath,
   extractionService,
   type ExtractionValue,
+  type FilterValue,
 } from '../../lib/rulevalue'
 
 const { _t } = usei18n()
@@ -497,6 +498,21 @@ function labelKeyOf(spec: Record<string, unknown>): string {
   return last.startsWith("['") || last.startsWith('["') ? last.slice(2, -2) : last
 }
 
+/** Whether a label spec carries an element condition.
+ *
+ * The preview cannot evaluate one: FormEdit serializes the operator as a hashed
+ * ident and the only thing recoverable from it is a (translated) title, so
+ * guessing it would be worse than not trying. The preview therefore shows the
+ * labels the spec CAN produce and marks them as conditional. */
+function hasCondition(filter: FilterValue | undefined): boolean {
+  return typeof filter?.path === 'string' && filter.path !== ''
+}
+
+/** A previewed label value, marked where a condition decides whether it is set. */
+function mark(value: string, filter: FilterValue | undefined): string {
+  return hasCondition(filter) ? `${value} ${_t('(only when the condition matches)')}` : value
+}
+
 const reviews = computed<EndpointReview[]>(() =>
   state.connections.map((connection, ei) => {
     const services = state.services[ei]
@@ -508,17 +524,43 @@ const reviews = computed<EndpointReview[]>(() =>
     }
     // Mirror the agent's host-label resolution: a plain path -> one label with
     // the scalar at the path; a '[*]' path -> one label per element, keyed
-    // <base>/<element> with value from value_field (default 'true').
+    // <base>/<element> with value from value_field (default 'true'). A literal
+    // value collapses a '[*]' path to ONE label keyed as configured, and an
+    // optional condition decides which elements produce a label at all.
     const hostLabels: Array<{ label: string; value: string }> = []
     for (const l of services?.hostLabels ?? []) {
       const base = labelKeyOf(l)
+      const path = typeof l.path === 'string' ? l.path : ''
+      const literal = typeof l.value === 'string' && l.value ? l.value : null
       const valueField = typeof l.value_field === 'string' ? l.value_field : ''
-      const matches = sample !== null ? resolvePath(sample, l.path) : []
-      if (!l.path.includes('[*]')) {
+      if (!base) {
+        continue
+      }
+      if (!path) {
+        // Described by the rule alone: nothing but the condition is read.
+        if (literal !== null) {
+          hostLabels.push({ label: `json_api/${base}`, value: mark(literal, l.filter) })
+        }
+        continue
+      }
+      const matches = sample !== null ? resolvePath(sample, path) : []
+      if (!path.includes('[*]')) {
         hostLabels.push({
           label: `json_api/${base}`,
-          value: matches.length ? fmtValue(matches[0]!.value) : _t('(not found in sample)'),
+          value: mark(
+            literal ??
+              (matches.length ? fmtValue(matches[0]!.value) : _t('(not found in sample)')),
+            l.filter,
+          ),
         })
+        continue
+      }
+      if (literal !== null) {
+        // One label for the whole collection, keyed exactly as configured - not
+        // one per element - as soon as an element matches.
+        if (sample === null || matches.length) {
+          hostLabels.push({ label: `json_api/${base}`, value: mark(literal, l.filter) })
+        }
         continue
       }
       for (const m of matches) {
@@ -531,7 +573,7 @@ const reviews = computed<EndpointReview[]>(() =>
           }
           value = fmtValue(inner[0]!.value)
         }
-        hostLabels.push({ label: `json_api/${key}`, value })
+        hostLabels.push({ label: `json_api/${key}`, value: mark(value, l.filter) })
       }
     }
     const rows: Row[] = (services?.extractions ?? [])

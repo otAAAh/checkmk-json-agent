@@ -349,7 +349,7 @@ function labelsForEndpoint(endpointIndex: number): LabelSummary[] {
   }
   const out: LabelSummary[] = []
   ;(services.hostLabels ?? []).forEach((spec, hi) => {
-    out.push({ key: labelKeyOf(spec), scope: 'host', path: spec.path, hi })
+    out.push({ key: labelKeyOf(spec), scope: 'host', path: spec.path ?? '', hi })
   })
   services.extractions.forEach((ext, xi) => {
     const labels = Array.isArray(ext.labels) ? (ext.labels as Record<string, unknown>[]) : []

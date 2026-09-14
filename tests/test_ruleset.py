@@ -475,3 +475,35 @@ def test_an_inventory_field_that_keeps_its_service_may_join_one(ruleset):
     )
     # ... and so may an ordinary field.
     ruleset._validate_extraction({"service": "Status", "path": "status", "group": "Health"})
+
+
+def test_host_label_form_offers_a_filter_and_a_literal_value(ruleset):
+    form = ruleset._endpoint().elements["host_labels"].parameter_form.element_template
+    assert set(form.elements) == {"path", "key", "value_field", "value", "filter"}
+    # The predicate is the same three fields an extraction's filter uses.
+    assert set(form.elements["filter"].parameter_form.elements) == {"path", "op", "value"}
+    # A path is no longer required: a condition plus a literal value describes a
+    # label on its own.
+    assert form.elements["path"].required is False
+
+
+def test_piggyback_label_form_offers_a_filter_and_a_literal_value(ruleset):
+    form = ruleset._extraction().elements["piggyback_labels"].parameter_form.element_template
+    assert set(form.elements) == {"path", "key", "value", "filter"}
+
+
+def test_a_label_without_a_path_needs_a_key_and_a_literal_value(ruleset):
+    with pytest.raises(ValidationError):
+        ruleset._validate_label_spec({"value": "yes"})  # no key
+    with pytest.raises(ValidationError):
+        ruleset._validate_label_spec({"key": "MyApp"})  # no value
+    ruleset._validate_label_spec({"key": "MyApp", "value": "yes"})
+    # With a path both halves can be derived, so nothing else is needed.
+    ruleset._validate_label_spec({"path": "services[*]"})
+
+
+def test_a_host_label_takes_its_value_from_one_place_only(ruleset):
+    with pytest.raises(ValidationError):
+        ruleset._validate_host_label({"path": "c[*]", "value": "yes", "value_field": "status"})
+    ruleset._validate_host_label({"path": "c[*]", "value_field": "status"})
+    ruleset._validate_host_label({"path": "c[*]", "value": "yes"})
