@@ -35,6 +35,12 @@ Targets **Checkmk 2.4+** and the current stable plugin APIs
   (capped, credentials stripped) and the response headers on the endpoint's own
   service — including the body of a *rejected* response, which is where an API
   explains itself
+- **The JSON context on the services that alert**: the raw response above sits
+  on the endpoint's own service, which stays OK and notifies nobody. Opt in per
+  endpoint and the *field* services carry the JSON too — by default just the
+  element the value was read from, with all its sibling fields — so a CRIT
+  notification's `$LONGSERVICEOUTPUT$` shows what the API actually said, which
+  matters most for the on-call person who cannot reach the endpoint at all
 - **Response headers** as a value source: prefix the name with `@header.`
   (e.g. `@header.X-RateLimit-Remaining`) to monitor an API quota, a
   `Retry-After` or the age of a `Last-Modified`
@@ -215,6 +221,8 @@ Each **field to monitor** has:
 | **Upper / lower levels** | WARN/CRIT for numeric values |
 | **String matching** | Either *must match a regex* (choose the state when it does **not** match, default CRIT) or *map the value to a state* (separate OK / WARN / CRIT regexes, first full match wins; choose the state when nothing matches, default OK) |
 
+Each **endpoint** also has an optional **Report the JSON context in the field services** setting — what the services that actually alert show of the response; see [The JSON context on the field services](#the-json-context-on-the-field-services).
+
 Each **endpoint** also has an optional **Host labels** list: fields resolved from the response root and attached to the monitored *host* (e.g. `version`, `cluster.region`) as `json_api/<key>` — host-wide, needing no service. A path may contain a `[*]` wildcard (e.g. `components[*]`) to emit **one label per element**, keyed `json_api/<key>/<element>` (unique keys), with the value taken from an optional per-element **value field** (default `true`, i.e. set-membership tags). Two more fields turn that into a *classification* — a **label value** typed in the rule instead of read from the response, and **only elements matching a condition** (the same path + operator + value predicate a field's filter uses) — see [Classifying the host from a collection](#classifying-the-host-from-a-collection). In the wizard, the JSON picker's **`+ host label`** button adds these.
 
 ### The endpoint's own service
@@ -355,6 +363,56 @@ response carrying personal or otherwise sensitive data.
 > The raw response is **not archived**: the details always describe the most
 > recent check of that service. While the service stays CRIT that *is* the
 > failing response; once it recovers, the failure's body is gone.
+
+### The JSON context on the field services
+
+The section above puts the response on the endpoint's **own** service. But that
+service is usually OK: the one that goes CRIT — and therefore the one that
+**notifies** — is a field service, and its *Details* say only which path was
+read:
+
+```text
+Status: DOWN (expected to match 'UP')
+JSON path: services[*].status
+Source: https://app.example.com/api/v1/health
+```
+
+The JSON that would explain the failure was in the check's hand at that moment,
+and sat on a different service. **Report the JSON context in the field
+services** puts it where the alert is:
+
+```text
+Status: DOWN (expected to match 'UP')
+JSON path: services[*].status
+Source: https://app.example.com/api/v1/health
+Response context:
+{
+  "name": "payments",
+  "status": "DOWN",
+  "since": "2026-09-14T08:12:00Z"
+}
+```
+
+Two sources, both capped by a byte budget (default 1024, hard maximum 65536):
+
+| What to report | Shown |
+|---|---|
+| **The JSON this value was read from** (default) | For a `[*]` path: *that element*, with all its sibling fields and nothing else. Otherwise the object holding the value. An aggregation has no single element and an `@header.` path is not in the body at all, so both fall back to the whole response |
+| **The whole response body** | Always the whole document, on every field service of the endpoint |
+
+- It reaches notifications as `$LONGSERVICEOUTPUT$` — which is the point. The
+  person reading the alert is often on the wrong network, or has no credentials
+  for the API, and cannot check it themselves.
+- It is reported on a **missing path** too: "the path did not resolve" is
+  exactly when *what did the API return?* is the question.
+- Where several fields **share a service**, each line brings its own context
+  under its own `[<line>]` heading.
+- **Keep the budget small.** Unlike the raw response, this text is stored with
+  every check result of *every* field service of the endpoint — the whole-body
+  source multiplies it by the number of fields.
+- Credentials are stripped exactly as they are for the raw response, and the
+  same warning applies: details travel into notifications, so do not turn this
+  on for a response carrying personal or otherwise sensitive data.
 
 ### Caching responses
 

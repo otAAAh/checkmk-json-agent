@@ -1912,3 +1912,66 @@ def test_an_inventory_only_service_still_creates_none(check):
         ],
     )
     assert not list(check.discover_json_api(section))
+
+
+# --- The JSON context in a field service's details ---------------------------
+
+_CONTEXT_JSON = '{\n  "name": "payments",\n  "status": "DOWN"\n}'
+
+
+def test_the_field_service_details_carry_the_response_context(check):
+    """The service that alerts is the one that has to show the JSON (#190)."""
+    section = _section(
+        check,
+        [
+            _entry(
+                "Status",
+                value="DOWN",
+                expected="UP",
+                path="services[*].status",
+                url="http://x/h",
+                context=_CONTEXT_JSON,
+            )
+        ],
+    )
+    results = list(check.check_json_api("Status", {}, section))
+    assert results[0].state == State.CRIT
+    details = _details(results)
+    assert f"Response context:\n{_CONTEXT_JSON}" in details
+    # After the value and the context lines, so the first line an operator
+    # scans is still the one that says what happened.
+    assert details.index("JSON path:") < details.index("Response context:")
+    # Details-only: the summary stays the one line it was.
+    assert "Response context" not in results[0].summary
+
+
+def test_the_response_context_is_reported_on_a_missing_path_too(check):
+    # A path that did not resolve is exactly when "what did the API return?"
+    # is the question, so the context must survive the UNKNOWN branch.
+    section = _section(
+        check,
+        [_entry("Status", found=False, error="path not found", context=_CONTEXT_JSON)],
+    )
+    results = list(check.check_json_api("Status", {}, section))
+    assert results[0].state == State.UNKNOWN
+    assert "Response context:" in _details(results)
+
+
+def test_without_the_setting_no_context_is_reported(check):
+    section = _section(check, [_entry("Status", value="UP")])
+    assert "Response context" not in _details(list(check.check_json_api("Status", {}, section)))
+
+
+def test_each_line_of_a_shared_service_brings_its_own_context(check):
+    # Several fields in one service: each block is headed by its line, so the
+    # contexts stay attributable rather than merging into one wall of JSON.
+    section = _section(
+        check,
+        [
+            _entry("Health", label="Status", value="UP", context='{"a": 1}'),
+            _entry("Health", label="Component", value="nginx", context='{"b": 2}'),
+        ],
+    )
+    details = _details(list(check.check_json_api("Health", {}, section)))
+    assert details.index("[Status]") < details.index('{"a": 1}') < details.index("[Component]")
+    assert '{"b": 2}' in details

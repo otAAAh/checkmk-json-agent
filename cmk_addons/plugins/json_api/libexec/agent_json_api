@@ -452,6 +452,94 @@ def _store_report(
         meta["headers_reported"] = _reported_headers(meta.get("headers"), secret)
 
 
+# How much of the JSON context to put into ONE field service's details. Smaller
+# than the raw-response default on purpose: this text is repeated on every field
+# service of the endpoint, not written once to the endpoint's own service.
+_DEFAULT_CONTEXT_BYTES = 1024
+
+
+def _context_spec(endpoint: dict) -> dict | None:
+    """The endpoint's 'report the JSON context in the field services' settings."""
+    spec = endpoint.get("field_context")
+    return spec if isinstance(spec, dict) else None
+
+
+def _resolve_parent(data: object, path: str) -> tuple[bool, object]:
+    """Resolve everything but the LAST segment of a path: the value's container.
+
+    A single-segment path has the document itself as its container, which is the
+    right answer: the context of a top-level field IS the response.
+    """
+    tokens = list(_PATH_TOKEN.finditer(_strip_root(path)))
+    if len(tokens) <= 1:
+        return True, data
+    current = data
+    for match in tokens[:-1]:
+        index = match.group("idx")
+        if index is not None:
+            i = int(index)
+            if not isinstance(current, list) or i >= len(current):
+                return False, None
+            current = current[i]
+            continue
+        key = _token_key(match)
+        if not isinstance(current, dict) or key not in current:
+            return False, None
+        current = current[key]
+    return True, current
+
+
+def _context_object(spec: dict, document: object, path: str, element: object) -> object:
+    """The JSON a field's details should show, per the configured source.
+
+    'response' is the whole document. 'element' is the JSON the value was
+    actually read from: the current '[*]' element where there is one, else the
+    object containing the value (its parent). An aggregation has no single
+    element and a '@header.' path is not in the body at all, so both fall back to
+    the document - the alternative would be to report nothing where the context
+    is arguably most useful.
+    """
+    if spec.get("source") == "response":
+        return document
+    if element is not None and element is not _NO_ELEMENT:
+        return element
+    if _WILDCARD in path or path.strip().startswith(_HEADER_PREFIX):
+        return document
+    found, parent = _resolve_parent(document, path)
+    return parent if found else document
+
+
+def _context_text(
+    spec: dict | None,
+    document: object,
+    path: str,
+    element: object = None,
+    secret: str | None = None,
+) -> str | None:
+    """The pretty-printed, capped, secret-stripped JSON context, or None.
+
+    Pretty-printed rather than verbatim: the document has been parsed by the time
+    a field is extracted, and an indented object is what makes the details worth
+    reading. The cap is applied to the ENCODED text, so it bounds what is stored
+    with every check result; a cut that splits a multi-byte character decodes to
+    U+FFFD rather than failing the whole report.
+    """
+    if spec is None:
+        return None
+    raw = spec.get("max_bytes")
+    limit = int(raw) if isinstance(raw, (int, float)) and not isinstance(raw, bool) else 0
+    limit = max(1, min(limit or _DEFAULT_CONTEXT_BYTES, _MAX_REPORTED_BYTES))
+    try:
+        text = json.dumps(_context_object(spec, document, path, element), indent=2, default=str)
+    except (TypeError, ValueError):
+        return None
+    encoded = _redact_secret(text, secret).encode("utf-8", "replace")
+    if len(encoded) <= limit:
+        return encoded.decode("utf-8", "replace")
+    shown = encoded[:limit].decode("utf-8", "replace")
+    return f"{shown}\n... (truncated at {limit} of {len(encoded)} bytes)"
+
+
 def _accepted_statuses(endpoint: dict) -> set[int]:
     """Extra HTTP status codes to accept beyond 2xx, from the endpoint config.
 
@@ -1417,6 +1505,7 @@ def _result(
     calc_other: object = None,
     host_labels: dict[str, str] | None = None,
     label: str | None = None,
+    context: str | None = None,
 ) -> dict:
     # Values that are not JSON scalars (dict/list) are reported as strings.
     if found and isinstance(value, (dict, list)):
@@ -1469,6 +1558,11 @@ def _result(
         # Where this value goes in the HW/SW inventory tree, if anywhere. None
         # for the ordinary "this is a service" case.
         "inventory": _inventory_spec(spec, row_key),
+        # The JSON this value was read from, for the endpoints that asked for it.
+        # It travels WITH the result rather than being looked up from the
+        # endpoint record by the check, because a piggybacked result lands in a
+        # different section, which has no endpoint record to look anything up in.
+        "context": context,
     }
 
 
@@ -1593,6 +1687,8 @@ def _extract(
     url: str,
     headers: object = None,
     prefix: str = "",
+    context: dict | None = None,
+    secret: str | None = None,
 ) -> list[dict]:
     results = []
     for spec in extractions:
@@ -1625,6 +1721,7 @@ def _extract(
                     _resolve_labels(label_specs, document),
                     summary_fields=_resolve_summary(summary, document),
                     label=line,
+                    context=_context_text(context, document, spec["path"], secret=secret),
                 )
             )
             continue
@@ -1651,6 +1748,7 @@ def _extract(
                     summary_fields=_resolve_summary(summary, document),
                     calc_other=_resolve_calc_other(spec, document),
                     label=line,
+                    context=_context_text(context, document, spec["path"], secret=secret),
                 )
             )
             continue
@@ -1676,6 +1774,7 @@ def _extract(
                     summary_fields=_resolve_summary(summary, document),
                     calc_other=_resolve_calc_other(spec, document),
                     label=line,
+                    context=_context_text(context, document, spec["path"], secret=secret),
                 )
             )
             continue
@@ -1739,6 +1838,7 @@ def _extract(
                     # overwrite each other under one key.
                     row_key=label or str(index),
                     label=element_line,
+                    context=_context_text(context, document, spec["path"], element, secret),
                 )
             )
     return results
@@ -2068,7 +2168,13 @@ def _process_endpoint(
         if error is not None:
             return _fail(error, meta)
         results = _extract(
-            document, endpoint.get("extractions", []), url, meta.get("headers"), prefix
+            document,
+            endpoint.get("extractions", []),
+            url,
+            meta.get("headers"),
+            prefix,
+            _context_spec(endpoint),
+            secret,
         )
         host_labels = _resolve_host_labels(endpoint.get("host_labels", []), document)
         if debug:

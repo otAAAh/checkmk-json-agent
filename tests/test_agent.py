@@ -2924,3 +2924,101 @@ def test_a_failed_endpoint_keeps_its_shared_services(agent, monkeypatch):
         ("Health", "Component"),
         ("Other", None),
     ]
+
+
+# --- The JSON context in the field services ----------------------------------
+
+CONTEXT_DOC = {
+    "services": [
+        {"name": "web", "status": "UP"},
+        {"name": "payments", "status": "DOWN", "since": "2026-09-14T08:12:00Z"},
+    ],
+    "cluster": {"region": "eu", "version": "2.4.0"},
+}
+
+
+def test_context_is_off_unless_configured(agent):
+    assert agent._context_spec({}) is None
+    assert agent._context_spec({"field_context": None}) is None
+    assert agent._context_text(None, CONTEXT_DOC, "cluster.version") is None
+
+
+def test_context_of_a_wildcard_element_is_that_element(agent):
+    spec = {"source": "element", "max_bytes": 4096}
+    element = CONTEXT_DOC["services"][1]
+    text = agent._context_text(spec, CONTEXT_DOC, "services[*].status", element)
+    assert json.loads(text) == element
+    # Only that element: the sibling service is not dragged along.
+    assert "web" not in text
+
+
+def test_context_of_a_plain_path_is_the_object_holding_it(agent):
+    spec = {"source": "element", "max_bytes": 4096}
+    text = agent._context_text(spec, CONTEXT_DOC, "cluster.version")
+    assert json.loads(text) == {"region": "eu", "version": "2.4.0"}
+
+
+def test_context_of_a_top_level_path_is_the_whole_document(agent):
+    # The container of a top-level field IS the response.
+    spec = {"source": "element", "max_bytes": 9999}
+    text = agent._context_text(spec, CONTEXT_DOC, "cluster")
+    assert json.loads(text) == CONTEXT_DOC
+
+
+def test_context_of_an_aggregation_or_header_falls_back_to_the_response(agent):
+    spec = {"source": "element", "max_bytes": 9999}
+    assert json.loads(agent._context_text(spec, CONTEXT_DOC, "services[*].name")) == CONTEXT_DOC
+    assert (
+        json.loads(agent._context_text(spec, CONTEXT_DOC, "@header.X-RateLimit-Remaining"))
+        == CONTEXT_DOC
+    )
+
+
+def test_context_source_response_always_reports_the_document(agent):
+    spec = {"source": "response", "max_bytes": 9999}
+    element = CONTEXT_DOC["services"][1]
+    assert json.loads(agent._context_text(spec, CONTEXT_DOC, "services[*].status", element)) == (
+        CONTEXT_DOC
+    )
+
+
+def test_context_is_capped_and_says_so(agent):
+    spec = {"source": "response", "max_bytes": 20}
+    text = agent._context_text(spec, CONTEXT_DOC, "cluster")
+    assert "truncated at 20 of" in text
+    # The cap applies to the JSON itself; the note is what is added on top.
+    assert len(text.split("\n... (truncated")[0].encode()) == 20
+
+
+def test_context_limit_falls_back_and_is_clamped(agent):
+    big = {"items": [{"name": f"item-{i}"} for i in range(200)]}
+    # Absent / zero / nonsense means the default budget, never "all of it".
+    for spec in ({"source": "response"}, {"source": "response", "max_bytes": 0}):
+        text = agent._context_text(spec, big, "items")
+        assert f"truncated at {agent._DEFAULT_CONTEXT_BYTES} of" in text
+    # And the rule's own ceiling cannot be exceeded either.
+    huge = agent._context_text({"source": "response", "max_bytes": 10**9}, big, "items")
+    assert f"truncated at {agent._MAX_REPORTED_BYTES} of" not in huge
+    assert "truncated" not in huge
+
+
+def test_context_never_carries_the_secret(agent):
+    # Same rule as the raw response: an API echoing the key must not store it
+    # with the check result - and here it would be stored on every field service.
+    spec = {"source": "response", "max_bytes": 4096}
+    text = agent._context_text(spec, {"echo": "s3cret"}, "echo", None, "s3cret")
+    assert "s3cret" not in text
+
+
+def test_extract_attaches_the_context_to_every_result(agent):
+    specs = [{"path": "services[*].status", "service": "Svc", "label_path": "name"}]
+    results = agent._extract(
+        CONTEXT_DOC, specs, "http://test/h", context={"source": "element", "max_bytes": 4096}
+    )
+    assert [json.loads(r["context"])["name"] for r in results] == ["web", "payments"]
+
+
+def test_extract_without_the_setting_attaches_nothing(agent):
+    specs = [{"path": "services[*].status", "service": "Svc"}]
+    results = agent._extract(CONTEXT_DOC, specs, "http://test/h")
+    assert all(r["context"] is None for r in results)

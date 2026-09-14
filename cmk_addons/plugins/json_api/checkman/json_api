@@ -59,6 +59,15 @@ description:
  does not apply to a derived rate or age. Otherwise the value is shown in the
  service summary, and a metric is added when it is numeric.
 
+ An endpoint can also be told to report the JSON a value was read from in its
+ field services' details: the '[*]' element it came from (or the object holding
+ it), or the whole response body, capped by a byte budget and stripped of the
+ endpoint's credentials. The service that goes WARN or CRIT is the one that
+ notifies, and a service's details reach notifications as $LONGSERVICEOUTPUT$ -
+ so this is what puts the API's own answer in front of a person who often
+ cannot reach the endpoint themselves. It is reported for a path that did not
+ resolve as well.
+
  The service goes {UNKNOWN} if the configured path is not present in the
  response, or if its endpoint could not be reached or did not return JSON. By
  default only 2xx responses are read; additional HTTP status codes can be

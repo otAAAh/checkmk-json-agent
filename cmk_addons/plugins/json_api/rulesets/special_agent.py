@@ -1511,6 +1511,76 @@ def _endpoint() -> Dictionary:
                     },
                 ),
             ),
+            "field_context": DictElement(
+                required=False,
+                parameter_form=Dictionary(
+                    title=Title("Report the JSON context in the field services"),
+                    help_text=Help(
+                        "Off by default. The setting above reports the response on "
+                        "the endpoint's OWN service - but the services that go WARN "
+                        "or CRIT, and therefore the ones that notify, are the field "
+                        "services, and their Details say only which path was read. "
+                        "This puts the JSON itself there too, so the alert carries "
+                        "what the API actually said: a service's Details travel into "
+                        "notifications as $LONGSERVICEOUTPUT$, and the person on "
+                        "call often cannot reach the endpoint at all - wrong "
+                        "network, no credentials - while the endpoint's own service "
+                        "stayed OK and notified nobody. Credentials are stripped "
+                        "exactly as they are for the raw response. Note that this "
+                        "text is stored with every check result of EVERY field "
+                        "service of this endpoint, so keep the byte budget small."
+                    ),
+                    elements={
+                        "source": DictElement(
+                            required=True,
+                            parameter_form=SingleChoice(
+                                title=Title("What to report"),
+                                elements=[
+                                    SingleChoiceElement(
+                                        "element",
+                                        Title("The JSON this value was read from"),
+                                    ),
+                                    SingleChoiceElement(
+                                        "response",
+                                        Title("The whole response body"),
+                                    ),
+                                ],
+                                prefill=DefaultValue("element"),
+                                help_text=Help(
+                                    "'The JSON this value was read from' is the "
+                                    "targeted form: for a '[*]' path that element, "
+                                    "otherwise the object holding the value - so "
+                                    "the service that alerted shows the element "
+                                    "that failed with all its sibling fields, and "
+                                    "nothing else. An aggregation has no single "
+                                    "element and a '@header.' path is not in the "
+                                    "body at all, so both report the whole "
+                                    "response. 'The whole response body' always "
+                                    "does, repeated on every field service - which "
+                                    "is why the cap matters more here than on the "
+                                    "endpoint's own service."
+                                ),
+                            ),
+                        ),
+                        "max_bytes": DictElement(
+                            required=True,
+                            parameter_form=Integer(
+                                title=Title("Report at most (bytes)"),
+                                help_text=Help(
+                                    "Longer context is cut off at this many bytes "
+                                    "and the service says so. Keep it small: this "
+                                    "text is stored with every check result of "
+                                    "every field service of this endpoint."
+                                ),
+                                prefill=DefaultValue(1024),
+                                custom_validate=(
+                                    validators.NumberInRange(min_value=1, max_value=65536),
+                                ),
+                            ),
+                        ),
+                    },
+                ),
+            ),
             "proxy": DictElement(
                 required=False,
                 parameter_form=Proxy(

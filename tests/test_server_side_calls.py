@@ -1042,3 +1042,39 @@ def test_the_shared_service_rides_in_the_endpoint_blob(ssc):
         ("Component", "Health"),
         ("Other", None),
     ]
+
+
+def test_field_context_passed_through(ssc):
+    """The endpoint blob carries the field-context settings for the agent."""
+    args = _command_args(
+        ssc,
+        {
+            "endpoints": [
+                {
+                    "url": "http://x",
+                    "verify_cert": True,
+                    "extractions": [{"path": "status", "service": "S"}],
+                    "field_context": {"source": "element", "max_bytes": 512},
+                }
+            ]
+        },
+    )
+    (endpoint,) = _endpoints(ssc, args)
+    assert endpoint["field_context"] == {"source": "element", "max_bytes": 512}
+
+
+def test_field_context_absent_by_default(ssc):
+    args = _command_args(
+        ssc,
+        {
+            "endpoints": [
+                {
+                    "url": "http://x",
+                    "verify_cert": True,
+                    "extractions": [{"path": "status", "service": "S"}],
+                }
+            ]
+        },
+    )
+    (endpoint,) = _endpoints(ssc, args)
+    assert endpoint["field_context"] is None

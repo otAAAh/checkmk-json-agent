@@ -215,6 +215,10 @@ function makeEndpoint(withSample) {
     // 'value' is the literal label value; the fl* triple is the condition that
     // decides which elements produce a label (the ruleset's shared filter).
     host_labels: [],
+    // Report the JSON context in the FIELD services' details: how many bytes
+    // ("" = off) and what to show - the element the value came from, or the
+    // whole response body.
+    context_bytes: "", context_source: "element",
     proxy_mode: "default", proxy_url: "",   // default (env) | url | no_proxy
     ca_bundle: "", client_cert: "", client_key: "",
     json: withSample ? JSON.stringify(SAMPLE, null, 2) : "",
@@ -412,6 +416,12 @@ function renderConn() {
        <label>Retries</label><input type="text" id="c-retries" value="${escAttr(e.retries)}" placeholder="(optional) retry a connection error / 429 / 5xx, e.g. 2">
        <label>Retry backoff (s)</label><input type="text" id="c-retrybackoff" value="${escAttr(e.retry_backoff)}" placeholder="wait before the first retry, doubled each time">
        <label>Report raw response</label><input type="text" id="c-reportbytes" value="${escAttr(e.report_bytes)}" placeholder="(optional) bytes of the body in the service details, e.g. 2048">
+       <label>Report JSON context</label><input type="text" id="c-contextbytes" value="${escAttr(e.context_bytes)}" placeholder="(optional) bytes of JSON in the FIELD services' details, e.g. 1024">
+       <label>Context to report</label>
+       <select id="c-contextsource">
+         <option value="element" ${e.context_source !== "response" ? "selected" : ""}>The JSON the value was read from</option>
+         <option value="response" ${e.context_source === "response" ? "selected" : ""}>The whole response body</option>
+       </select>
        <label>HTTP proxy</label>
        <select id="c-proxymode">
          <option value="default" ${e.proxy_mode === "default" ? "selected" : ""}>From environment</option>
@@ -444,6 +454,7 @@ function renderConn() {
   bind("c-retries", () => { e.retries = $("c-retries").value; renderOutputs(); });
   bind("c-retrybackoff", () => { e.retry_backoff = $("c-retrybackoff").value; renderOutputs(); });
   bind("c-reportbytes", () => { e.report_bytes = $("c-reportbytes").value; renderOutputs(); });
+  bind("c-contextbytes", () => { e.context_bytes = $("c-contextbytes").value; renderOutputs(); });
   bind("c-proxyurl", () => { e.proxy_url = $("c-proxyurl").value; renderOutputs(); });
   bind("c-cabundle", () => { e.ca_bundle = $("c-cabundle").value; renderOutputs(); });
   bind("c-clientcert", () => { e.client_cert = $("c-clientcert").value; renderOutputs(); });
@@ -463,6 +474,7 @@ function renderConn() {
   // structural selects → re-render the form
   $("c-method").onchange = () => { e.method = $("c-method").value; renderConn(); renderOutputs(); };
   $("c-authtype").onchange = () => { e.auth.type = $("c-authtype").value; renderConn(); renderOutputs(); };
+  $("c-contextsource").onchange = () => { e.context_source = $("c-contextsource").value; renderOutputs(); };
   $("c-proxymode").onchange = () => { e.proxy_mode = $("c-proxymode").value; renderConn(); renderOutputs(); };
   $("c-verify").onchange = () => { e.verify_cert = $("c-verify").checked; renderOutputs(); };
   $("c-redir").onchange = () => { e.follow_redirects = $("c-redir").checked; renderOutputs(); };
@@ -974,6 +986,18 @@ function hostLabelObjs(e) {
   return out;
 }
 
+// The "report the JSON context in the field services" object ({source,
+// max_bytes}), or null when off - an empty byte budget, the same way the raw
+// response says off. Clamped to the ruleset's range (1-65536 bytes).
+function contextObj(e) {
+  const bytes = parseInt(e.context_bytes, 10);
+  if (Number.isNaN(bytes) || bytes < 1) return null;
+  return {
+    source: e.context_source === "response" ? "response" : "element",
+    max_bytes: Math.min(bytes, 65536),
+  };
+}
+
 // Parse the "accept status codes" text field into a de-duplicated int array,
 // mirroring the ruleset's List(Integer) and the agent's _accepted_statuses.
 function parseStatuses(s) {
@@ -1050,6 +1074,8 @@ function pyEndpoint(e, indent) {
   if (rt) lines.push(`${i}'retry': {'attempts': ${rt.attempts}, 'backoff': ${floatPy(rt.backoff)}},`);
   const rep = reportObj(e);
   if (rep) lines.push(`${i}'show_response': {'max_bytes': ${rep.max_bytes}, 'headers': ${rep.headers ? "True" : "False"}},`);
+  const ctx = contextObj(e);
+  if (ctx) lines.push(`${i}'field_context': {'source': ${pyStr(ctx.source)}, 'max_bytes': ${ctx.max_bytes}},`);
   const px = proxyPy(e);
   if (px) lines.push(`${i}'proxy': ${px},`);
   const hls = hostLabelObjs(e).map(pyHostLabel);
@@ -1084,6 +1110,7 @@ function endpointCliObj(e) {
     accept_status: parseStatuses(e.accept_status),
     retry: retryObj(e),
     show_response: reportObj(e),
+    field_context: contextObj(e),
     proxy: proxyCli(e),
     auth: AUTH_KIND[e.auth.type] || null,
     extractions: extractionObjs(e),
