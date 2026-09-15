@@ -1541,6 +1541,9 @@ def test_process_endpoint_returns_a_record(agent, monkeypatch):
         "from_cache": False,
         "cache_age": None,
         "attempts": 1,
+        "pages": 1,
+        "elements": None,
+        "pagination_stopped": None,
         "body": None,
         "body_truncated": False,
         "body_size": None,
@@ -3022,3 +3025,473 @@ def test_extract_without_the_setting_attaches_nothing(agent):
     specs = [{"path": "services[*].status", "service": "Svc"}]
     results = agent._extract(CONTEXT_DOC, specs, "http://test/h")
     assert all(r["context"] is None for r in results)
+
+
+# --- Pagination -------------------------------------------------------------
+#
+# The case these exist for: an API that answers a collection one page at a time.
+# Without following the pages, every count, aggregation and '[*]' wildcard built
+# from it describes the first page and says nothing about the rest, which is an
+# answer that is wrong rather than missing.
+
+
+def _paged(agent, monkeypatch, pages, status=None):
+    """Serve a map of {url: body} and record the URLs that were requested.
+
+    ``status`` optionally maps a URL to an HTTP status code, for the pages that
+    are supposed to fail. A URL nothing was configured for answers 404, so a
+    test can tell "the agent followed a link it should not have" from "the agent
+    stopped".
+    """
+    seen = []
+
+    def fake_request(_self, _method, url, **_kwargs):
+        seen.append(url)
+        code = (status or {}).get(url, 200 if url in pages else 404)
+        body = pages.get(url, b"{}")
+        headers = {}
+        if isinstance(body, tuple):
+            body, headers = body
+        return _FakeResponse(body=body, status_code=code, headers=headers)
+
+    monkeypatch.setattr(agent.requests.Session, "request", fake_request)
+    return seen
+
+
+def _page(items, next_url=None):
+    """One page of a 'links.next' style API."""
+    return json.dumps({"items": items, "links": {"next": next_url}}).encode()
+
+
+PAGINATED = {
+    "url": "http://api/jobs",
+    "pagination": {"next": ["body", "links.next"], "items": "items", "max_pages": 10},
+}
+
+
+def test_pagination_merges_every_page_into_the_first(agent, monkeypatch):
+    seen = _paged(
+        agent,
+        monkeypatch,
+        {
+            "http://api/jobs": _page([{"id": 1}, {"id": 2}], "http://api/jobs?page=2"),
+            "http://api/jobs?page=2": _page([{"id": 3}], None),
+        },
+    )
+    doc, error, meta = agent._fetch(PAGINATED, None)
+    assert error is None
+    # The whole collection, in page order - and the rest of the document stays
+    # the first page's, so a 'total' next to it still resolves.
+    assert [job["id"] for job in doc["items"]] == [1, 2, 3]
+    assert seen == ["http://api/jobs", "http://api/jobs?page=2"]
+    assert (meta["pages"], meta["elements"], meta["pagination_stopped"]) == (2, 3, None)
+
+
+def test_pagination_reports_the_bytes_of_every_page(agent, monkeypatch):
+    first = _page([{"id": 1}], "http://api/jobs?page=2")
+    second = _page([{"id": 2}], None)
+    _paged(agent, monkeypatch, {"http://api/jobs": first, "http://api/jobs?page=2": second})
+    _doc, error, meta = agent._fetch(PAGINATED, None)
+    assert error is None
+    # Response size is a cost the operator watches; one page of it is not it.
+    assert meta["size"] == len(first) + len(second)
+
+
+def test_pagination_resolves_a_relative_next_link(agent, monkeypatch):
+    seen = _paged(
+        agent,
+        monkeypatch,
+        {
+            "http://api/v1/jobs": _page([{"id": 1}], "/v1/jobs?page=2"),
+            "http://api/v1/jobs?page=2": _page([{"id": 2}], None),
+        },
+    )
+    doc, error, _meta = agent._fetch({**PAGINATED, "url": "http://api/v1/jobs"}, None)
+    assert error is None and len(doc["items"]) == 2
+    assert seen[1] == "http://api/v1/jobs?page=2"
+
+
+def test_pagination_follows_the_link_header(agent, monkeypatch):
+    seen = _paged(
+        agent,
+        monkeypatch,
+        {
+            "http://api/jobs": (
+                json.dumps({"items": [{"id": 1}]}).encode(),
+                {
+                    "Link": (
+                        '<http://api/jobs?page=2>; rel="next", <http://api/jobs?page=9>; rel="last"'
+                    )
+                },
+            ),
+            # The last page offers only a 'prev' link, which ends pagination.
+            "http://api/jobs?page=2": (
+                json.dumps({"items": [{"id": 2}]}).encode(),
+                {"link": '<http://api/jobs>; rel="prev"'},
+            ),
+        },
+    )
+    doc, error, meta = agent._fetch(
+        {
+            "url": "http://api/jobs",
+            "pagination": {"next": ["link_header", None], "items": "items"},
+        },
+        None,
+    )
+    assert error is None and [job["id"] for job in doc["items"]] == [1, 2]
+    assert seen == ["http://api/jobs", "http://api/jobs?page=2"]
+    assert meta["pages"] == 2
+
+
+def test_pagination_without_a_next_link_reads_one_page(agent, monkeypatch):
+    _paged(agent, monkeypatch, {"http://api/jobs": _page([{"id": 1}], None)})
+    _doc, error, meta = agent._fetch(PAGINATED, None)
+    # One page, and nothing was left behind: the collection is complete, which is
+    # what the absent 'stopped' reason says.
+    assert error is None
+    assert (meta["pages"], meta["elements"], meta["pagination_stopped"]) == (1, 1, None)
+
+
+def test_pagination_stops_at_the_page_limit_and_says_so(agent, monkeypatch):
+    seen = _paged(
+        agent,
+        monkeypatch,
+        {
+            "http://api/jobs": _page([{"id": 1}], "http://api/jobs?page=2"),
+            "http://api/jobs?page=2": _page([{"id": 2}], "http://api/jobs?page=3"),
+            "http://api/jobs?page=3": _page([{"id": 3}], None),
+        },
+    )
+    doc, error, meta = agent._fetch(
+        {**PAGINATED, "pagination": {**PAGINATED["pagination"], "max_pages": 2}}, None
+    )
+    assert error is None and len(doc["items"]) == 2
+    assert len(seen) == 2
+    # The collection is short, so the endpoint's own service has to say it is.
+    assert "page limit (2)" in meta["pagination_stopped"]
+
+
+def test_pagination_at_exactly_the_page_limit_is_complete(agent, monkeypatch):
+    _paged(
+        agent,
+        monkeypatch,
+        {
+            "http://api/jobs": _page([{"id": 1}], "http://api/jobs?page=2"),
+            "http://api/jobs?page=2": _page([{"id": 2}], None),
+        },
+    )
+    _doc, error, meta = agent._fetch(
+        {**PAGINATED, "pagination": {**PAGINATED["pagination"], "max_pages": 2}}, None
+    )
+    # An API with as many pages as the limit was read WHOLE: a truncation note
+    # has to mean something was actually left behind, or it is noise.
+    assert error is None and meta["pagination_stopped"] is None
+
+
+def test_pagination_stops_at_the_element_limit(agent, monkeypatch):
+    _paged(
+        agent,
+        monkeypatch,
+        {
+            "http://api/jobs": _page([{"id": 1}, {"id": 2}], "http://api/jobs?page=2"),
+            "http://api/jobs?page=2": _page([{"id": 3}], "http://api/jobs?page=3"),
+            "http://api/jobs?page=3": _page([{"id": 4}], None),
+        },
+    )
+    doc, error, meta = agent._fetch(
+        {**PAGINATED, "pagination": {**PAGINATED["pagination"], "max_elements": 3}}, None
+    )
+    # Checked BETWEEN pages, so a page is never cut in half - the collection can
+    # end slightly above the cap rather than mid-page.
+    assert error is None and len(doc["items"]) == 3
+    assert "element limit (3)" in meta["pagination_stopped"]
+
+
+def test_pagination_refuses_a_link_to_another_host(agent, monkeypatch):
+    seen = _paged(
+        agent,
+        monkeypatch,
+        {
+            "http://api/jobs": _page([{"id": 1}], "http://evil.example/jobs?page=2"),
+            "http://evil.example/jobs?page=2": _page([{"id": 2}], None),
+        },
+    )
+    doc, error, meta = agent._fetch(PAGINATED, None)
+    # The response body must not decide where an authenticated request from the
+    # Checkmk server goes - the SSRF shape 'follow redirects' also closes.
+    assert error is None and len(doc["items"]) == 1
+    assert seen == ["http://api/jobs"]
+    assert "another host (evil.example)" in meta["pagination_stopped"]
+
+
+def test_pagination_refuses_a_non_http_link(agent, monkeypatch):
+    _paged(agent, monkeypatch, {"http://api/jobs": _page([{"id": 1}], "file:///etc/passwd")})
+    _doc, error, meta = agent._fetch(PAGINATED, None)
+    assert error is None
+    assert "not an http(s) URL" in meta["pagination_stopped"]
+
+
+def test_pagination_stops_when_the_api_repeats_a_page(agent, monkeypatch):
+    seen = _paged(
+        agent,
+        monkeypatch,
+        {
+            "http://api/jobs": _page([{"id": 1}], "http://api/jobs?page=2"),
+            # Points back at itself: without loop detection this would spend the
+            # whole page budget re-reading one page.
+            "http://api/jobs?page=2": _page([{"id": 2}], "http://api/jobs?page=2"),
+        },
+    )
+    doc, error, meta = agent._fetch(PAGINATED, None)
+    assert error is None and len(doc["items"]) == 2
+    assert len(seen) == 2
+    assert "pagination loop" in meta["pagination_stopped"]
+
+
+def test_a_page_that_fails_fails_the_endpoint(agent, monkeypatch):
+    _paged(
+        agent,
+        monkeypatch,
+        {
+            "http://api/jobs": _page([{"id": 1}], "http://api/jobs?page=2"),
+            "http://api/jobs?page=2": _page([{"id": 2}], None),
+        },
+        status={"http://api/jobs?page=2": 500},
+    )
+    doc, error, _meta = agent._fetch(PAGINATED, None)
+    # Half a collection looks exactly like a shrinking one, so it is never
+    # reported as if it were whole: the endpoint's services carry the error.
+    assert doc is None
+    assert error == "Page 2 failed: HTTP 500"
+
+
+def test_a_failed_page_is_retried_like_any_transient_failure(agent, monkeypatch):
+    calls = {"n": 0}
+    pages = {
+        "http://api/jobs": _page([{"id": 1}], "http://api/jobs?page=2"),
+        "http://api/jobs?page=2": _page([{"id": 2}], None),
+    }
+
+    def fake_request(_self, _method, url, **_kwargs):
+        calls["n"] += 1
+        # The second page fails once (a 503), then answers.
+        if url.endswith("page=2") and calls["n"] == 2:
+            return _FakeResponse(body=b"", status_code=503)
+        return _FakeResponse(body=pages[url])
+
+    monkeypatch.setattr(agent.requests.Session, "request", fake_request)
+    monkeypatch.setattr(agent.time, "sleep", lambda _seconds: None)
+    doc, error, meta = agent._fetch({**PAGINATED, "retry": {"attempts": 1, "backoff": 0}}, None)
+    # The whole endpoint is re-fetched from page one, which is the only way to
+    # rebuild a collection that is merged in order.
+    assert error is None and len(doc["items"]) == 2
+    assert meta["attempts"] == 2
+
+
+def test_a_page_that_is_not_json_fails_the_endpoint(agent, monkeypatch):
+    _paged(
+        agent,
+        monkeypatch,
+        {
+            "http://api/jobs": _page([{"id": 1}], "http://api/jobs?page=2"),
+            "http://api/jobs?page=2": b"<html>nope</html>",
+        },
+    )
+    _doc, error, _meta = agent._fetch(PAGINATED, None)
+    assert error.startswith("Page 2 is not valid JSON")
+
+
+def test_a_page_without_the_collection_fails_the_endpoint(agent, monkeypatch):
+    _paged(
+        agent,
+        monkeypatch,
+        {
+            "http://api/jobs": _page([{"id": 1}], "http://api/jobs?page=2"),
+            "http://api/jobs?page=2": json.dumps({"links": {"next": None}}).encode(),
+        },
+    )
+    _doc, error, _meta = agent._fetch(PAGINATED, None)
+    # Skipping it would under-count exactly the way unfollowed pagination does.
+    assert error == "Page 2 has no collection at 'items'"
+
+
+def test_a_page_whose_collection_is_another_kind_fails_the_endpoint(agent, monkeypatch):
+    _paged(
+        agent,
+        monkeypatch,
+        {
+            "http://api/jobs": _page([{"id": 1}], "http://api/jobs?page=2"),
+            "http://api/jobs?page=2": json.dumps({"items": {"a": 1}}).encode(),
+        },
+    )
+    _doc, error, _meta = agent._fetch(PAGINATED, None)
+    assert "cannot be merged" in error and "dict" in error and "list" in error
+
+
+def test_pagination_without_the_collection_in_the_response_fails(agent, monkeypatch):
+    _paged(agent, monkeypatch, {"http://api/jobs": json.dumps({"jobs": []}).encode()})
+    _doc, error, _meta = agent._fetch(PAGINATED, None)
+    assert error == "Pagination: the response has no collection at 'items'"
+
+
+def test_pagination_over_a_scalar_fails(agent, monkeypatch):
+    _paged(agent, monkeypatch, {"http://api/jobs": json.dumps({"items": 7}).encode()})
+    _doc, error, _meta = agent._fetch(PAGINATED, None)
+    assert "not a collection" in error
+
+
+def test_pagination_merges_an_object_by_key(agent, monkeypatch):
+    _paged(
+        agent,
+        monkeypatch,
+        {
+            "http://api/comp": json.dumps(
+                {"components": {"db": {"status": "UP"}}, "next": "http://api/comp?page=2"}
+            ).encode(),
+            "http://api/comp?page=2": json.dumps(
+                {"components": {"queue": {"status": "DOWN"}}}
+            ).encode(),
+        },
+    )
+    doc, error, meta = agent._fetch(
+        {
+            "url": "http://api/comp",
+            "pagination": {"next": ["body", "next"], "items": "components"},
+        },
+        None,
+    )
+    # A JSON object pages by key rather than by position, and '[*]' already
+    # treats both container kinds alike.
+    assert error is None and sorted(doc["components"]) == ["db", "queue"]
+    assert meta["elements"] == 2
+
+
+def test_pagination_over_a_root_array(agent, monkeypatch):
+    _paged(
+        agent,
+        monkeypatch,
+        {
+            "http://api/jobs": (
+                json.dumps([{"id": 1}]).encode(),
+                {"Link": '<http://api/jobs?page=2>; rel="next"'},
+            ),
+            "http://api/jobs?page=2": (json.dumps([{"id": 2}]).encode(), {}),
+        },
+    )
+    doc, error, _meta = agent._fetch(
+        {
+            "url": "http://api/jobs",
+            # '$' is how a response that IS the array says so.
+            "pagination": {"next": ["link_header", None], "items": "$"},
+        },
+        None,
+    )
+    assert error is None and [job["id"] for job in doc] == [1, 2]
+
+
+def test_pagination_sends_every_page_the_same_request(agent, monkeypatch):
+    sent = []
+
+    def fake_request(_self, method, url, **kwargs):
+        sent.append({"method": method, "url": url, **kwargs})
+        body = (
+            _page([{"id": 1}], "http://api/jobs?page=2")
+            if url == "http://api/jobs"
+            else _page([{"id": 2}], None)
+        )
+        return _FakeResponse(body=body)
+
+    monkeypatch.setattr(agent.requests.Session, "request", fake_request)
+    _doc, error, _meta = agent._fetch(
+        {
+            **PAGINATED,
+            "method": "POST",
+            "body": '{"q": 1}',
+            "headers": [["X-Api", "v1"]],
+            "timeout": 7.0,
+            "verify_cert": False,
+        },
+        None,
+    )
+    assert error is None and len(sent) == 2
+    # A cursor only the API understands needs no configuration here precisely
+    # because the second request is the first one at a different URL.
+    assert sent[0]["method"] == sent[1]["method"] == "POST"
+    for key in ("data", "headers", "timeout", "verify", "allow_redirects", "params"):
+        assert sent[0][key] == sent[1][key]
+
+
+def test_pagination_page_count_is_clamped_to_the_agents_own_ceiling(agent):
+    # The ruleset's range is 1-100, but a hand-written blob is not bound by it:
+    # the agent never makes more requests than this for one endpoint.
+    assert agent._pagination_limits({"max_pages": 10**6}) == (agent._MAX_PAGES, None)
+    assert agent._pagination_limits({}) == (agent._DEFAULT_MAX_PAGES, None)
+    assert agent._pagination_limits({"max_pages": 0, "max_elements": 0}) == (
+        agent._DEFAULT_MAX_PAGES,
+        None,
+    )
+    assert agent._pagination_limits({"max_pages": 3, "max_elements": 50}) == (3, 50)
+
+
+def test_pagination_is_reported_as_misconfigured_rather_than_ignored(agent, monkeypatch):
+    _paged(agent, monkeypatch, {"http://api/jobs": _page([{"id": 1}], None)})
+    # Pagination asked for without saying where the next page is: the services
+    # would otherwise describe one page while the rule claims to follow them all.
+    _doc, error, _meta = agent._fetch(
+        {"url": "http://api/jobs", "pagination": {"items": "items"}}, None
+    )
+    assert "without a next-page link" in error
+
+
+def test_the_cache_stores_the_merged_collection(agent, monkeypatch, tmp_path):
+    monkeypatch.setattr(agent, "_cache_dir", lambda name=agent._CACHE_DIR_NAME: tmp_path)
+    _paged(
+        agent,
+        monkeypatch,
+        {
+            "http://api/jobs": _page([{"id": 1}], "http://api/jobs?page=2"),
+            "http://api/jobs?page=2": _page([{"id": 2}], None),
+        },
+    )
+    endpoint = {**PAGINATED, "cache_ttl": 300.0}
+    _doc, error, _meta = agent._fetch(endpoint, None)
+    assert error is None
+
+    # Caching the first page would serve a collection that shrinks for the whole
+    # TTL, so what is cached is what the extractions saw.
+    def boom(*_args, **_kwargs):
+        raise AssertionError("a cache hit must not make a request")
+
+    monkeypatch.setattr(agent.requests.Session, "request", boom)
+    doc, error, meta = agent._fetch(endpoint, None)
+    assert error is None and [job["id"] for job in doc["items"]] == [1, 2]
+    assert meta["from_cache"] is True and meta["pages"] == 2
+
+
+def test_the_pagination_settings_are_part_of_the_cache_identity(agent):
+    other = {**PAGINATED, "pagination": {**PAGINATED["pagination"], "items": "data.items"}}
+    # A changed collection path or page limit changes what the cached (merged)
+    # body contains, so it must not be answered from the old cache file.
+    assert agent._cache_key(PAGINATED) != agent._cache_key(other)
+    assert agent._cache_key(PAGINATED) != agent._cache_key({"url": PAGINATED["url"]})
+
+
+def test_an_aggregation_counts_the_whole_merged_collection(agent, monkeypatch):
+    _paged(
+        agent,
+        monkeypatch,
+        {
+            "http://api/jobs": _page([{"id": 1}, {"id": 2}], "http://api/jobs?page=2"),
+            "http://api/jobs?page=2": _page([{"id": 3}], None),
+        },
+    )
+    document, error, _meta = agent._fetch(PAGINATED, None)
+    assert error is None
+    results = agent._extract(
+        document,
+        [{"path": "items", "service": "Queue", "aggregate": "count"}],
+        "http://api/jobs",
+    )
+    # The whole point: 'count' over a queue that pages at 2 reports the queue,
+    # not the page size.
+    assert results[0]["value"] == 3

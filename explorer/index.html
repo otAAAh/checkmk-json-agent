@@ -219,6 +219,10 @@ function makeEndpoint(withSample) {
     // ("" = off) and what to show - the element the value came from, or the
     // whole response body.
     context_bytes: "", context_source: "element",
+    // Follow the API's pagination and merge the pages: where the next page's URL
+    // is ("" = off | body | link_header), the path to it for the body mode, the
+    // collection each page carries, and the two caps.
+    page_mode: "", page_next: "", page_items: "", page_max: "10", page_max_elements: "",
     proxy_mode: "default", proxy_url: "",   // default (env) | url | no_proxy
     ca_bundle: "", client_cert: "", client_key: "",
     json: withSample ? JSON.stringify(SAMPLE, null, 2) : "",
@@ -422,6 +426,17 @@ function renderConn() {
          <option value="element" ${e.context_source !== "response" ? "selected" : ""}>The JSON the value was read from</option>
          <option value="response" ${e.context_source === "response" ? "selected" : ""}>The whole response body</option>
        </select>
+       <label>Follow pagination</label>
+       <select id="c-pagemode">
+         <option value="" ${!e.page_mode ? "selected" : ""}>No (one page only)</option>
+         <option value="body" ${e.page_mode === "body" ? "selected" : ""}>Next page URL in the body</option>
+         <option value="link_header" ${e.page_mode === "link_header" ? "selected" : ""}>Next page URL in the 'Link' header</option>
+       </select>
+       ${e.page_mode ? `
+       ${e.page_mode === "body" ? `<label>Next page path</label><input type="text" id="c-pagenext" value="${escAttr(e.page_next)}" placeholder="e.g. links.next">` : ""}
+       <label>Collection to merge</label><input type="text" id="c-pageitems" value="${escAttr(e.page_items)}" placeholder="e.g. data.items ('$' = the response IS the array)">
+       <label>Max pages</label><input type="text" id="c-pagemax" value="${escAttr(e.page_max)}" placeholder="10">
+       <label>Max elements</label><input type="text" id="c-pagemaxel" value="${escAttr(e.page_max_elements)}" placeholder="(optional) stop after N elements">` : ""}
        <label>HTTP proxy</label>
        <select id="c-proxymode">
          <option value="default" ${e.proxy_mode === "default" ? "selected" : ""}>From environment</option>
@@ -455,6 +470,10 @@ function renderConn() {
   bind("c-retrybackoff", () => { e.retry_backoff = $("c-retrybackoff").value; renderOutputs(); });
   bind("c-reportbytes", () => { e.report_bytes = $("c-reportbytes").value; renderOutputs(); });
   bind("c-contextbytes", () => { e.context_bytes = $("c-contextbytes").value; renderOutputs(); });
+  bind("c-pagenext", () => { e.page_next = $("c-pagenext").value; renderOutputs(); });
+  bind("c-pageitems", () => { e.page_items = $("c-pageitems").value; renderOutputs(); });
+  bind("c-pagemax", () => { e.page_max = $("c-pagemax").value; renderOutputs(); });
+  bind("c-pagemaxel", () => { e.page_max_elements = $("c-pagemaxel").value; renderOutputs(); });
   bind("c-proxyurl", () => { e.proxy_url = $("c-proxyurl").value; renderOutputs(); });
   bind("c-cabundle", () => { e.ca_bundle = $("c-cabundle").value; renderOutputs(); });
   bind("c-clientcert", () => { e.client_cert = $("c-clientcert").value; renderOutputs(); });
@@ -475,6 +494,8 @@ function renderConn() {
   $("c-method").onchange = () => { e.method = $("c-method").value; renderConn(); renderOutputs(); };
   $("c-authtype").onchange = () => { e.auth.type = $("c-authtype").value; renderConn(); renderOutputs(); };
   $("c-contextsource").onchange = () => { e.context_source = $("c-contextsource").value; renderOutputs(); };
+  // Structural: the body mode has a path field the header mode has not.
+  $("c-pagemode").onchange = () => { e.page_mode = $("c-pagemode").value; renderConn(); renderOutputs(); };
   $("c-proxymode").onchange = () => { e.proxy_mode = $("c-proxymode").value; renderConn(); renderOutputs(); };
   $("c-verify").onchange = () => { e.verify_cert = $("c-verify").checked; renderOutputs(); };
   $("c-redir").onchange = () => { e.follow_redirects = $("c-redir").checked; renderOutputs(); };
@@ -998,6 +1019,29 @@ function contextObj(e) {
   };
 }
 
+// The 'pagination' Dictionary, or null when the endpoint reads one page. The
+// agent needs BOTH a next-page link and the collection to append to, so a
+// half-filled form emits nothing rather than a rule the ruleset would reject.
+// max_pages is clamped to the ruleset's range (1-100); an unparseable one falls
+// back to its default rather than being emitted as NaN.
+function paginationObj(e) {
+  const items = String(e.page_items || "").trim();
+  const next = String(e.page_next || "").trim();
+  if (!e.page_mode || !items) return null;
+  if (e.page_mode === "body" && !next) return null;
+  const pages = parseInt(e.page_max, 10);
+  const o = {
+    next: e.page_mode === "link_header" ? ["link_header", null] : ["body", next],
+    items,
+    max_pages: Number.isNaN(pages) ? 10 : Math.min(Math.max(pages, 1), 100),
+  };
+  // Null rather than absent, so the CLI blob mirrors the server-side call's
+  // _endpoint_json (which always dumps the key); the rule value below omits it.
+  const elements = parseInt(e.page_max_elements, 10);
+  o.max_elements = !Number.isNaN(elements) && elements >= 1 ? elements : null;
+  return o;
+}
+
 // Parse the "accept status codes" text field into a de-duplicated int array,
 // mirroring the ruleset's List(Integer) and the agent's _accepted_statuses.
 function parseStatuses(s) {
@@ -1076,6 +1120,17 @@ function pyEndpoint(e, indent) {
   if (rep) lines.push(`${i}'show_response': {'max_bytes': ${rep.max_bytes}, 'headers': ${rep.headers ? "True" : "False"}},`);
   const ctx = contextObj(e);
   if (ctx) lines.push(`${i}'field_context': {'source': ${pyStr(ctx.source)}, 'max_bytes': ${ctx.max_bytes}},`);
+  const pg = paginationObj(e);
+  if (pg) {
+    // 'next' is a CascadingSingleChoice, i.e. a TUPLE in the rule value; the
+    // 'Link' header branch is a FixedValue, whose value is None.
+    const nx = pg.next[0] === "link_header"
+      ? "('link_header', None)"
+      : `('body', ${pyStr(pg.next[1])})`;
+    const parts = [`'next': ${nx}`, `'items': ${pyStr(pg.items)}`, `'max_pages': ${pg.max_pages}`];
+    if (pg.max_elements != null) parts.push(`'max_elements': ${pg.max_elements}`);
+    lines.push(`${i}'pagination': {${parts.join(", ")}},`);
+  }
   const px = proxyPy(e);
   if (px) lines.push(`${i}'proxy': ${px},`);
   const hls = hostLabelObjs(e).map(pyHostLabel);
@@ -1111,6 +1166,7 @@ function endpointCliObj(e) {
     retry: retryObj(e),
     show_response: reportObj(e),
     field_context: contextObj(e),
+    pagination: paginationObj(e),
     proxy: proxyCli(e),
     auth: AUTH_KIND[e.auth.type] || null,
     extractions: extractionObjs(e),

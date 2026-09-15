@@ -525,3 +525,37 @@ def test_field_context_form_has_the_expected_keys(ruleset):
 
 def test_reporting_the_field_context_is_optional(ruleset):
     assert ruleset._endpoint().elements["field_context"].required is False
+
+
+def test_pagination_form_has_the_expected_keys(ruleset):
+    form = ruleset._endpoint().elements["pagination"].parameter_form
+    assert set(form.elements) == {"next", "items", "max_pages", "max_elements"}
+    # Both halves are needed to follow anything, so both are required; the caps
+    # have a default (the page one) and are optional (the element one).
+    assert [key for key, el in form.elements.items() if el.required] == [
+        "next",
+        "items",
+        "max_pages",
+    ]
+    assert [e.name for e in form.elements["next"].parameter_form.elements] == [
+        "body",
+        "link_header",
+    ]
+    assert form.elements["next"].parameter_form.prefill.value == "body"
+    assert form.elements["max_pages"].parameter_form.prefill.value == 10
+
+
+def test_following_pagination_is_optional(ruleset):
+    assert ruleset._endpoint().elements["pagination"].required is False
+
+
+def test_the_paths_of_a_pagination_setting_name_single_places(ruleset):
+    # The collection to merge is ONE container and the next link is ONE URL, so a
+    # '[*]' in either cannot mean anything - rejected in Setup rather than
+    # becoming an endpoint that reports "no collection at ..." at runtime.
+    with pytest.raises(ValidationError, match="without a '\\[\\*\\]' wildcard"):
+        ruleset._validate_pagination({"next": ("body", "links.next"), "items": "data.items[*]"})
+    with pytest.raises(ValidationError, match="must not contain a"):
+        ruleset._validate_pagination({"next": ("body", "pages[*].next"), "items": "items"})
+    ruleset._validate_pagination({"next": ("body", "links.next"), "items": "data.items"})
+    ruleset._validate_pagination({"next": ("link_header", None), "items": "$"})

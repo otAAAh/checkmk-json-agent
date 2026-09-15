@@ -108,6 +108,26 @@ def _endpoint_parameter_form() -> Dictionary:
                     prefill=DefaultValue(ServiceState.OK),
                 ),
             ),
+            "state_pagination_stopped": DictElement(
+                required=False,
+                parameter_form=ServiceState(
+                    title=Title("State when the collection was read incompletely"),
+                    help_text=Help(
+                        "Applies when the endpoint follows the API's pagination and "
+                        "a further page existed that was not read - a page or "
+                        "element limit was reached, or the API offered a link the "
+                        "agent refuses to follow (another host, or one it had "
+                        "already fetched). Every service built from that collection "
+                        "- a count, an aggregation, a '[*]' wildcard - is then "
+                        "describing part of it. WARN by default, because a "
+                        "collection quietly missing its tail is exactly what "
+                        "following the pages was meant to prevent. Lower it to OK "
+                        "for an endpoint where reading the first N pages is "
+                        "deliberate."
+                    ),
+                    prefill=DefaultValue(ServiceState.WARN),
+                ),
+            ),
             "state_unreachable": DictElement(
                 required=False,
                 parameter_form=ServiceState(

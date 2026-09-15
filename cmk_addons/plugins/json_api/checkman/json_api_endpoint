@@ -33,6 +33,16 @@ description:
  because no request was made; a failing request is never answered from an
  expired cache, so a real outage still shows up.
 
+ When the endpoint follows the API's {pagination}, this service reports how many
+ pages were read and how many elements the merged collection ended up with. If a
+ further page existed but was not read - a page or element limit was reached, or
+ the API offered a next link the agent refuses to follow, such as one on another
+ host - the service says the collection is {incomplete} and goes {WARN} (also
+ configurable). That matters because every service built from that collection, a
+ count or an aggregation or a wildcard, is then describing only part of it. A
+ page that cannot be read at all fails the endpoint instead, so half a collection
+ is never reported as if it were whole.
+
  The endpoint can also be configured to report the {raw response} in this
  service's details: the body as it came off the wire, cut off at a configurable
  number of bytes, and optionally the response headers. It covers a rejected
@@ -46,8 +56,9 @@ description:
  check; nothing is archived.
 
  Configure the levels for the response time, the levels for the certificate's
- remaining validity, and the state for an unreachable endpoint with the check
- parameters rule {Generic JSON API endpoint} (Setup >
+ remaining validity, and the states for an unreachable endpoint and for an
+ incompletely read collection with the check parameters rule
+ {Generic JSON API endpoint} (Setup >
  Service monitoring rules > Applications). The endpoint's connection settings -
  and its optional name - live in the {Generic JSON API} special agent rule.
 

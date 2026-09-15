@@ -240,6 +240,15 @@ class EndpointStatus:
     # means a retry policy absorbed a failure, which the service reports rather
     # than hides.
     attempts: int = 1
+    # Pagination: how many pages the agent read and merged (1 = one page, which
+    # is also what an endpoint that does not follow pagination reports), how many
+    # elements the merged collection ended up with, and why following stopped
+    # while a further page still existed. The last one is the important half: it
+    # means the collection - and therefore every count, aggregation and wildcard
+    # built from it - is INCOMPLETE, which unfollowed pagination never says.
+    pages: int = 1
+    elements: int | None = None
+    pagination_stopped: str | None = None
     # The raw response, for an endpoint configured to report it: the body as it
     # came off the wire (already capped and secret-stripped by the agent), how
     # long it really was, and whether what is here is only its beginning. None
@@ -482,6 +491,9 @@ def _endpoint_statuses(raw: object) -> dict[str, EndpointStatus]:
             attempts=_optional_int(record.get("attempts")) or 1,
             from_cache=bool(record.get("from_cache")),
             cache_age=_optional_number(record.get("cache_age")),
+            pages=_optional_int(record.get("pages")) or 1,
+            elements=_optional_int(record.get("elements")),
+            pagination_stopped=_optional_str(record.get("pagination_stopped")),
             body=_optional_str(record.get("body")),
             body_truncated=bool(record.get("body_truncated")),
             body_size=_optional_int(record.get("body_size")),
@@ -1296,6 +1308,26 @@ def check_json_api_endpoint(
         yield Result(
             state=State(_coerce_state(params.get("state_retried"), 0)),
             summary=retry_note,
+        )
+
+    if endpoint.pages > 1 or endpoint.elements is not None:
+        # Only where pagination is actually configured, and then always - "1 page,
+        # 7 elements" is the confirmation that the collection is whole, which is
+        # the question this setting exists to answer.
+        elements = f", {endpoint.elements} elements" if endpoint.elements is not None else ""
+        yield Result(
+            state=State.OK,
+            notice=f"Pages read: {endpoint.pages}{elements}",
+        )
+    if endpoint.pagination_stopped:
+        # A further page existed and was not read, so every service built from
+        # this collection is describing part of it. WARN by default - the
+        # collection being incomplete is precisely what following the pages was
+        # meant to prevent - and in the SUMMARY, because "HTTP 200" alone would
+        # claim the whole answer is here.
+        yield Result(
+            state=State(_coerce_state(params.get("state_pagination_stopped"), 1)),
+            summary=f"Collection incomplete: {endpoint.pagination_stopped}",
         )
 
     if endpoint.elapsed is not None:

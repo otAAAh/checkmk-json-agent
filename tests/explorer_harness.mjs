@@ -71,6 +71,11 @@ const FIXTURE = {
   // clamp, or the rule it prints will not import.
   context_bytes: "999999",
   context_source: "element",
+  page_mode: "body",
+  page_next: "links.next",
+  page_items: "data.items",
+  page_max: "999",
+  page_max_elements: "500",
   json: "",
   parsedRoot: null,
   parseErr: "",
@@ -175,6 +180,13 @@ const FIXTURE_KEY_HEADER = {
   ...FIXTURE,
   name: "api-key-header",
   url: "https://app.example.com/v2/health",
+  // The other next-page source: the RFC 8288 'Link' header, whose form spec is a
+  // FixedValue - so the rule value is a tuple ending in None.
+  page_mode: "link_header",
+  page_next: "",
+  page_items: "$",
+  page_max: "3",
+  page_max_elements: "",
   auth: { type: "header", username: "", pwid: "pw-store-id", field: "X-API-Key" },
 };
 const FIXTURE_KEY_QUERY = {
@@ -189,8 +201,12 @@ const FIXTURE_OAUTH2 = {
   name: "oauth2",
   url: "https://app.example.com/v4/health",
   // Context reporting off (an empty byte budget), so the generators are pinned
-  // on both sides of the optional Dictionary.
+  // on both sides of the optional Dictionary. Pagination off for the same
+  // reason - and off is also what a half-filled form must produce.
   context_bytes: "",
+  page_mode: "body",
+  page_next: "links.next",
+  page_items: "",
   auth: {
     type: "oauth2", username: "", pwid: "pw-store-id", field: "",
     tokenUrl: "https://login.example.com/oauth2/v2.0/token",
@@ -233,6 +249,11 @@ src += `
     // response"; an oversized one is clamped to the ruleset's own maximum.
     reportOff: reportObj({ report_bytes: "", report_headers: true }),
     reportClamped: reportObj({ report_bytes: "999999", report_headers: true }),
+    // Following pagination needs BOTH a next-page link and the collection to
+    // append to: neither half on its own may reach the generated rule.
+    pageNoItems: paginationObj({ page_mode: "body", page_next: "links.next", page_items: "" }),
+    pageNoPath: paginationObj({ page_mode: "body", page_next: "", page_items: "items" }),
+    pageOff: paginationObj({ page_mode: "", page_next: "links.next", page_items: "items" }),
   };
   console.log(JSON.stringify(out));
 })();

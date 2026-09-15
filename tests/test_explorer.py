@@ -365,3 +365,48 @@ def test_explorer_omits_the_field_context_when_off(rule_value: dict, explorer_ou
     assert off["name"] == "oauth2"
     assert "field_context" not in off
     assert explorer_output["cli"][3]["field_context"] is None
+
+
+def test_explorer_emits_the_pagination_settings(rule_value: dict, explorer_output: dict):
+    endpoint = rule_value["endpoints"][0]
+    # 'next' is a CascadingSingleChoice, i.e. a tuple in the rule value, and the
+    # page count is clamped to the ruleset's range (1-100) or the rule would not
+    # import.
+    assert endpoint["pagination"] == {
+        "next": ("body", "links.next"),
+        "items": "data.items",
+        "max_pages": 100,
+        "max_elements": 500,
+    }
+    # The CLI blob mirrors the server-side call's _endpoint_json, where the tuple
+    # has been through JSON and the unset cap is an explicit null.
+    assert explorer_output["cli"][0]["pagination"] == {
+        "next": ["body", "links.next"],
+        "items": "data.items",
+        "max_pages": 100,
+        "max_elements": 500,
+    }
+
+
+def test_explorer_emits_the_link_header_pagination_branch(rule_value: dict, explorer_output: dict):
+    endpoint = rule_value["endpoints"][1]
+    assert endpoint["name"] == "api-key-header"
+    # A FixedValue branch: the tuple's second half is None, and no element cap
+    # was given, so that key is omitted from the rule value.
+    assert endpoint["pagination"] == {"next": ("link_header", None), "items": "$", "max_pages": 3}
+    assert explorer_output["cli"][1]["pagination"]["next"] == ["link_header", None]
+    assert explorer_output["cli"][1]["pagination"]["max_elements"] is None
+
+
+def test_explorer_omits_pagination_unless_it_can_be_followed(
+    rule_value: dict, explorer_output: dict
+):
+    # A form filled in halfway must emit nothing rather than a rule the ruleset
+    # would reject (both keys are required inside the Dictionary).
+    off = rule_value["endpoints"][3]
+    assert off["name"] == "oauth2"
+    assert "pagination" not in off
+    assert explorer_output["cli"][3]["pagination"] is None
+    assert explorer_output["pageNoItems"] is None
+    assert explorer_output["pageNoPath"] is None
+    assert explorer_output["pageOff"] is None

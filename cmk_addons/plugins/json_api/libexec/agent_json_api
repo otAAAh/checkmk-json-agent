@@ -40,10 +40,10 @@ import ssl
 import sys
 import tempfile
 import time
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from urllib.parse import quote, quote_plus, urlsplit, urlunsplit
+from urllib.parse import quote, quote_plus, urljoin, urlsplit, urlunsplit
 
 import requests
 from cmk.utils import password_store as _legacy_pwstore
@@ -672,6 +672,10 @@ def _cache_key(endpoint: dict, secret: str | None = None) -> str:
             endpoint.get("client_cert"),
             endpoint.get("accept_status"),
             endpoint.get("proxy"),
+            # The cached body is the MERGED one, so how the pages were followed
+            # is part of what it is: a changed collection path or page limit must
+            # not be answered from a cache built under the old settings.
+            endpoint.get("pagination"),
         ],
         sort_keys=True,
         default=str,
@@ -999,6 +1003,280 @@ def _retryable_status(status: int) -> bool:
     return status == 429 or 500 <= status < 600
 
 
+# A paginated collection arrives one page at a time, and the agent asks for one
+# page - so a '[*]' expansion or an aggregation over it silently describes the
+# FIRST page and nothing else. 'count' over a queue that pages at 25 reports 25
+# however long the queue is: an answer that is wrong without saying so, which is
+# worse than an error. Following the pages is opt-in per endpoint because it
+# costs requests, but it is the only way that answer becomes true.
+#
+# However the rule is written, the agent never makes more than this many
+# requests for one endpoint. A check that walks a thousand pages is an outage of
+# its own - Checkmk kills a special agent that overruns - and a hand-written
+# rule (or a blob built by something other than the ruleset) is not bound by the
+# ruleset's own range.
+_MAX_PAGES = 100
+_DEFAULT_MAX_PAGES = 10
+
+
+def _pagination_spec(endpoint: dict) -> dict | None:
+    """The endpoint's 'follow pagination' settings, or None when off."""
+    spec = endpoint.get("pagination")
+    return spec if isinstance(spec, dict) else None
+
+
+def _next_source(spec: dict) -> tuple[str, str] | None:
+    """Where the next page's URL comes from: ``("body", <path>)`` or ``("link_header", "")``.
+
+    The CascadingSingleChoice value as the rule stores it (a list once it has
+    been through JSON). Anything else - a missing choice, an empty body path -
+    means pagination cannot be followed at all, which is reported as None rather
+    than guessed at.
+    """
+    raw = spec.get("next")
+    if not isinstance(raw, (list, tuple)) or len(raw) != 2:
+        return None
+    mode, value = raw
+    if mode == "body" and isinstance(value, str) and value.strip():
+        return "body", _strip_root(value)
+    if mode == "link_header":
+        return "link_header", ""
+    return None
+
+
+def _items_path(spec: dict) -> str | None:
+    """The path to the collection each page carries, '' for the response root.
+
+    '$' (or '$.') is how a response that IS the array says so; ``_strip_root``
+    turns it into the empty path, which ``_resolve_path`` resolves to the whole
+    document.
+    """
+    raw = spec.get("items")
+    return _strip_root(raw) if isinstance(raw, str) else None
+
+
+def _pagination_limits(spec: dict) -> tuple[int, int | None]:
+    """``(max pages, max elements)``, the page count clamped to ``_MAX_PAGES``."""
+    raw = spec.get("max_pages")
+    pages = (
+        int(raw)
+        if isinstance(raw, (int, float)) and not isinstance(raw, bool) and raw >= 1
+        else _DEFAULT_MAX_PAGES
+    )
+    raw = spec.get("max_elements")
+    elements = (
+        int(raw)
+        if isinstance(raw, (int, float)) and not isinstance(raw, bool) and raw >= 1
+        else None
+    )
+    return min(pages, _MAX_PAGES), elements
+
+
+def _container_len(container: object) -> int:
+    """How many elements the merged collection holds so far."""
+    return len(container) if isinstance(container, (list, dict)) else 0
+
+
+def _next_candidate(source: tuple[str, str], document: object, headers: object) -> str | None:
+    """The next page's URL as this page states it, or None for "there is none".
+
+    'There is none' is how pagination ENDS, so an absent field, a JSON ``null``
+    and an empty string all mean the same thing: the last page has been read.
+    """
+    mode, path = source
+    if mode == "body":
+        found, value = _resolve_path(document, path)
+        if found and isinstance(value, str) and value.strip():
+            return value.strip()
+        return None
+    # RFC 8288: Link: <https://api/jobs?page=2>; rel="next", <...>; rel="last".
+    # Parsed with requests' own parser rather than a regex of ours - it is the
+    # same code that fills response.links, and the header is fiddlier than it
+    # looks (several links per header, quoted parameters, relative URLs).
+    found, header = _resolve_header(headers, f"{_HEADER_PREFIX}Link")
+    if not found or not isinstance(header, str):
+        return None
+    for link in requests.utils.parse_header_links(header):
+        if link.get("rel") == "next" and (url := link.get("url", "").strip()):
+            return url
+    return None
+
+
+def _next_target(
+    candidate: str, current_url: str, origin: str, seen: set[str]
+) -> tuple[str | None, str | None]:
+    """``(url to fetch, reason not to)`` for a next-page link.
+
+    Relative links are the norm ('/api/v1/jobs?page=2'), so the candidate is
+    resolved against the page it came from.
+
+    Two links are refused rather than followed. One on ANOTHER HOST would make
+    the response body decide where the Checkmk server sends an authenticated
+    request - the same SSRF shape the 'follow redirects' switch exists to
+    close - and the endpoint's credentials travel with every page. One already
+    fetched means the API is pointing at itself, which would otherwise spend the
+    whole page budget re-reading one page. Both stop pagination with a reason the
+    endpoint's own service reports; neither fails the endpoint, so the data that
+    WAS read still monitors the API.
+    """
+    url = urljoin(current_url, candidate)
+    parsed = urlsplit(url)
+    if parsed.scheme.lower() not in ("http", "https") or not parsed.netloc:
+        return None, f"the next page link is not an http(s) URL ({candidate})"
+    if parsed.netloc.lower() != origin:
+        return None, f"the next page link points to another host ({parsed.netloc})"
+    if url in seen:
+        return None, "the API repeated a page link (pagination loop)"
+    return url, None
+
+
+def _merge_page(container: object, addition: object) -> str | None:
+    """Append one page's collection to the first page's, in place; error if any.
+
+    In place because ``container`` is the object inside the first page's document
+    that every extraction will read: extending it is what makes the whole
+    collection visible to a '[*]' wildcard and an aggregation, while the rest of
+    the document (a 'total', a 'generated_at') stays the first page's.
+
+    A JSON object pages by key rather than by position, so the two container
+    kinds the rest of the agent already treats alike are both merged - and a page
+    whose collection is neither, or is not the same kind as the first page's, is
+    an error: silently skipping it would under-count exactly the way unfollowed
+    pagination does.
+    """
+    if isinstance(container, list) and isinstance(addition, list):
+        container.extend(addition)
+        return None
+    if isinstance(container, dict) and isinstance(addition, dict):
+        container.update(addition)
+        return None
+    return (
+        f"its collection is a {type(addition).__name__}, "
+        f"but the first page's is a {type(container).__name__}"
+    )
+
+
+def _follow_pagination(
+    session: requests.Session,
+    method: str,
+    request_kwargs: dict,
+    accepted: set[int],
+    endpoint: dict,
+    spec: dict,
+    document: object,
+    meta: dict,
+    headers: object,
+    read_bytes: int,
+    scrub: Callable[[str], str],
+    debug: bool,
+) -> tuple[str | None, bool]:
+    """Read the remaining pages and merge them into ``document``.
+
+    Returns ``(error, retryable)`` like ``_attempt`` does, and records what it
+    took in ``meta``: how many pages were read, how large the merged collection
+    is, and - where a next page existed but was not followed - why not.
+
+    A page that cannot be read fails the whole endpoint rather than being
+    dropped. Half a collection looks exactly like a shrinking one: 'unhealthy
+    nodes: 0' because page 2 timed out is the failure mode this whole feature
+    exists to remove, so it is reported as an error the endpoint's services can
+    show instead.
+
+    Every page reuses the first page's session, headers, authentication and
+    timeout - the same request, at a different URL - so a cursor that only the
+    API understands needs no configuration here.
+    """
+    source = _next_source(spec)
+    items = _items_path(spec)
+    if source is None or items is None:
+        # The rule asked for pagination without saying where the next page or the
+        # collection is. Reported rather than ignored: the services would
+        # otherwise describe one page while the rule claims to follow them all.
+        return "Pagination is configured without a next-page link or a collection path", False
+    found, container = _resolve_path(document, items)
+    if not found:
+        return f"Pagination: the response has no collection at '{items or '$'}'", False
+    if not isinstance(container, (list, dict)):
+        return (
+            f"Pagination: '{items or '$'}' is a {type(container).__name__}, "
+            "not a collection that pages can be appended to"
+        ), False
+
+    max_pages, max_elements = _pagination_limits(spec)
+    url = endpoint.get("url", "")
+    origin = urlsplit(url).netloc.lower()
+    seen = {url}
+    current_url = url
+    page_document = document
+    page_headers = headers
+    pages = 1
+    total_bytes = read_bytes
+    stopped: str | None = None
+
+    while (candidate := _next_candidate(source, page_document, page_headers)) is not None:
+        # The caps are only consulted once a further page actually exists, so an
+        # API with exactly as many pages as the limit is read whole and reported
+        # as complete - a truncation note has to mean something was left behind.
+        if pages >= max_pages:
+            stopped = f"the page limit ({max_pages}) was reached"
+            break
+        if max_elements is not None and _container_len(container) >= max_elements:
+            stopped = f"the element limit ({max_elements}) was reached"
+            break
+        next_url, reason = _next_target(candidate, current_url, origin, seen)
+        if next_url is None:
+            stopped = reason
+            break
+        page = pages + 1
+        _debug(debug, f"  page {page}: {method} {scrub(next_url)}")
+        try:
+            response = session.request(method, next_url, **request_kwargs)
+            with response:
+                status = response.status_code
+                if not (200 <= status < 300 or status in accepted):
+                    reason_phrase = getattr(response, "reason", "") or ""
+                    return (
+                        f"Page {page} failed: HTTP {status}"
+                        f"{f' {reason_phrase}' if reason_phrase else ''}",
+                        _retryable_status(status),
+                    )
+                # The 50 MiB ceiling is a budget for the whole endpoint, not per
+                # page: a hundred pages of half a megabyte are just as able to
+                # exhaust the monitoring host as one huge body.
+                raw = _read_capped(response, _MAX_RESPONSE_BYTES - total_bytes)
+                page_headers = dict(response.headers)
+        except _ResponseTooLarge:
+            return (
+                f"Pagination exceeds the {_MAX_RESPONSE_BYTES}-byte limit at page {page}",
+                False,
+            )
+        except requests.exceptions.RequestException as exc:
+            return f"Page {page} failed: Request failed: {scrub(str(exc))}", True
+        try:
+            page_document = json.loads(raw)
+        except ValueError as exc:
+            return f"Page {page} is not valid JSON: {exc}", False
+        found, addition = _resolve_path(page_document, items)
+        if not found:
+            return f"Page {page} has no collection at '{items or '$'}'", False
+        if (mismatch := _merge_page(container, addition)) is not None:
+            return f"Page {page} cannot be merged: {mismatch}", False
+        total_bytes += len(raw)
+        pages = page
+        seen.add(next_url)
+        current_url = next_url
+
+    if stopped is not None:
+        _debug(debug, f"  pagination stopped after {pages} pages: {stopped}")
+    meta["pages"] = pages
+    meta["elements"] = _container_len(container)
+    meta["pagination_stopped"] = stopped
+    # What the endpoint really read, across every page: the response size is a
+    # cost the operator is watching, and one page of it is not the cost.
+    meta["size"] = total_bytes
+    return None, False
+
+
 def _fetch(
     endpoint: dict, secret: str | None, debug: bool = False
 ) -> tuple[object | None, str | None, dict]:
@@ -1144,19 +1422,21 @@ def _attempt(
             _debug(debug, f"  query parameter {next(iter(params))}: {_REDACTED}")
         if body is not None:
             _debug(debug, f"  body: {body}")
+    # Collected rather than passed inline: a paginated endpoint sends the same
+    # request again at the next page's URL, and every setting - authentication,
+    # headers, TLS, timeout - has to be the first page's.
+    request_kwargs: dict[str, object] = {
+        "params": params,
+        "data": body,
+        "headers": headers,
+        "verify": _verify_arg(endpoint),
+        "cert": _client_cert(endpoint),
+        "allow_redirects": allow_redirects,
+        "timeout": timeout if timeout is not None else 30.0,
+        "stream": True,  # so _read_capped can bound the buffered body
+    }
     try:
-        response = session.request(
-            method,
-            endpoint["url"],
-            params=params,
-            data=body,
-            headers=headers,
-            verify=_verify_arg(endpoint),
-            cert=_client_cert(endpoint),
-            allow_redirects=allow_redirects,
-            timeout=timeout if timeout is not None else 30.0,
-            stream=True,  # so _read_capped can bound the buffered body
-        )
+        response = session.request(method, endpoint["url"], **request_kwargs)
         with response:
             status = response.status_code
             meta["status"] = status
@@ -1234,11 +1514,36 @@ def _attempt(
         # not a blip.
         _timed()
         return None, f"Response is not valid JSON: {exc}", False
+    cacheable = raw
+    if (pagination := _pagination_spec(endpoint)) is not None:
+        error, retryable = _follow_pagination(
+            session,
+            method,
+            request_kwargs,
+            accepted,
+            endpoint,
+            pagination,
+            document,
+            meta,
+            dict(response.headers),
+            len(raw),
+            scrub,
+            debug,
+        )
+        if error is not None:
+            _timed()
+            return None, error, retryable
+        if meta.get("pages", 1) > 1:
+            # The MERGED document is what the extractions saw, so it is what a
+            # cache hit has to replay - caching the first page would serve a
+            # collection that shrinks for the length of the TTL. Re-serialized
+            # rather than concatenated: the pages were merged as JSON.
+            cacheable = json.dumps(document).encode("utf-8")
     timed = _timed()
     if ttl is not None:
         # Only a response we could actually parse is worth caching; an error or a
         # non-JSON body would just be replayed for the whole TTL.
-        _cache_write(endpoint, raw, timed, secret)
+        _cache_write(endpoint, cacheable, timed, secret)
     return document, None, False
 
 
@@ -2105,6 +2410,13 @@ def _endpoint_record(
         # How many attempts the request took (1 = no retry was needed). Reported
         # so a retry policy cannot silently hide an API that is degrading.
         "attempts": meta.get("attempts", 1),
+        # Pagination: how many pages were read, how many elements the merged
+        # collection holds, and - when a further page existed but was not
+        # followed - why not. 1 page and no reason is what an endpoint that does
+        # not paginate reports, which is also the default.
+        "pages": meta.get("pages", 1),
+        "elements": meta.get("elements"),
+        "pagination_stopped": meta.get("pagination_stopped"),
         # The raw response, for the endpoints that opted in: the body as it came
         # off the wire (capped, secret-stripped) and the response headers
         # (credential-bearing ones masked). None/absent means "not requested",
