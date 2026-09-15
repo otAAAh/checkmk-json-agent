@@ -86,6 +86,16 @@ Targets **Checkmk 2.4+** and the current stable plugin APIs
   aggregation) to the elements whose sub-field matches — e.g. one service per
   node whose `status` is *not* `ok`, or count only the pods that aren't
   `Running` (operators: equals / not-equals / regex / not-regex)
+- **Follow the API's pagination**: a collection answered one page at a time
+  otherwise leaves every count, aggregation and `[*]` wildcard describing the
+  *first page* — `count` over a queue that pages at 25 reports 25 however long
+  the queue is, and nothing in any service says so. Opt in per endpoint, say
+  where the next page's URL is (a field in the body, or the RFC 8288 `Link`
+  header) and which collection to merge, and the pages are appended into one
+  document that the wildcards, aggregations, filters and host labels all see
+  whole. A link to another host is refused, the pages read are reported, and
+  where a cap left a page behind the endpoint's own service says the collection
+  is **incomplete** and goes WARN
 - **Counters → per-second rate**: mark a field as a counter and the check
   monitors its change per second instead of the ever-growing total
   (`requests_total`, `bytes_sent`), with a rate metric of its own
@@ -189,6 +199,7 @@ Each endpoint has:
 | **Follow HTTP redirects** | On by default; turn off to harden against redirect-based SSRF |
 | **Re-read at most every (seconds)** | Optional cache TTL. Reuses the last response for this endpoint while it is younger than this, instead of requesting it again — see [Caching responses](#caching-responses). Unset (the default) always fetches fresh |
 | **Retry a failed request** | Optional: a number of retries (1–5) and a backoff in seconds, doubled for each further attempt and capped at 30 s in total. Only a connection error, a timeout, an HTTP 429 or a 5xx is retried — a 4xx, a body that is not JSON and an oversized response answer the same however often they are asked. A cached response makes no request, so nothing is retried. Off by default |
+| **Follow pagination** | Optional; read a collection that the API answers one page at a time and merge the pages, instead of describing only the first. Needs where the next page's URL is (a JSON path in the body, or the `Link` header's `rel="next"`) and the path to the collection each page carries; capped by a page count (1–100, default 10) and optionally an element count. Off by default — see [Following pagination](#following-pagination) |
 | **Request timeout (seconds)** | Optional; defaults to 30 |
 | **Additional accepted HTTP status codes** | Optional; by default only 2xx responses are read (any other status → UNKNOWN). List extra codes (e.g. `503`) to parse and extract their body too. 2xx is always accepted |
 | **Report the raw response** | Optional; put the response itself into the *Details* of this endpoint's own `JSON API <name>` service — the body (capped at a byte budget you set, 2048 by default) and, unless you turn them off, the response headers. Includes the body of a *rejected* response. Credentials are stripped first. Off by default — see [Reporting the raw response](#reporting-the-raw-response) |
@@ -451,6 +462,85 @@ one entry and serve each other's data for the whole TTL. The credential itself
 reaches neither the agent's endpoint blob nor the disk. Stale files from edited
 rules are pruned automatically.
 
+### Following pagination
+
+Most REST APIs answer a collection **one page at a time**. The agent makes one
+request per endpoint, so without this setting every service built from such a
+collection describes the *first page*:
+
+```text
+JSON Queued jobs    OK - Value: 25          (the queue is 812 long)
+JSON Node web-1 ... JSON Node web-25        (there are 300 nodes)
+```
+
+Nothing in either service hints at it. That is worse than an error: the answer
+is not missing, it is **wrong**, and it stays wrong while the graph looks flat
+and the service stays green.
+
+**Follow pagination** reads the rest. It needs two things, because APIs disagree
+only about where they put them:
+
+| Setting | What it is |
+|---|---|
+| **Where the next page's URL comes from** | Either a **field in the body** — `links.next`, `next`, `meta.next_page_url` — or the **`Link` response header**'s `rel="next"`, the RFC 8288 convention the GitHub / GitLab / Jenkins style APIs use. A page carrying no next link (absent field, JSON `null`, empty string, no header) is the last one: that is how pagination ends |
+| **The collection to merge** | The array (or object) each page carries a slice of — `items`, `data.jobs`, or `$` where the response *is* the array |
+
+Each page's collection is appended to the first page's, and **the rest of the
+document stays as the first page sent it** — so a `total` or a `generated_at`
+next to the collection still resolves and every path in the rule is unchanged.
+A JSON object pages by key rather than by position, so both container kinds
+merge, exactly as a `[*]` wildcard already treats them alike.
+
+Every page is the first page's request at a different URL — same session,
+method, headers, authentication and timeout — so a cursor only the API
+understands needs no configuration here. A relative link (`/v1/jobs?page=2`) is
+resolved against the page it came from.
+
+#### The caps, and why they are not optional
+
+Each page is a request made *while the check runs*, and Checkmk kills a special
+agent that overruns. So **Read at most this many pages** is required (1–100,
+default 10; the agent clamps to 100 whatever a hand-written rule says), and an
+optional element cap can stop earlier — checked between pages, so a page is
+never cut in half and the collection may end slightly above it. For a
+collection that does not change every check interval, combine this with a
+[cache TTL](#caching-responses): the merged document is what gets cached.
+
+#### Nothing is hidden
+
+The endpoint's own `JSON API <name>` service reports what it took:
+
+```text
+HTTP 200
+Pages read: 3, 137 elements
+```
+
+and where a further page existed but was **not** read, it says so in the
+summary and goes WARN — configurable with *State when the collection was read
+incompletely*, and worth lowering to OK only where reading the first N pages is
+deliberate:
+
+```text
+Collection incomplete: the page limit (10) was reached
+```
+
+Three things stop pagination that way rather than failing the endpoint, so what
+*was* read still monitors the API: a cap, a next link pointing at **another
+host**, and a link **already fetched**. The host restriction is deliberate — the
+response body must not decide where the Checkmk server sends an authenticated
+request, which is the same SSRF shape the *Follow HTTP redirects* switch closes
+— and a repeated link means the API is pointing at itself, which would
+otherwise spend the whole page budget re-reading one page.
+
+A page that cannot be read at all (a 5xx, a timeout, a body that is not JSON, a
+page missing the collection) **fails the endpoint** instead: half a collection
+looks exactly like a shrinking one, and a retry policy, if configured, re-reads
+the endpoint from page one.
+
+> **The in-site wizard's preview shows one page.** It resolves against the
+> single response it fetched, so with pagination on, its element counts describe
+> the first page — the review step says so. The site itself merges the pages.
+
 ### One service for several fields
 
 Not every API deserves a service per field. A small health endpoint —
@@ -548,6 +638,10 @@ you leave untouched keep the agent-rule defaults.
 - **Endpoint request failed / not JSON** → that endpoint's services go UNKNOWN
   with the error, and its own `JSON API <name>` service goes CRIT (configurable);
   the other endpoints in the rule keep reporting normally
+- **Pagination left a page behind** → the field services report the part of the
+  collection that was read, and the endpoint's own service goes WARN
+  (configurable) saying the collection is incomplete; a page that could not be
+  read at all fails the endpoint as above
 
 Values are rendered as they appear in JSON, so a regex matches
 `true` / `false` / `null` — not Python's `True` / `False` / `None`.
@@ -761,6 +855,30 @@ works on an object too (e.g. `components` → number of components). Add a
 **condition** to aggregate only part of the collection, e.g. *count only the
 nodes whose `status` does not equal `ok`*.
 
+### Reading a paginated collection
+
+`GET /api/v1/jobs` answers 25 jobs at a time and says where the next page is:
+
+```json
+{"items": [{"id": 1, "state": "running"}, "..."],
+ "total": 812,
+ "links": {"next": "https://app.example.com/api/v1/jobs?page=2"}}
+```
+
+Set **Follow pagination** on the endpoint — next page URL from the body at
+`links.next`, collection `items`, at most 40 pages — and then:
+
+| Service name | JSON path | Aggregate / condition | Reports |
+|---|---|---|---|
+| `Jobs` | `items` | number of elements | `812`, not `25` |
+| `Failed jobs` | `items` | number of elements, condition `state` equals `failed` | every failed job in the queue, not just page one's |
+
+Without it, both services would report a number bounded by the page size and
+nothing would say so. Note that `total` in the body is a *fact the API already
+computed*: where an API offers one, a plain field on `total` is cheaper than
+walking the pages — pagination is for the cases where the number you need is
+not in the document (a condition, a sum, one service per element).
+
 ### Monitoring a counter's rate
 
 Many APIs only expose ever-growing totals, where the interesting number is the
@@ -897,8 +1015,9 @@ agent_json_api --endpoint '{"url": "https://app/health", "extractions": [...]}' 
 Diagnostics go to **stderr** (the parsed section still goes to stdout, so the
 run stays valid), and show, per endpoint: the request method/URL, the request
 headers (the `Authorization` value is masked), the HTTP status and body size, a
-preview of the raw response, and how each configured path resolved
-(found/​not-found, one line per resulting service). This makes a wrong path or an
+preview of the raw response, one line per page where the endpoint follows
+pagination (with the reason it stopped, if it did), and how each configured path
+resolved (found/​not-found, one line per resulting service). This makes a wrong path or an
 unexpected response shape obvious without reproducing the request elsewhere.
 
 ## Security notes
@@ -1039,6 +1158,9 @@ cmk_addons/plugins/json_api/
   validated at config time (the JSON isn't known then)
 - A per-second rate needs two checks before it can be computed, so a counter
   field is uninformative on its first check (and after the counter resets)
+- Pagination needs a next-page **link** (in the body or the `Link` header): an
+  API that only accepts `?page=N` until a page comes back empty, or one that
+  pages by an `offset` the client has to compute, is not followed
 - The in-site wizard's review step does not preview an aggregated value, a rate
   or an age: which aggregation was picked is a hashed ident on the form's wire
   and a rate needs two checks, so it says what the site will compute instead of
