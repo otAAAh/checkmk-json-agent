@@ -26,6 +26,16 @@ included. One rule. Any API. Done.
   of elements** (queue length, unhealthy nodes) or the **sum / average / min /
   max** of the values (`queues[*].depth`). The result is a number, so units,
   WARN/CRIT levels and a metric all apply.
+- 📚 **Follow the API's pagination** — a collection answered one page at a time
+  otherwise leaves every count, aggregation and `[*]` service describing the
+  **first page**, with nothing saying so: `count` over a queue that pages at 25
+  reports 25 however long the queue is. Say where the next page's URL is (a
+  field in the body, or the RFC 8288 `Link` header) and which collection to
+  merge, and the pages become one document that the wildcards, aggregations and
+  labels see whole. Capped in pages and elements, a link to another host is
+  refused, and where a cap left a page behind the endpoint's own service says
+  the collection is **incomplete** instead of reporting part of it as if it were
+  all of it.
 - 🔍 **Filter elements by a condition** — restrict a `[*]` wildcard or an
   aggregation to the elements that match: one service per node whose `status` is
   *not* `ok`, or a count of only the pods that aren't `Running`
@@ -59,6 +69,13 @@ included. One rule. Any API. Done.
   `tenant disabled` sends you to the right place. Capped at a byte budget you
   set, with `Set-Cookie`, authorization headers and the endpoint's own secret
   masked first. Off by default.
+- 🔔 **…on the service that actually alerts** — the raw response above sits on
+  the endpoint's own service, which stays OK and notifies nobody. Opt in per
+  endpoint and the **field** services carry the JSON too — by default just the
+  element the value was read from, with its sibling fields — so a CRIT
+  notification's `$LONGSERVICEOUTPUT$` shows what the API said, including when
+  the path did not resolve at all. It matters most for the person on call who
+  cannot reach the endpoint themselves: wrong network, no credentials.
 - 🐢 **Rate-limited API? Cache it** — give an endpoint a TTL and the agent reuses
   its last response instead of asking again, so monitoring cannot exhaust a
   request quota. It never caches an error and never answers a failed request from
@@ -92,6 +109,12 @@ included. One rule. Any API. Done.
   filters can key off what the API says about itself. The hosts a `[*]` rule
   creates can carry labels from **their own element**, so 50 generated hosts are
   addressable by region or role instead of being an anonymous crowd.
+- 🧭 **Or let the host classify itself** — a label can be a *conclusion* rather
+  than a copied field: "if any element of `services[*]` has a `name` matching
+  `^MyApp`, put `json_api/MyApp: yes` on the host". A condition picks the
+  elements, the value is typed in the rule, and the whole collection collapses
+  to **one** label — so thresholds, contact groups, folder rules and views
+  attach themselves from what the API reports the host is actually running.
 - 🧮 **Transform the numeric value** — apply a small arithmetic expression like
   `value / 1024 / 1024` (bytes→MiB) or `(value - 32) * 5 / 9` (°F→°C) before
   levels and the metric; safely evaluated, no `eval`. A **second field** can join
