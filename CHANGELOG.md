@@ -3,6 +3,21 @@
 All notable changes to this project, one section per released version.
 Generated from the git history by `scripts/gen_changelog.py`.
 
+## [0.18.0] - 2026-09-15
+
+### Features
+
+- Follow the API's pagination and merge the pages ([#194](https://github.com/otAAAh/checkmk-json-agent/pull/194)) ([`8060a49`](https://github.com/otAAAh/checkmk-json-agent/commit/8060a49))
+- Report the JSON context in the field services ([#192](https://github.com/otAAAh/checkmk-json-agent/pull/192)) ([`f99c6c8`](https://github.com/otAAAh/checkmk-json-agent/commit/f99c6c8))
+- Host labels from a filtered collection ([#191](https://github.com/otAAAh/checkmk-json-agent/pull/191)) ([`0aedd3c`](https://github.com/otAAAh/checkmk-json-agent/commit/0aedd3c))
+
+### Other
+
+- Prepare 0.18.0 - announcement and refreshed Exchange listings ([#196](https://github.com/otAAAh/checkmk-json-agent/pull/196)) ([`691bfc3`](https://github.com/otAAAh/checkmk-json-agent/commit/691bfc3))
+- Document following the API's pagination ([#195](https://github.com/otAAAh/checkmk-json-agent/pull/195)) ([`2eadb28`](https://github.com/otAAAh/checkmk-json-agent/commit/2eadb28))
+- Deps: Bump ruff from 0.16.6 to 0.16.7 ([#187](https://github.com/otAAAh/checkmk-json-agent/pull/187)) ([`b7068c8`](https://github.com/otAAAh/checkmk-json-agent/commit/b7068c8))
+- Bump the actions group with 2 updates ([#188](https://github.com/otAAAh/checkmk-json-agent/pull/188)) ([`4cb1d1c`](https://github.com/otAAAh/checkmk-json-agent/commit/4cb1d1c))
+
 ## [0.17.0] - 2026-09-13
 
 ### Features
