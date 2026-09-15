@@ -1975,3 +1975,89 @@ def test_each_line_of_a_shared_service_brings_its_own_context(check):
     details = _details(list(check.check_json_api("Health", {}, section)))
     assert details.index("[Status]") < details.index('{"a": 1}') < details.index("[Component]")
     assert '{"b": 2}' in details
+
+
+# --- Pagination on the endpoint's own service ---------------------------------
+
+
+def test_endpoint_reports_how_many_pages_were_read(check):
+    section = _section(check, [], endpoints=[_endpoint_record(pages=3, elements=137)])
+    details = _details(check.check_json_api_endpoint("frontend", {}, section))
+    assert "Pages read: 3, 137 elements" in details
+
+
+def test_endpoint_reports_a_single_page_collection_as_whole(check):
+    # "1 page, 7 elements" is the confirmation the setting exists to give: the
+    # collection every count and wildcard was built from is complete.
+    section = _section(check, [], endpoints=[_endpoint_record(pages=1, elements=7)])
+    results = list(check.check_json_api_endpoint("frontend", {}, section))
+    assert "Pages read: 1, 7 elements" in _details(results)
+    assert all(r.state == State.OK for r in results if isinstance(r, Result))
+
+
+def test_endpoint_without_pagination_says_nothing_about_pages(check):
+    section = _section(check, [], endpoints=[_endpoint_record()])
+    assert "Pages read" not in _details(check.check_json_api_endpoint("frontend", {}, section))
+
+
+def test_endpoint_warns_when_the_collection_was_read_incompletely(check):
+    section = _section(
+        check,
+        [],
+        endpoints=[
+            _endpoint_record(
+                pages=10, elements=250, pagination_stopped="the page limit (10) was reached"
+            )
+        ],
+    )
+    results = list(check.check_json_api_endpoint("frontend", {}, section))
+    (incomplete,) = [
+        r for r in results if isinstance(r, Result) and (r.summary or "").startswith("Collection")
+    ]
+    # In the SUMMARY, not a notice: "HTTP 200" alone would claim the whole answer
+    # is here, and every service built from this collection describes part of it.
+    assert incomplete.state == State.WARN
+    assert incomplete.summary == "Collection incomplete: the page limit (10) was reached"
+
+
+def test_the_incomplete_collection_state_is_configurable(check):
+    section = _section(
+        check,
+        [],
+        endpoints=[_endpoint_record(pagination_stopped="the element limit (100) was reached")],
+    )
+    results = list(
+        check.check_json_api_endpoint("frontend", {"state_pagination_stopped": 0}, section)
+    )
+    (incomplete,) = [
+        r for r in results if isinstance(r, Result) and (r.summary or "").startswith("Collection")
+    ]
+    # Reading the first N pages can be deliberate, so it can be lowered to OK.
+    assert incomplete.state == State.OK
+
+
+def test_pagination_facts_survive_the_section_parse(check):
+    section = _section(
+        check,
+        [],
+        endpoints=[
+            {
+                "name": "api",
+                "url": "https://x/h",
+                "ok": True,
+                "pages": 4,
+                "elements": 91,
+                "pagination_stopped": "the API repeated a page link (pagination loop)",
+            }
+        ],
+    )
+    endpoint = section.endpoints["api"]
+    assert (endpoint.pages, endpoint.elements) == (4, 91)
+    assert "pagination loop" in endpoint.pagination_stopped
+
+
+def test_a_section_from_an_older_agent_reports_one_page(check):
+    # Nothing about pagination in the record: one page, complete, silent.
+    section = _section(check, [], endpoints=[{"name": "api", "url": "https://x/h", "ok": True}])
+    endpoint = section.endpoints["api"]
+    assert (endpoint.pages, endpoint.elements, endpoint.pagination_stopped) == (1, None, None)

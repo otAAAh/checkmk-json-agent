@@ -30,6 +30,14 @@ description:
  matches or does not match a regular expression) become services or are
  aggregated.
 
+ Where the endpoint follows the API's {pagination}, all of this sees the merged
+ collection - every page's elements, not just the first page's - so a count over
+ a queue that pages at 25 reports the queue rather than the page size. If a
+ further page existed but was not read, the collection is incomplete and the
+ {endpoint's own} service says so; these services report the part that was read,
+ with nothing in them to suggest it was cut short, which is why that notice
+ belongs there and is a {WARN} by default.
+
  A {[*]} field may instead create one Checkmk {host} per element rather than one
  more service on the polling host: name a field within each element that holds
  the host name, and every element becomes a piggyback host carrying this service

@@ -1078,3 +1078,74 @@ def test_field_context_absent_by_default(ssc):
     )
     (endpoint,) = _endpoints(ssc, args)
     assert endpoint["field_context"] is None
+
+
+def test_pagination_passed_through(ssc):
+    """The endpoint blob carries where the pages are; the agent owns the policy."""
+    args = _command_args(
+        ssc,
+        {
+            "endpoints": [
+                {
+                    "url": "http://x",
+                    "verify_cert": True,
+                    "extractions": [{"path": "items", "service": "Queue"}],
+                    "pagination": {
+                        "next": ("body", "links.next"),
+                        "items": "items",
+                        "max_pages": 5,
+                        "max_elements": 500,
+                    },
+                }
+            ]
+        },
+    )
+    (endpoint,) = _endpoints(ssc, args)
+    # A tuple becomes a list on the way through JSON, which is what the agent
+    # reads it as.
+    assert endpoint["pagination"] == {
+        "next": ["body", "links.next"],
+        "items": "items",
+        "max_pages": 5,
+        "max_elements": 500,
+    }
+
+
+def test_pagination_link_header_and_defaults(ssc):
+    args = _command_args(
+        ssc,
+        {
+            "endpoints": [
+                {
+                    "url": "http://x",
+                    "verify_cert": True,
+                    "extractions": [{"path": "items", "service": "Queue"}],
+                    "pagination": {"next": ("link_header", None), "items": "$"},
+                }
+            ]
+        },
+    )
+    (endpoint,) = _endpoints(ssc, args)
+    assert endpoint["pagination"] == {
+        "next": ["link_header", None],
+        "items": "$",
+        "max_pages": 10,
+        "max_elements": None,
+    }
+
+
+def test_pagination_absent_by_default(ssc):
+    args = _command_args(
+        ssc,
+        {
+            "endpoints": [
+                {
+                    "url": "http://x",
+                    "verify_cert": True,
+                    "extractions": [{"path": "status", "service": "S"}],
+                }
+            ]
+        },
+    )
+    (endpoint,) = _endpoints(ssc, args)
+    assert endpoint["pagination"] is None

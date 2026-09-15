@@ -167,6 +167,34 @@ def _validate_query_parameter(value: str) -> None:
         )
 
 
+def _validate_pagination(value: object) -> None:
+    """The two paths of a pagination setting must name single places.
+
+    A '[*]' wildcard expands to many values; the collection to merge is ONE
+    container and the next-page link is ONE URL, so a wildcard in either is a
+    configuration that cannot mean anything - rejected here rather than becoming
+    an endpoint that reports "no collection at ..." at runtime.
+    """
+    if not isinstance(value, dict):
+        return
+    items = value.get("items")
+    if isinstance(items, str) and "[*]" in items:
+        raise validators.ValidationError(
+            Message(
+                "The collection to merge must name the collection itself, "
+                "without a '[*]' wildcard - e.g. 'data.items' rather than "
+                "'data.items[*]'."
+            )
+        )
+    nxt = value.get("next")
+    if not (isinstance(nxt, (tuple, list)) and len(nxt) == 2 and nxt[0] == "body"):
+        return
+    if isinstance(nxt[1], str) and "[*]" in nxt[1]:
+        raise validators.ValidationError(
+            Message("The path to the next page's URL must not contain a '[*]' wildcard.")
+        )
+
+
 def _validate_endpoint(value: object) -> None:
     if not isinstance(value, dict):
         return
@@ -1576,6 +1604,154 @@ def _endpoint() -> Dictionary:
                                 custom_validate=(
                                     validators.NumberInRange(min_value=1, max_value=65536),
                                 ),
+                            ),
+                        ),
+                    },
+                ),
+            ),
+            "pagination": DictElement(
+                required=False,
+                parameter_form=Dictionary(
+                    title=Title("Follow pagination"),
+                    custom_validate=(_validate_pagination,),
+                    help_text=Help(
+                        "Off by default: one request, one page. An API that "
+                        "answers a collection one page at a time then leaves "
+                        "every service built from it describing the FIRST page "
+                        "only - 'count' over a queue that pages at 25 reports 25 "
+                        "however long the queue is, and a '[*]' wildcard creates "
+                        "services for the first page's elements alone. Nothing "
+                        "says so, which is why this is worth configuring: the "
+                        "answer is not missing, it is wrong. With this set the "
+                        "agent follows the API's own next-page link and appends "
+                        "each page's collection to the first page's, so the "
+                        "wildcards, the aggregations, the filters and the host "
+                        "labels all see the whole thing. Every page is requested "
+                        "exactly like the first one (same method, headers, "
+                        "authentication and timeout), and each one costs a "
+                        "request inside the check - so cap the pages, and "
+                        "consider a cache TTL for a collection that does not "
+                        "change every check interval. A page that cannot be read "
+                        "fails the endpoint rather than silently truncating the "
+                        "collection; where a further page exists but is not "
+                        "followed - a cap, or a link the agent refuses - the "
+                        "endpoint's own service reports it and goes WARN."
+                    ),
+                    elements={
+                        "next": DictElement(
+                            required=True,
+                            parameter_form=CascadingSingleChoice(
+                                title=Title("Where the next page's URL comes from"),
+                                help_text=Help(
+                                    "Both forms are common; the API's "
+                                    "documentation says which one it uses. A "
+                                    "page that carries no next link (an absent "
+                                    "field, a JSON 'null', an empty string, no "
+                                    "'Link' header) is the last one, which is how "
+                                    "pagination ends."
+                                ),
+                                elements=[
+                                    CascadingSingleChoiceElement(
+                                        name="body",
+                                        title=Title("A field in the response body"),
+                                        parameter_form=String(
+                                            title=Title("JSON path to the next page's URL"),
+                                            help_text=Help(
+                                                "From the response root, e.g. "
+                                                "'links.next', 'next' or "
+                                                "'meta.next_page_url'. A relative "
+                                                "URL ('/api/v1/jobs?page=2') is "
+                                                "resolved against the page it "
+                                                "came from."
+                                            ),
+                                            custom_validate=(
+                                                validators.LengthInRange(min_value=1),
+                                            ),
+                                        ),
+                                    ),
+                                    CascadingSingleChoiceElement(
+                                        name="link_header",
+                                        title=Title("The 'Link' response header (rel=\"next\")"),
+                                        parameter_form=FixedValue(
+                                            value=None,
+                                            label=Label(
+                                                "Read from the 'Link' header, as RFC 8288 "
+                                                "defines it"
+                                            ),
+                                            help_text=Help(
+                                                "The convention of the GitHub, "
+                                                "GitLab and Jenkins style APIs: "
+                                                "'Link: <https://host/jobs?page=2>; "
+                                                'rel="next"\'. The link with '
+                                                'rel="next" is followed; the '
+                                                "others ('last', 'prev') are "
+                                                "ignored."
+                                            ),
+                                        ),
+                                    ),
+                                ],
+                                prefill=DefaultValue("body"),
+                            ),
+                        ),
+                        "items": DictElement(
+                            required=True,
+                            parameter_form=String(
+                                title=Title("JSON path to the collection to merge"),
+                                help_text=Help(
+                                    "The array (or object) each page carries a "
+                                    "slice of - e.g. 'items', 'data.jobs' or "
+                                    "'results'. Use '$' where the response IS the "
+                                    "array. Each page's collection is appended to "
+                                    "the first page's, and the rest of the "
+                                    "document stays as the first page sent it: a "
+                                    "'total' or a 'generated_at' next to the "
+                                    "collection still resolves, and every path "
+                                    "configured below is unchanged. No '[*]' "
+                                    "wildcard here - this names the collection "
+                                    "itself, not the elements in it."
+                                ),
+                                custom_validate=(validators.LengthInRange(min_value=1),),
+                            ),
+                        ),
+                        "max_pages": DictElement(
+                            required=True,
+                            parameter_form=Integer(
+                                title=Title("Read at most this many pages"),
+                                help_text=Help(
+                                    "Including the first one, so '1' disables "
+                                    "following entirely. Each page is a request "
+                                    "made while the check runs, and a special "
+                                    "agent that overruns is killed - so this is "
+                                    "the setting that keeps a collection which "
+                                    "grew a hundredfold from turning the "
+                                    "monitoring into the outage. When the limit "
+                                    "is reached while a further page still "
+                                    "exists, the endpoint's own service says so "
+                                    "and goes WARN instead of quietly reporting "
+                                    "part of the collection."
+                                ),
+                                prefill=DefaultValue(10),
+                                custom_validate=(
+                                    validators.NumberInRange(min_value=1, max_value=100),
+                                ),
+                            ),
+                        ),
+                        "max_elements": DictElement(
+                            required=False,
+                            parameter_form=Integer(
+                                title=Title("And at most this many elements"),
+                                help_text=Help(
+                                    "Optional second cap, for a page size that is "
+                                    "not known in advance. Checked between pages, "
+                                    "so a page is never cut in half and the "
+                                    "collection can end slightly above this. Like "
+                                    "the page limit, reaching it while more pages "
+                                    "exist is reported on the endpoint's own "
+                                    "service. Remember that a '[*]' wildcard "
+                                    "creates one SERVICE per element."
+                                ),
+                                prefill=InputHint(1000),
+                                custom_validate=(validators.NumberInRange(min_value=1),),
                             ),
                         ),
                     },

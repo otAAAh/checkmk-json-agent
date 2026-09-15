@@ -680,6 +680,12 @@ const reviews = computed<EndpointReview[]>(() =>
       // never appears.
       serviceCount: rows.filter((row) => !row.inventoryOnly).length,
       inventoryCount: rows.filter((row) => row.inventoryOnly).length,
+      // The site follows this endpoint's pagination and merges the pages, but the
+      // preview resolves against the ONE response the wizard fetched - so every
+      // count below describes the first page. Said out loud rather than silently
+      // shown, because a count that is off by the rest of the collection is
+      // exactly what following the pages exists to fix.
+      paginates: !!connection.pagination,
     }
   }),
 )
@@ -708,6 +714,7 @@ const reviews = computed<EndpointReview[]>(() =>
             }}</span>
           </template>
           <template #content>
+            <p v-if="review.paginates" class="je-step-review__note">{{ _t('This endpoint follows the API\'s pagination. The site merges every page, while the counts below come from the single response fetched here - so they describe the first page only.') }}</p>
             <p v-if="!review.rows.length" class="je-step-review__empty">{{ _t('No services selected.') }}</p>
             <ul v-else class="je-step-review__services">
               <li v-for="(row, ri) in review.rows" :key="ri" class="je-step-review__service">
@@ -876,6 +883,10 @@ const reviews = computed<EndpointReview[]>(() =>
 }
 
 .je-step-review__empty {
+  color: var(--font-color-dimmed);
+}
+
+.je-step-review__note {
   color: var(--font-color-dimmed);
 }
 

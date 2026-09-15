@@ -199,6 +199,25 @@ class FieldContext(BaseModel, frozen=True):
     max_bytes: int = 1024
 
 
+class Pagination(BaseModel, frozen=True):
+    # Follow an API that answers one page at a time and merge the pages, so a
+    # '[*]' expansion or an aggregation describes the whole collection instead of
+    # its first page. The agent owns the policy (which links it will follow, the
+    # caps, the merging); only where to look travels here.
+    #
+    # The next-page link: ("body", "<path>") reads it from the response, e.g.
+    # 'links.next'; ("link_header", None) takes it from the RFC 8288 'Link'
+    # header's rel="next". Straight from the CascadingSingleChoice form spec.
+    next: tuple[Literal["body"], str] | tuple[Literal["link_header"], None]
+    # The collection each page carries ('data.items', or '$' for a response that
+    # IS the array); it is what the pages are appended to.
+    items: str
+    max_pages: int = 10
+    # A ceiling on the merged collection, checked between pages. None = no limit
+    # beyond the page count.
+    max_elements: int | None = None
+
+
 class ClientCert(BaseModel, frozen=True):
     cert: str
     # Separate private-key file; omit when the key is bundled into the cert file.
@@ -235,6 +254,8 @@ class Endpoint(BaseModel, frozen=True):
     show_response: ShowResponse | None = None
     # Report the JSON context in this endpoint's FIELD services. None = no.
     field_context: FieldContext | None = None
+    # Follow the API's pagination and merge the pages. None = read one page.
+    pagination: Pagination | None = None
     # HTTP proxy: the framework resolves the rule's Proxy choice into one of
     # these before parsing (stored_proxy ids are resolved to a URLProxy).
     proxy: URLProxy | NoProxy | EnvProxy | None = None
@@ -299,6 +320,7 @@ def _endpoint_json(endpoint: Endpoint, macros: Mapping[str, str]) -> str:
         "retry": endpoint.retry.model_dump() if endpoint.retry else None,
         "show_response": (endpoint.show_response.model_dump() if endpoint.show_response else None),
         "field_context": (endpoint.field_context.model_dump() if endpoint.field_context else None),
+        "pagination": endpoint.pagination.model_dump() if endpoint.pagination else None,
         "proxy": _proxy_spec(endpoint.proxy),
         "auth": endpoint.auth[0] if endpoint.auth else None,
         "extractions": [e.model_dump() for e in endpoint.extractions],
