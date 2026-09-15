@@ -3143,6 +3143,32 @@ def test_pagination_follows_the_link_header(agent, monkeypatch):
     assert meta["pages"] == 2
 
 
+def test_pagination_resolves_a_relative_link_header(agent, monkeypatch):
+    # RFC 8288 allows a relative URI reference, and real APIs (and dev/mock_api.py)
+    # send one - a server that pasted the request's own Host header into the
+    # response instead would be one header-splitting bug away from worse.
+    seen = _paged(
+        agent,
+        monkeypatch,
+        {
+            "http://api/v1/jobs": (
+                json.dumps({"items": [{"id": 1}]}).encode(),
+                {"Link": '</v1/jobs?page=2>; rel="next"'},
+            ),
+            "http://api/v1/jobs?page=2": (json.dumps({"items": [{"id": 2}]}).encode(), {}),
+        },
+    )
+    doc, error, _meta = agent._fetch(
+        {
+            "url": "http://api/v1/jobs",
+            "pagination": {"next": ["link_header", None], "items": "items"},
+        },
+        None,
+    )
+    assert error is None and [job["id"] for job in doc["items"]] == [1, 2]
+    assert seen[1] == "http://api/v1/jobs?page=2"
+
+
 def test_pagination_without_a_next_link_reads_one_page(agent, monkeypatch):
     _paged(agent, monkeypatch, {"http://api/jobs": _page([{"id": 1}], None)})
     _doc, error, meta = agent._fetch(PAGINATED, None)

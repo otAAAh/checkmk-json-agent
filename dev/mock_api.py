@@ -25,8 +25,9 @@ Endpoints (all GET unless noted):
             is how you can SEE the agent caching the token between checks
   /jobs     a PAGINATED collection, 7 jobs over 3 pages of 3: each page carries
             'items' plus 'links.next' (absent on the last page) AND an RFC 8288
-            'Link: <...>; rel="next"' header, so both next-page sources can be
-            exercised against the same endpoint. Without 'Follow pagination' a
+            'Link: <...>; rel="next"' header (both relative, as real APIs
+            commonly send them), so both next-page sources can be exercised
+            against the same endpoint. Without 'Follow pagination' a
             count over 'items' reports 3 forever; with it, 7. '?page=<n>' picks
             a page by hand, and '?loop=1' makes every page point at itself (the
             loop the agent has to refuse)
@@ -167,11 +168,15 @@ class Handler(BaseHTTPRequestHandler):
         # the link really does repeat: the pagination loop the agent has to
         # detect and refuse rather than spend its whole page budget on.
         looping = query.get("loop") == "1"
-        host = self.headers.get("Host", "localhost")
+        # RELATIVE, which real APIs commonly send and the agent resolves against
+        # the page it came from - so this exercises that path too. It also keeps
+        # the request's own 'Host' header out of the response: echoing a
+        # client-provided value into a header (and into the body) is header
+        # splitting waiting to happen, dev-only server or not.
         next_url = (
-            f"http://{host}/jobs?page={page}&loop=1"
+            f"/jobs?page={page}&loop=1"
             if looping
-            else f"http://{host}/jobs?page={page + 1}"
+            else f"/jobs?page={page + 1}"
             if start + JOBS_PER_PAGE < len(JOBS)
             else None
         )
