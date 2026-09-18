@@ -3,6 +3,24 @@
 All notable changes to this project, one section per released version.
 Generated from the git history by `scripts/gen_changelog.py`.
 
+## [0.19.0] - 2026-09-18
+
+### Features
+
+- State a field's value range, and use it as the metric's boundaries ([`7b4ff10`](https://github.com/otAAAh/checkmk-json-agent/commit/7b4ff10))
+- A Perf-O-Meter on every service ([#202](https://github.com/otAAAh/checkmk-json-agent/pull/202)) ([`e01f712`](https://github.com/otAAAh/checkmk-json-agent/commit/e01f712))
+
+### Fixes
+
+- The wizard reads the same key grammar as the agent ([`c65f4c2`](https://github.com/otAAAh/checkmk-json-agent/commit/c65f4c2))
+- The wizard preview makes the agent's request, not a subset ([#198](https://github.com/otAAAh/checkmk-json-agent/pull/198)) ([`fa9e2c4`](https://github.com/otAAAh/checkmk-json-agent/commit/fa9e2c4))
+
+### Other
+
+- Prepare 0.19.0 - announcement and refreshed Exchange listings ([`c8c3027`](https://github.com/otAAAh/checkmk-json-agent/commit/c8c3027))
+- Guard the wizard's three-way contract (browser, page, rule) ([#201](https://github.com/otAAAh/checkmk-json-agent/pull/201)) ([`329578a`](https://github.com/otAAAh/checkmk-json-agent/commit/329578a))
+- A type and unit gate for the wizard's TypeScript ([#199](https://github.com/otAAAh/checkmk-json-agent/pull/199)) ([`e2a016b`](https://github.com/otAAAh/checkmk-json-agent/commit/e2a016b))
+
 ## [0.18.0] - 2026-09-15
 
 ### Features
