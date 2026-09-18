@@ -76,6 +76,11 @@ def graphing():
 
 
 @pytest.fixture(scope="session")
+def perfometers():
+    return _load("ja_perfometers", "graphing/perfometers.py")
+
+
+@pytest.fixture(scope="session")
 def explorer_fetch():
     """The Explorer's preview fetch — 2.5+ only.
 
