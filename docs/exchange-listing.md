@@ -104,6 +104,15 @@ included. One rule. Any API. Done.
 - 📈 **Thresholds & graphs in Checkmk** — WARN/CRIT and metrics live in *your*
   rule, not upstream in the API, and can be retuned per folder, host or service
   from a normal check-parameters rule without touching the connection.
+- 📊 **A Perf-O-Meter that means something** — the bar in the service list is
+  scaled to the field's own **critical level**, so it reads as "how close to
+  critical" rather than against a maximum nobody can know for a JSON value.
+  Where a field has no levels it falls back to an open range for its unit.
+- 📐 **State the value range** — a battery is 0–100, a queue with a cap is 0 to
+  that cap. Say so and Checkmk stops guessing: the graph keeps a **steady
+  scale** instead of rescaling to whatever the last hour contained, a **gauge
+  dashboard widget** has a dial to draw, and the bar fills against the real
+  maximum. It never changes the state — presentation only, and optional.
 - 🏷️ **Labels from the response** — attach Checkmk **host** and **service labels**
   built from fields (`json_api/version`, `json_api/region`), so views, rules and
   filters can key off what the API says about itself. The hosts a `[*]` rule
