@@ -998,7 +998,12 @@ Passwords**).
 extension package that adds a guided setup under **Setup → Quick setup → Generic
 JSON API**. It fetches each endpoint's live response from the site, lets you
 point-and-pick fields with a preview of the resulting service states, and creates
-the rule for you. It is a companion to this agent — install the `json_api`
+the rule for you. The preview is made with the endpoint's *whole* connection —
+method, body, headers, authentication (including the OAuth 2.0 token exchange),
+TLS verification with a custom CA bundle or a client certificate, and the
+configured HTTP proxy — so what you see is what the agent will see; the
+exceptions are the retry policy and pagination, which the wizard names where
+they matter rather than reproducing. It is a companion to this agent — install the `json_api`
 package first — and requires **Checkmk 2.5+** (it builds on Checkmk's native
 Quick-Setup UI). See [`docs/exchange-listing-explorer.md`](docs/exchange-listing-explorer.md).
 

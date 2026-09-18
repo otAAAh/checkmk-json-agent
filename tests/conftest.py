@@ -19,6 +19,10 @@ import pytest
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 FAMILY = REPO_ROOT / "cmk_addons" / "plugins" / "json_api"
+# The Explorer's GUI half ships in the OTHER package, under a directory that is
+# not an importable Python package here either (in a site it lands in the
+# ``cmk.gui.plugins.wato`` namespace), so it is loaded by path just the same.
+GUI = REPO_ROOT / "gui" / "wato" / "json_explorer"
 
 # The rulesets import shared form specs as ``cmk_addons.plugins.json_api.lib``
 # (an absolute import that resolves against the namespace package at runtime in
@@ -27,14 +31,18 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 
-def _load(name: str, relpath: str):
-    loader = SourceFileLoader(name, str(FAMILY / relpath))
+def _load_file(name: str, path: Path):
+    loader = SourceFileLoader(name, str(path))
     spec = importlib.util.spec_from_loader(name, loader)
     assert spec is not None
     module = importlib.util.module_from_spec(spec)
     sys.modules[name] = module
     loader.exec_module(module)
     return module
+
+
+def _load(name: str, relpath: str):
+    return _load_file(name, FAMILY / relpath)
 
 
 @pytest.fixture(scope="session")
@@ -65,3 +73,19 @@ def check_ruleset():
 @pytest.fixture(scope="session")
 def graphing():
     return _load("ja_graphing", "graphing/json_api.py")
+
+
+@pytest.fixture(scope="session")
+def explorer_fetch():
+    """The Explorer's preview fetch — 2.5+ only.
+
+    The agent package supports 2.4, the Explorer does not (its GUI APIs, e.g.
+    ``cmk.gui.pages.PageContext``, only exist from 2.5), so on the 2.4 leg of CI
+    the module cannot even be imported. That is the package's documented
+    requirement rather than a failure, hence a skip with the reason spelled out
+    — the schema drift guards in the same file run on both lines regardless.
+    """
+    try:
+        return _load_file("ja_explorer_fetch", GUI / "fetch.py")
+    except ImportError as exc:
+        pytest.skip(f"the Explorer package needs the Checkmk 2.5+ GUI APIs: {exc}")

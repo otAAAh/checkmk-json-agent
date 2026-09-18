@@ -34,6 +34,10 @@ fields into Checkmk services. Especially relevant areas:
 - the special agent's request handling (`cmk_addons/plugins/json_api/libexec/agent_json_api`)
   — TLS verification, redirect following (SSRF hardening), response-size limits,
   and secret handling via the Checkmk password store;
+- the Explorer wizard's server-side preview fetch
+  (`gui/wato/json_explorer/fetch.py`, shipped in the `json_api_explorer`
+  package) — the same request, made from the Checkmk server while an operator
+  configures it, so the same TLS, redirect and secret-handling concerns apply;
 - config-time validation in the ruleset.
 
 Findings in these areas are in scope. Issues in Checkmk itself should be reported
