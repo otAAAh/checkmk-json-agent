@@ -410,3 +410,20 @@ def test_explorer_omits_pagination_unless_it_can_be_followed(
     assert explorer_output["pageNoItems"] is None
     assert explorer_output["pageNoPath"] is None
     assert explorer_output["pageOff"] is None
+
+
+def test_explorer_emits_a_value_range_the_ruleset_accepts(rule_value: dict, explorer_output: dict):
+    """The range is optional, so nothing else in this file would notice it going
+    missing — and a field that silently loses its range draws a graph that
+    rescales itself every hour."""
+    by_service = {e["service"]: e for e in rule_value["endpoints"][0]["extractions"]}
+
+    assert by_service["Node"]["value_range"] == {"min": 0.0, "max": 1000.0}
+    # Floats, like every other number the ruleset's Float fields hold.
+    assert all(isinstance(end, float) for end in by_service["Node"]["value_range"].values())
+    # A field with no range configured must not carry an empty one: the ruleset
+    # rejects a range with neither end.
+    assert "value_range" not in by_service["Health"]
+    # The agent command line mirrors the rule.
+    cli_extractions = {e["service"]: e for e in explorer_output["cli"][0]["extractions"]}
+    assert cli_extractions["Node"]["value_range"] == {"min": 0, "max": 1000}

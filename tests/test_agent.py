@@ -3521,3 +3521,17 @@ def test_an_aggregation_counts_the_whole_merged_collection(agent, monkeypatch):
     # The whole point: 'count' over a queue that pages at 2 reports the queue,
     # not the page size.
     assert results[0]["value"] == 3
+
+
+def test_the_value_range_travels_with_the_result(agent):
+    """The agent has no use for the range itself - it neither renders nor
+    measures anything - but it is the only path from the rule to the check."""
+    specs = [
+        {"path": "items[0].count", "service": "Count", "value_range": {"min": 0, "max": 100}},
+        {"path": "status", "service": "Health"},
+    ]
+
+    by_service = {r["service"]: r for r in agent._extract(DOC, specs, "http://test/h")}
+
+    assert by_service["Count"]["value_range"] == {"min": 0, "max": 100}
+    assert by_service["Health"]["value_range"] is None

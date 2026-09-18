@@ -111,6 +111,10 @@ const FIXTURE = {
       valueAs: "",
       tsFormat: "auto",
       unit: "count",
+      // A stated value range: it becomes the metric's boundaries, and both ends
+      // have to survive into the rule as floats.
+      vr_min: "0",
+      vr_max: "1000",
       calc: "value / 1024",
       lu_w: "0.8",
       lu_c: "0.9",

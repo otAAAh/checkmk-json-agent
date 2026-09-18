@@ -63,6 +63,7 @@ def test_basic_command_line(ssc):
             "piggyback_labels": [],
             "filter": None,
             "unit": None,
+            "value_range": None,
             "labels": [],
             "levels_upper": None,
             "levels_lower": None,
@@ -1149,3 +1150,52 @@ def test_pagination_absent_by_default(ssc):
     )
     (endpoint,) = _endpoints(ssc, args)
     assert endpoint["pagination"] is None
+
+
+def test_a_value_range_reaches_the_agent(ssc):
+    """The range is configured in the rule and used by the check, so it has to
+    survive the one hop between them that drops anything it does not model."""
+    args = _command_args(
+        ssc,
+        {
+            "endpoints": [
+                {
+                    "url": "https://example.com/health",
+                    "method": "GET",
+                    "verify_cert": True,
+                    "extractions": [
+                        {
+                            "path": "battery",
+                            "service": "Battery",
+                            "unit": "percent",
+                            "value_range": {"min": 0.0, "max": 100.0},
+                        }
+                    ],
+                }
+            ]
+        },
+    )
+    (endpoint,) = _endpoints(ssc, args)
+
+    assert endpoint["extractions"][0]["value_range"] == {"min": 0.0, "max": 100.0}
+
+
+def test_half_a_value_range_reaches_the_agent_as_half_a_range(ssc):
+    args = _command_args(
+        ssc,
+        {
+            "endpoints": [
+                {
+                    "url": "https://example.com/health",
+                    "method": "GET",
+                    "verify_cert": True,
+                    "extractions": [
+                        {"path": "queue", "service": "Queue", "value_range": {"min": 0.0}}
+                    ],
+                }
+            ]
+        },
+    )
+    (endpoint,) = _endpoints(ssc, args)
+
+    assert endpoint["extractions"][0]["value_range"] == {"min": 0.0, "max": None}

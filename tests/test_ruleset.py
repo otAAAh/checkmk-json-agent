@@ -194,6 +194,7 @@ def test_extraction_form_has_the_expected_keys(ruleset):
         "filter",
         "value_as",
         "unit",
+        "value_range",
         "levels_upper",
         "levels_lower",
         "calc",
@@ -559,3 +560,22 @@ def test_the_paths_of_a_pagination_setting_name_single_places(ruleset):
         ruleset._validate_pagination({"next": ("body", "pages[*].next"), "items": "items"})
     ruleset._validate_pagination({"next": ("body", "links.next"), "items": "data.items"})
     ruleset._validate_pagination({"next": ("link_header", None), "items": "$"})
+
+
+def test_a_value_range_needs_at_least_one_end(ruleset):
+    ruleset._validate_value_range({"min": 0.0, "max": 100.0})  # must not raise
+    ruleset._validate_value_range({"max": 100.0})  # must not raise
+
+    with pytest.raises(ValidationError):
+        ruleset._validate_value_range({})
+    with pytest.raises(ValidationError):
+        ruleset._validate_value_range({"min": None, "max": None})
+
+
+def test_a_value_range_must_run_upwards(ruleset):
+    """A reversed range would be accepted by the metric and then draw a graph
+    nobody can read, so it is refused where the operator can still see why."""
+    with pytest.raises(ValidationError):
+        ruleset._validate_value_range({"min": 100.0, "max": 0.0})
+    with pytest.raises(ValidationError):
+        ruleset._validate_value_range({"min": 5.0, "max": 5.0})
