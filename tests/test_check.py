@@ -78,6 +78,84 @@ def test_check_plain_numeric_value_emits_metric(check):
     assert any(isinstance(r, Metric) and r.value == 42.0 for r in results)
 
 
+def test_a_value_range_becomes_the_metrics_boundaries(check):
+    """The range is what gives a graph a steady scale and a gauge widget a dial:
+    without it Checkmk only ever knows the values it has already seen."""
+    section = _section(
+        check, [_entry("Battery", value=64, unit="percent", value_range={"min": 0, "max": 100})]
+    )
+
+    (metric,) = [r for r in check.check_json_api("Battery", {}, section) if isinstance(r, Metric)]
+
+    assert metric.boundaries == (0.0, 100.0)
+
+
+def test_a_value_range_reaches_a_field_that_has_levels_too(check):
+    """Levels and a range answer different questions - 'when is this bad' and
+    'how big can it get' - so configuring one must not drop the other."""
+    section = _section(
+        check,
+        [
+            _entry(
+                "Queue",
+                value=30,
+                levels_upper=["fixed", [50.0, 80.0]],
+                value_range={"min": 0, "max": 100},
+            )
+        ],
+    )
+
+    (metric,) = [r for r in check.check_json_api("Queue", {}, section) if isinstance(r, Metric)]
+
+    assert metric.boundaries == (0.0, 100.0)
+    assert metric.levels == (50.0, 80.0)
+
+
+def test_one_end_of_a_range_is_better_than_none(check):
+    section = _section(check, [_entry("Queue", value=30, value_range={"min": 0})])
+
+    (metric,) = [r for r in check.check_json_api("Queue", {}, section) if isinstance(r, Metric)]
+
+    assert metric.boundaries == (0.0, None)
+
+
+def test_a_field_without_a_range_has_no_boundaries(check):
+    section = _section(check, [_entry("Queue", value=30)])
+
+    (metric,) = [r for r in check.check_json_api("Queue", {}, section) if isinstance(r, Metric)]
+
+    assert metric.boundaries == (None, None)
+
+
+@pytest.mark.parametrize(
+    "value_range",
+    [
+        {},
+        {"min": None, "max": None},
+        {"min": "low", "max": "high"},
+        "0-100",
+        None,
+    ],
+)
+def test_an_unusable_range_is_ignored_rather_than_breaking_the_check(check, value_range):
+    """A rule written by hand (or by an older version) is not bound by the form,
+    and a service that vanishes because its range is malformed would be a far
+    worse outcome than a graph without a fixed scale."""
+    section = _section(check, [_entry("Queue", value=30, value_range=value_range)])
+
+    (metric,) = [r for r in check.check_json_api("Queue", {}, section) if isinstance(r, Metric)]
+
+    assert metric.boundaries == (None, None)
+
+
+def test_a_partly_usable_range_keeps_the_end_that_works(check):
+    section = _section(check, [_entry("Queue", value=30, value_range={"min": 0, "max": "lots"})])
+
+    (metric,) = [r for r in check.check_json_api("Queue", {}, section) if isinstance(r, Metric)]
+
+    assert metric.boundaries == (0.0, None)
+
+
 def test_metric_name_maps_unit_to_metric(check):
     assert check._metric_name(None) == "json_api_value"
     assert check._metric_name("count") == "json_api_count"

@@ -118,6 +118,16 @@ class InventorySpec(BaseModel, frozen=True):
     keep_service: bool = False
 
 
+class ValueRange(BaseModel, frozen=True):
+    # The range the value moves in, when it has one. Presentation only: it
+    # becomes the metric's boundaries, which is what gives a graph a steady
+    # scale, a gauge widget its dial and the service list's bar a real maximum.
+    # Either end may be absent - a queue with a floor of zero and no ceiling is
+    # a range worth stating too.
+    min: float | None = None
+    max: float | None = None
+
+
 class Extraction(BaseModel, frozen=True):
     path: str
     service: str
@@ -139,6 +149,8 @@ class Extraction(BaseModel, frozen=True):
     # server-side call; the agent applies it). Serialized via model_dump below.
     filter: FilterSpec | None = None
     unit: str | None = None
+    # Carried through to the check, which turns it into the metric's boundaries.
+    value_range: ValueRange | None = None
     # Fields attached as SERVICE labels on this service (resolved per '[*]'
     # element by the agent). Host-wide labels live on the endpoint (host_labels).
     labels: Sequence[LabelSpec] = ()

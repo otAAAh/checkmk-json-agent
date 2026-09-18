@@ -1847,6 +1847,10 @@ def _result(
         # quietly computing with a stand-in.
         "calc_other": calc_other,
         "unit": spec.get("unit"),
+        # The range this value moves in, when the rule states one. Untouched
+        # here: the check turns it into the metric's boundaries, and only the
+        # check emits metrics.
+        "value_range": spec.get("value_range"),
         # Passed through for the check: it derives the per-second rate / the age
         # (it owns the value store and knows "now").
         "value_as": spec.get("value_as"),

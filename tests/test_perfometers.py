@@ -32,20 +32,29 @@ def _required_metrics(perfometer) -> set[str]:
     """Every metric the perfometer needs before it can be drawn."""
     required = {segment for segment in perfometer.segments if isinstance(segment, str)}
     for bound in (perfometer.focus_range.lower, perfometer.focus_range.upper):
-        if isinstance(bound.value, (metrics.CriticalOf, metrics.WarningOf)):
+        if isinstance(bound.value, _SCALAR_BOUNDS):
             required.add(bound.value.metric_name)
     return required
 
 
+# The perfdata scalar each bound kind is read from, which is also what Checkmk
+# requires to be present before the perfometer can match at all.
+_SCALAR_OF = {
+    metrics.WarningOf: "warn",
+    metrics.CriticalOf: "crit",
+    metrics.MinimumOf: "min",
+    metrics.MaximumOf: "max",
+}
+_SCALAR_BOUNDS = tuple(_SCALAR_OF)
+
+
 def _required_scalars(perfometer) -> set[tuple[str, str]]:
     """The ``(metric, scalar)`` pairs the perfometer's bounds need in perfdata."""
-    needed = set()
-    for bound in (perfometer.focus_range.lower, perfometer.focus_range.upper):
-        if isinstance(bound.value, metrics.CriticalOf):
-            needed.add((bound.value.metric_name, "crit"))
-        if isinstance(bound.value, metrics.WarningOf):
-            needed.add((bound.value.metric_name, "warn"))
-    return needed
+    return {
+        (bound.value.metric_name, _SCALAR_OF[type(bound.value)])
+        for bound in (perfometer.focus_range.lower, perfometer.focus_range.upper)
+        if isinstance(bound.value, _SCALAR_BOUNDS)
+    }
 
 
 def _first_match(perfometers_module, service_metrics: dict[str, set[str]]) -> str | None:
@@ -67,8 +76,17 @@ def _first_match(perfometers_module, service_metrics: dict[str, set[str]]) -> st
 @pytest.mark.parametrize(
     "service_metrics, expected",
     [
-        # A field with upper levels: scaled to CRIT, which is the only scale a
-        # JSON value ever really has.
+        # A field whose rule states a value range: scaled to the range, which is
+        # the true maximum and beats every other scale.
+        ({"json_api_count": {"min", "max"}}, "json_api_count_in_range"),
+        # ... including when levels are configured as well.
+        ({"json_api_count": {"min", "max", "crit"}}, "json_api_count_in_range"),
+        # Half a range is not a range: without both ends there is nothing to
+        # scale to, so the next variant takes over.
+        ({"json_api_count": {"max", "crit"}}, "json_api_count_to_crit"),
+        ({"json_api_count": {"max"}}, "json_api_count"),
+        # A field with upper levels but no range: scaled to CRIT, the only other
+        # scale a JSON value usually has.
         ({"json_api_count": {"crit"}}, "json_api_count_to_crit"),
         # The same field without levels falls back to the open range rather than
         # drawing nothing.
@@ -99,19 +117,20 @@ def test_the_right_bar_is_drawn(perfometers, service_metrics, expected):
     assert _first_match(perfometers, service_metrics) == expected
 
 
-def test_the_specific_variant_is_declared_before_its_fallback(perfometers):
-    """Definition order IS the behaviour: a fallback declared first would match
-    every service and the CRIT-scaled variant would never be reached."""
-    seen: set[str] = set()
+def test_each_metrics_variants_run_from_specific_to_general(perfometers):
+    """Definition order IS the behaviour. A variant needs every scalar its
+    bounds name, so the one needing MORE has to come first: declare the
+    open-ended bar before the CRIT-scaled one and it swallows every service,
+    leaving the specific variants as dead code nobody notices."""
+    previous: dict[str, int] = {}
     for perfometer in _definitions(perfometers):
         metric = next(iter(_required_metrics(perfometer)))
-        if not _required_scalars(perfometer):
-            seen.add(metric)
-            continue
-        assert metric not in seen, (
-            f"{perfometer.name} can never match: the open-ended bar for {metric} "
-            "is declared before it"
+        specificity = len(_required_scalars(perfometer))
+        assert specificity < previous.get(metric, 99), (
+            f"{perfometer.name} can never match: a less specific bar for "
+            f"{metric} is declared before it"
         )
+        previous[metric] = specificity
 
 
 def test_every_bar_belongs_to_exactly_one_kind_of_service(perfometers):
