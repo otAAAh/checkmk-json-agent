@@ -6,10 +6,19 @@ The JSON field picker needs the endpoint's response to build its tree, but the
 browser can't fetch operator endpoints (CORS, and they're typically only
 reachable from the Checkmk server). So we fetch it here — the same place the
 special agent does — using the SAME connection the wizard configured: method,
-body, request headers, TLS verification and authentication (basic / bearer / an
-API key in a header or query parameter, all resolved from the password store).
-That way the preview matches what the agent
-will actually see (authenticated / self-signed endpoints work in the wizard).
+body, request headers, TLS (verification, a custom CA bundle, a client
+certificate), the HTTP proxy, and authentication (basic / bearer / an API key in
+a header or query parameter / OAuth2, all resolved from the password store).
+That way the preview matches what the agent will actually see (authenticated,
+private-CA, mutual-TLS and proxy-only endpoints all work in the wizard).
+
+The connection helpers below mirror the agent's, one for one — ``_verify_arg``,
+``_client_cert``, ``_proxies`` (the agent's ``_apply_proxy``) and the cross-host
+header stripping in ``_RedirectSafeSession`` (its ``_Session``). They
+are re-implemented rather than imported because the agent ships in the *other*
+MKP (and is a stdlib-only executable, not an importable module), so the two must
+be kept in step by hand; ``tests/test_explorer_gui.py`` is where that is pinned
+down.
 
 Input (POST): ``connection`` = the connection FormEdit value (JSON); falls back
 to a bare ``url`` query var. Output: ``{ok, status, json, headers}`` or
@@ -18,10 +27,15 @@ them: the agent can monitor one with an '@header.' path (an API quota, a
 Last-Modified age), and the browser cannot see them for itself because this
 request is made server-side.
 
-The endpoint's RETRY policy is deliberately not applied here: this fetch runs
-with a person waiting on the wizard, where reporting "connection refused" in one
-second beats retrying for half a minute before saying the same thing. Resilience
-is the agent's job; this is a preview.
+Two endpoint settings are deliberately NOT applied here, because a preview with
+a person waiting is not the same job as an unattended check:
+
+* RETRY — reporting "connection refused" in one second beats retrying for half a
+  minute before saying the same thing. Resilience is the agent's job.
+* PAGINATION — the agent may walk up to a hundred pages and merge them; the
+  wizard fetches one page. It does not hide that: the review step reads the
+  endpoint's pagination setting straight off the rule being built and says the
+  counts describe the first page, so no flag has to travel back from here.
 
 SECURITY: this performs an HTTP request from the Checkmk server to an
 operator-supplied URL — an SSRF vector, exactly like the agent itself. It is
@@ -85,8 +99,122 @@ def _connection() -> dict[str, Any]:
     return {"url": request.get_str_input_mandatory("url").strip()}
 
 
-class _TokenError(Exception):
+class _PreviewError(Exception):
+    """A configured connection the preview cannot carry out.
+
+    Reported as the fetch error rather than shrugged off: a preview that
+    silently drops part of the connection is exactly the failure this module
+    exists to avoid — it would show the operator a response the agent will never
+    see (or hide one it will).
+    """
+
+
+class _TokenError(_PreviewError):
     """The OAuth2 token could not be obtained; reported as the fetch error."""
+
+
+def _auth_header_name(conn: dict[str, Any]) -> str | None:
+    """The header an 'API key in a header' connection puts its key into."""
+    auth = conn.get("auth")
+    if not (isinstance(auth, (list, tuple)) and len(auth) == 2 and auth[0] == "auth_header"):
+        return None
+    params = auth[1] if isinstance(auth[1], dict) else {}
+    name = params.get("header")
+    return name if isinstance(name, str) and name.strip() else "X-API-Key"
+
+
+class _RedirectSafeSession(requests.Session):
+    """A session that also strips an API-key HEADER on a cross-host redirect.
+
+    ``requests`` already does this for ``Authorization``, which covers the basic,
+    bearer and OAuth2 modes — but its ``rebuild_auth`` knows only that one header
+    name. An API key lives in a header the *API* names, so without this a
+    previewed endpoint that redirects to another host is handed the key in full,
+    which is precisely what the password-store modes exist to prevent. The
+    preview follows redirects by default (like the agent), so this must be the
+    default too.
+
+    The agent's ``_Session`` does the same thing for the same reason; this is its
+    counterpart on the GUI side.
+
+    A key in a query parameter needs no equivalent: the redirect's Location
+    replaces the query string rather than carrying it along.
+    """
+
+    def __init__(self, secret_header: str | None = None) -> None:
+        super().__init__()
+        self._secret_header = secret_header
+
+    def rebuild_auth(self, prepared_request: Any, response: Any) -> None:
+        super().rebuild_auth(prepared_request, response)
+        if not self._secret_header:
+            return
+        if self.should_strip_auth(response.request.url, prepared_request.url):
+            # Headers are a case-insensitive mapping, so the configured spelling
+            # need not match what was actually sent.
+            prepared_request.headers.pop(self._secret_header, None)
+
+
+def _verify_arg(conn: dict[str, Any]) -> bool | str:
+    """The ``verify`` value for requests: the flag, or a CA-bundle path.
+
+    A custom CA bundle lets a private-CA endpoint be verified without turning
+    verification off, so it only applies while verification is on — same rule as
+    the agent, or the preview would reject a certificate the agent accepts.
+    """
+    verify = conn.get("verify_cert", True)
+    ca_bundle = conn.get("ca_bundle")
+    if verify and ca_bundle:
+        return str(ca_bundle)
+    return bool(verify)
+
+
+def _client_cert(conn: dict[str, Any]) -> str | tuple[str, str] | None:
+    """The ``cert`` value for requests (mutual TLS): None, certfile, or
+    (certfile, keyfile) when the key lives in a separate file."""
+    cert = conn.get("client_cert")
+    if not isinstance(cert, dict) or not cert.get("cert"):
+        return None
+    key = cert.get("key")
+    return (str(cert["cert"]), str(key)) if key else str(cert["cert"])
+
+
+def _proxies(conn: dict[str, Any]) -> dict[str, str] | None:
+    """The ``requests`` proxy mapping for the endpoint's 'HTTP proxy' choice.
+
+    The stored value is the ``Proxy`` FormSpec's
+    ``("cmk_postprocessed", <kind>, <value>)`` triple, where ``stored_proxy``
+    only *names* one of the site's global proxies. Resolving that is what
+    Checkmk's own helper does for the agent's command line, so the preview asks
+    the same helper instead of re-deriving it. ``None`` means "honour the
+    environment", which is requests' own default.
+    """
+    proxy = conn.get("proxy")
+    if proxy is None:
+        return None
+    try:
+        from cmk.gui.watolib.config_domains import ConfigDomainCore
+        from cmk.utils.http_proxy_config import http_proxy_config_from_user_setting
+    except ImportError as exc:  # internal API moved — say so, never fetch direct
+        raise _PreviewError(
+            _("Cannot resolve the configured HTTP proxy on this Checkmk version (%s)") % exc
+        ) from exc
+    # The site's global settings are only read when the value actually names one
+    # of them: an explicit URL, 'no proxy' and 'environment' are self-contained,
+    # and a preview should not load the configuration to answer them.
+    kind = proxy[1] if isinstance(proxy, (list, tuple)) and len(proxy) == 3 else None
+    global_proxies = (
+        ConfigDomainCore().load().get("http_proxies", {}) if kind == "stored_proxy" else {}
+    )
+    return http_proxy_config_from_user_setting(proxy, global_proxies).to_requests_proxies()
+
+
+def _session(conn: dict[str, Any]) -> requests.Session:
+    """A session carrying this endpoint's proxy and redirect handling."""
+    session = _RedirectSafeSession(_auth_header_name(conn))
+    if (proxies := _proxies(conn)) is not None:
+        session.proxies = proxies
+    return session
 
 
 def _access_token(params: dict[str, Any], conn: dict[str, Any]) -> str:
@@ -103,7 +231,7 @@ def _access_token(params: dict[str, Any], conn: dict[str, Any]) -> str:
     if audience := params.get("audience"):
         data["audience"] = str(audience)
 
-    session = requests.Session()
+    session = _session(conn)
     if params.get("client_auth") == "post":
         data["client_id"] = str(params.get("client_id", ""))
         data["client_secret"] = secret
@@ -115,7 +243,11 @@ def _access_token(params: dict[str, Any], conn: dict[str, Any]) -> str:
             params["token_url"],
             data=data,
             timeout=conn.get("timeout") or _TIMEOUT,
-            verify=conn.get("verify_cert", True),
+            # The token endpoint is part of the trust chain: verification
+            # follows the endpoint's own TLS settings rather than being relaxed
+            # here, and an mTLS-protected IdP needs the client certificate too.
+            verify=_verify_arg(conn),
+            cert=_client_cert(conn),
         )
     except requests.RequestException as exc:
         # Only the exception TYPE and the token URL, never the message: requests
@@ -146,7 +278,7 @@ def _access_token(params: dict[str, Any], conn: dict[str, Any]) -> str:
 
 
 def _perform_request(conn: dict[str, Any]) -> requests.Response:
-    session = requests.Session()
+    session = _session(conn)
     headers = {h["name"]: h["value"] for h in conn.get("headers", []) if isinstance(h, dict)}
 
     auth = conn.get("auth")
@@ -177,7 +309,8 @@ def _perform_request(conn: dict[str, Any]) -> requests.Response:
         data=body,
         headers=headers,
         timeout=conn.get("timeout") or _TIMEOUT,
-        verify=conn.get("verify_cert", True),
+        verify=_verify_arg(conn),
+        cert=_client_cert(conn),
         allow_redirects=conn.get("follow_redirects", True),
     )
 
@@ -206,10 +339,10 @@ class JsonExplorerFetchPage(AjaxPage):
 
         try:
             resp = _perform_request(conn)
-        except _TokenError as exc:
-            # Reported on its own: "the token endpoint said no" is a different
-            # problem from "the API said no", and conflating them sends the
-            # operator to the wrong URL.
+        except _PreviewError as exc:
+            # Reported on its own: "the token endpoint said no" (or "this proxy
+            # cannot be resolved") is a different problem from "the API said
+            # no", and conflating them sends the operator to the wrong URL.
             return {"ok": False, "error": str(exc)}
         except requests.RequestException as exc:
             # The message of a connection error quotes the URL it tried to
