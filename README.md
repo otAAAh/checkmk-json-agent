@@ -130,6 +130,11 @@ Targets **Checkmk 2.4+** and the current stable plugin APIs
   table row per element. No service is created unless you ask for one
 - **Thresholds**: WARN/CRIT upper and lower levels for numeric values, exposed
   as a metric/graph
+- **A Perf-O-Meter on every service**: the bar in the service list is scaled to
+  the field's own CRIT level where one is configured — so it reads as "how close
+  to critical", the only scale a JSON value really has — and falls back to an
+  open range for the unit otherwise. A service built from several fields has
+  none: its metrics are named after the fields at runtime
 - **String matching**: two modes — either a regex the value must fully match
   (with a configurable state when it does not, default CRIT), or map the value
   to a state by matching it against separate OK / WARN / CRIT regexes (tried in
