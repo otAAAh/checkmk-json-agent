@@ -1,0 +1,52 @@
+{
+  "comment": [
+    "Shared path-grammar cases, read by BOTH sides of the picker contract:",
+    "tests/test_path_grammar_parity.py drives the special agent's own resolver,",
+    "frontend/src/lib/jsonpaths.test.ts drives the wizard's TypeScript port.",
+    "A path the operator clicks in the picker has to mean in the check exactly",
+    "what the wizard previewed, so the two implementations answer the same",
+    "cases from one file instead of each side's tests asserting its own idea.",
+    "Only WELL-FORMED paths live here: for a malformed path the two differ on",
+    "purpose (the port refuses it, the agent's tokenizer skips the junk), which",
+    "each side's own tests pin down."
+  ],
+  "documents": {
+    "health": {
+      "status": "UP",
+      "version": "2.4.1",
+      "components": {
+        "db": { "status": "UP", "details": { "latency": 12 } },
+        "disk": { "status": "DOWN", "details": { "latency": 480 } }
+      },
+      "nodes": [
+        { "name": "node-a", "load": 0.4, "tags": ["primary", "eu"] },
+        { "name": "node-b", "load": 1.9, "tags": ["replica"] }
+      ],
+      "empty": [],
+      "odd.key": { "value": 7 },
+      "quoted'key": { "value": 8 },
+      "nothing": null
+    },
+    "collection": [{ "id": 1, "state": "open" }, { "id": 2, "state": "closed" }]
+  },
+  "cases": [
+    { "name": "a top-level key", "document": "health", "path": "status", "values": ["UP"] },
+    { "name": "a nested key", "document": "health", "path": "components.db.status", "values": ["UP"] },
+    { "name": "a leading $ is the document root", "document": "health", "path": "$.version", "values": ["2.4.1"] },
+    { "name": "a bare $ prefix without the dot", "document": "health", "path": "$version", "values": ["2.4.1"] },
+    { "name": "an array index", "document": "health", "path": "nodes[1].name", "values": ["node-b"] },
+    { "name": "an index past the end matches nothing", "document": "health", "path": "nodes[7].name", "values": [] },
+    { "name": "a missing key matches nothing", "document": "health", "path": "components.cache.status", "values": [] },
+    { "name": "a key holding null is found, with the null", "document": "health", "path": "nothing", "values": [null] },
+    { "name": "a wildcard over an array", "document": "health", "path": "nodes[*].name", "values": ["node-a", "node-b"] },
+    { "name": "a wildcard over an object map", "document": "health", "path": "components[*].status", "values": ["UP", "DOWN"] },
+    { "name": "a wildcard reaching deeper into each element", "document": "health", "path": "components[*].details.latency", "values": [12, 480] },
+    { "name": "two wildcard levels expand to the cartesian product", "document": "health", "path": "nodes[*].tags[*]", "values": ["primary", "eu", "replica"] },
+    { "name": "a wildcard over an empty array matches nothing", "document": "health", "path": "empty[*].name", "values": [] },
+    { "name": "a wildcard over a missing container matches nothing", "document": "health", "path": "absent[*].name", "values": [] },
+    { "name": "a wildcard yielding whole elements", "document": "collection", "path": "[*].state", "values": ["open", "closed"] },
+    { "name": "a bracket-quoted key holding a dot", "document": "health", "path": "['odd.key'].value", "values": [7] },
+    { "name": "a double-quoted key holding a dot", "document": "health", "path": "[\"odd.key\"].value", "values": [7] },
+    { "name": "a double-quoted key holding an apostrophe", "document": "health", "path": "[\"quoted'key\"].value", "values": [8] }
+  ]
+}

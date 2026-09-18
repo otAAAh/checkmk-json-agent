@@ -51,6 +51,24 @@ make typecheck   # mypy
 make test        # pytest (needs a site Python, see above)
 ```
 
+If your change touches the Explorer wizard's TypeScript (`frontend/`), run its
+own checks too — they need Node and nothing else (no Checkmk checkout, no site):
+
+```sh
+cd frontend
+npm ci
+npm test         # vitest: path grammar, wizard state, REST/AJAX client
+npm run typecheck  # tsc over the modules that don't import cmk-frontend-vue
+```
+
+The Vue components themselves are only type-checked through the full frontend
+build (`.github/workflows/frontend-build.yml`), which assembles a Checkmk
+checkout — the PR build job is where import breakage shows up. Note that the
+path grammar is covered from BOTH sides: `frontend/src/lib/jsonpaths.test.ts`
+and `tests/test_path_grammar_parity.py` answer the same cases from
+`tests/fixtures/json_path_cases.json`, so a change to how paths resolve has to
+be made in the agent and the wizard together.
+
 If your change touches translatable Setup/graphing strings, also keep the
 catalogs in sync:
 

@@ -102,6 +102,26 @@ jobs:
           done
           exit $rc
 
+  # The wizard's TypeScript that needs NO Checkmk checkout: the path grammar,
+  # the wizard's state model and the REST/AJAX client. The Vue components are
+  # covered by the frontend build (frontend-build.yml, which needs a cmk clone
+  # plus a Docker image for the theme assets); this runs on a plain runner in
+  # seconds, and it is the only job that reports a TYPE error at all — the
+  # bundler strips types without resolving them, so a missing type import builds
+  # perfectly happily. Node ships on the runner, so no setup-node step.
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - run: npm ci
+      - name: Type check (the modules that need no cmk bridge)
+        run: npm run typecheck
+      - name: Unit tests
+        run: npm test
+
   # The standalone Explorer (explorer/index.html) is a hand-written mirror of the
   # config schema; this drives its real output generators (via Node) and checks
   # they still cover every required ruleset field. Runs on a plain runner - it
