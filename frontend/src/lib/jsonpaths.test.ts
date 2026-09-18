@@ -92,6 +92,13 @@ describe('defaultService — the service name a picked path suggests', () => {
     expect(defaultService('nodes[0]')).toBe('Nodes')
   })
 
+  it('keeps a key whole, dashes and spaces included', () => {
+    // The whole key is the name the operator recognises: a service called
+    // 'Type' for 'meta.content-type' looks like it monitors something else.
+    expect(defaultService('meta.content-type')).toBe('Content-type')
+    expect(defaultService('meta.my key')).toBe('My key')
+  })
+
   it('falls back to a usable name for a path with no named segment', () => {
     expect(defaultService('')).toBe('Value')
   })
