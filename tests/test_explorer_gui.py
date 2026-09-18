@@ -20,7 +20,6 @@ Loaded by path (``explorer_fetch`` fixture, see conftest); needs the ``cmk.gui``
 APIs, so it runs in the same Checkmk Pythons as the rest of the suite.
 """
 
-import ast
 import json
 import threading
 from dataclasses import dataclass
@@ -28,16 +27,9 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 import pytest
+from ruleset_ast import dictionary_keys
 
 _FETCH = Path(__file__).resolve().parent.parent / "gui" / "wato" / "json_explorer" / "fetch.py"
-_RULESET = (
-    Path(__file__).resolve().parent.parent
-    / "cmk_addons"
-    / "plugins"
-    / "json_api"
-    / "rulesets"
-    / "special_agent.py"
-)
 
 # An explicit password as the Password FormSpec stores it on disk.
 _SECRET = ("cmk_postprocessed", "explicit_password", ("", "s3cr3t"))
@@ -335,29 +327,10 @@ _NOT_PART_OF_THE_REQUEST = {
 }
 
 
-def _endpoint_fields() -> set[str]:
-    """The keys of the ruleset's endpoint Dictionary (AST-parsed, no cmk import)."""
-    tree = ast.parse(_RULESET.read_text())
-    func = next(
-        node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == "_endpoint"
-    )
-    elements = next(
-        keyword.value
-        for call in ast.walk(func)
-        if isinstance(call, ast.Call)
-        and isinstance(call.func, ast.Name)
-        and call.func.id == "Dictionary"
-        for keyword in call.keywords
-        if keyword.arg == "elements"
-    )
-    assert isinstance(elements, ast.Dict)
-    return {key.value for key in elements.keys if isinstance(key, ast.Constant)}
-
-
 def test_every_endpoint_field_is_applied_by_the_preview_or_knowingly_skipped():
     """The guard that would have caught this whole PR a year earlier."""
     classified = _APPLIED_TO_THE_REQUEST | set(_NOT_PART_OF_THE_REQUEST)
-    fields = _endpoint_fields()
+    fields = dictionary_keys("_endpoint")
 
     assert not fields - classified, (
         "new endpoint field(s) in the ruleset that the preview has not been told "
