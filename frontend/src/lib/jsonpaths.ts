@@ -41,7 +41,10 @@ export function joinKey(parent: string, key: string): string {
   return parent + seg
 }
 
-const _SEG = /[A-Za-z0-9_]+|\['[^']*'\]|\["[^"]*"\]|\[\d+\]/g
+// The agent's _PATH_TOKEN, segment for segment: a bracket-quoted key, an
+// array index, or a plain key — which is anything that is not '.', '[' or
+// ']', dashes and spaces included.
+const _SEG = /\['[^']*'\]|\["[^"]*"\]|\[\d+\]|[^.[\]]+/g
 
 export function defaultService(path: string): string {
   const cleaned = path.replace(/\[\*\]/g, '')
@@ -178,7 +181,11 @@ function tokenizePath(rawPath: string): Step[] | null {
   } else if (path.startsWith('$')) {
     path = path.slice(1)
   }
-  const seg = /^(?:\.?([A-Za-z0-9_]+)|\['([^']*)'\]|\["([^"]*)"\]|\[(\d+)\]|(\[\*\]))/
+  // Same alternatives as the agent's _PATH_TOKEN (plus '[*]', which the agent
+  // handles a level up), but ANCHORED and consumed step by step: the agent
+  // scans for tokens and ignores whatever lies between them, while a preview
+  // must not resolve a path it did not fully understand.
+  const seg = /^(?:\['([^']*)'\]|\["([^"]*)"\]|\[(\d+)\]|(\[\*\])|\.?([^.[\]]+))/
   const steps: Step[] = []
   while (path.length) {
     const m = seg.exec(path)
@@ -190,11 +197,11 @@ function tokenizePath(rawPath: string): Step[] | null {
     } else if (m[2] !== undefined) {
       steps.push({ kind: 'key', key: m[2] })
     } else if (m[3] !== undefined) {
-      steps.push({ kind: 'key', key: m[3] })
+      steps.push({ kind: 'index', index: Number(m[3]) })
     } else if (m[4] !== undefined) {
-      steps.push({ kind: 'index', index: Number(m[4]) })
-    } else {
       steps.push({ kind: 'wildcard' })
+    } else {
+      steps.push({ kind: 'key', key: m[5]! })
     }
     path = path.slice(m[0].length)
   }
