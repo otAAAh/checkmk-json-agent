@@ -1,0 +1,12 @@
+{
+  // Type-check the modules that do NOT import cmk-frontend-vue through the
+  // build-time bridge (`@/...`), so this runs on a bare clone and in CI. The
+  // components are covered by the frontend build itself; this catches the
+  // errors a bundler never reports, because esbuild strips types without
+  // resolving them (a missing type import builds happily and fails nothing).
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "types": ["node"]
+  },
+  "include": ["src/lib/**/*.ts", "src/api/**/*.ts", "src/composables/**/*.ts", "vitest.config.ts"]
+}

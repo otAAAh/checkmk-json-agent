@@ -21,6 +21,7 @@ import {
   extractionService,
   newServices,
   type ConnectionValue,
+  type EndpointServices,
   type ExtractionValue,
   type WizardState,
 } from '../lib/rulevalue'
