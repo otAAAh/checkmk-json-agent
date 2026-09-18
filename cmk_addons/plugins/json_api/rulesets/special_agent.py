@@ -344,6 +344,21 @@ def _validate_host_label(value: object) -> None:
 _SUMMARY_TEMPLATE_PATTERN = re.compile(r"[^{}]*(\{[^{}]+\}[^{}]*)*\Z")
 
 
+def _validate_value_range(value: object) -> None:
+    """A range has to be a range: at least one end, and the right way round."""
+    if not isinstance(value, dict):
+        return
+    low, high = value.get("min"), value.get("max")
+    if low is None and high is None:
+        raise validators.ValidationError(
+            Message("Give at least one end of the range, or leave the range unset.")
+        )
+    if low is not None and high is not None and low >= high:
+        raise validators.ValidationError(
+            Message("The lowest value must be smaller than the highest value.")
+        )
+
+
 def _validate_summary(value: str) -> None:
     if not value.strip():
         return
@@ -1133,6 +1148,41 @@ def _extraction() -> Dictionary:
                         SingleChoiceElement("percent", Title("Percent")),
                     ],
                     prefill=InputHint(Title("No unit")),
+                ),
+            ),
+            "value_range": DictElement(
+                required=False,
+                parameter_form=Dictionary(
+                    title=Title("Value range (for graphs and gauges)"),
+                    help_text=Help(
+                        "The range this value moves in, when it has one: a "
+                        "battery percentage is 0 to 100, a queue with a cap is 0 "
+                        "to that cap. It changes nothing about the state - it "
+                        "tells Checkmk what 'full' means, so the graph keeps a "
+                        "steady scale instead of rescaling to whatever the last "
+                        "hour happened to contain, a gauge dashboard widget has "
+                        "a dial to draw, and the service list's bar is filled "
+                        "against the real maximum. Leave it unset for a value "
+                        "with no natural limit; the bar is then scaled to the "
+                        "critical level instead, where one is configured."
+                    ),
+                    custom_validate=(_validate_value_range,),
+                    elements={
+                        "min": DictElement(
+                            required=False,
+                            parameter_form=Float(
+                                title=Title("Lowest possible value"),
+                                prefill=DefaultValue(0.0),
+                            ),
+                        ),
+                        "max": DictElement(
+                            required=False,
+                            parameter_form=Float(
+                                title=Title("Highest possible value"),
+                                prefill=InputHint(100.0),
+                            ),
+                        ),
+                    },
                 ),
             ),
             "levels_upper": DictElement(

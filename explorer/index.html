@@ -718,7 +718,8 @@ function addExtraction(path) {
     aggregate: "",
     valueAs: "", tsFormat: "auto",
     flPath: "", flOp: "not_equals", flValue: "",
-    unit: "", calc: "", calcPath: "", summary: "", lu_w: "", lu_c: "", ll_w: "", ll_c: "",
+    unit: "", vr_min: "", vr_max: "",
+    calc: "", calcPath: "", summary: "", lu_w: "", lu_c: "", ll_w: "", ll_c: "",
     invNode: "", invKey: "", invKeepService: false,
     matchMode: "", mmPattern: "", mmState: "2",
     smOk: "", smWarn: "", smCrit: "", smState: "0",
@@ -773,6 +774,7 @@ function renderFields() {
         ["", "count", "bytes", "seconds", "percent"].map(u =>
           `<option value="${u}"${e.unit === u ? " selected" : ""}>${u || "no unit"}</option>`).join("") +
       `</select></div>` +
+      `<div class="row"><label>Value range</label><span class="lvls"><input type="text" data-f="vr_min" data-i="${i}" value="${escAttr(e.vr_min)}" placeholder="lowest (e.g. 0)"><input type="text" data-f="vr_max" data-i="${i}" value="${escAttr(e.vr_max)}" placeholder="highest (e.g. 100)"></span></div>` +
       `<div class="row"><label>Transform</label><input type="text" data-f="calc" data-i="${i}" value="${escAttr(e.calc)}" placeholder="e.g. value / 1024 / 1024, or value / other * 100"></div>` +
       `<div class="row"><label>Second path ('other')</label><input type="text" data-f="calcPath" data-i="${i}" value="${escAttr(e.calcPath)}" placeholder="(optional) e.g. total — only with 'other' in the transform"></div>` +
       `<div class="row"><label>Summary text</label><input type="text" data-f="summary" data-i="${i}" value="${escAttr(e.summary)}" placeholder="extra text, e.g. {message} (leader {leader})"></div>` +
@@ -821,6 +823,23 @@ function renderFields() {
 }
 
 // ---- output generation ----------------------------------------------------
+// A value range as the rule stores it: {min, max}, either end optional, both
+// numbers. Anything unparseable is dropped rather than written into the rule -
+// the ruleset would reject it, and a range is presentation only anyway.
+function valueRange(low, high) {
+  const num = v => {
+    const s = String(v ?? "").trim();
+    return s !== "" && Number.isFinite(Number(s)) ? Number(s) : undefined;
+  };
+  const min = num(low), max = num(high);
+  if (min === undefined && max === undefined) return null;
+  if (min !== undefined && max !== undefined && min >= max) return null;
+  const out = {};
+  if (min !== undefined) out.min = min;
+  if (max !== undefined) out.max = max;
+  return out;
+}
+
 function levelsPair(w, c) {
   const wn = parseFloat(w), cn = parseFloat(c);
   if (Number.isNaN(wn) || Number.isNaN(cn)) return null;
@@ -845,6 +864,10 @@ function extractionObjs(e) {
     if (x.flPath && x.flPath.trim())
       o.filter = { path: x.flPath.trim(), op: x.flOp || "equals", value: x.flValue || "" };
     if (x.unit) o.unit = x.unit;
+    // The range the value moves in: the metric's boundaries, so the graph keeps
+    // a steady scale and a gauge widget has a dial. Either end may stand alone.
+    const vr = valueRange(x.vr_min, x.vr_max);
+    if (vr) o.value_range = vr;
     if (x.calc) o.calc = x.calc;
     if (x.calcPath && x.calcPath.trim()) o.calc_path = x.calcPath.trim();
     if (x.summary && x.summary.trim()) o.summary = x.summary.trim();
@@ -896,6 +919,12 @@ function pyExtraction(o) {
   }
   if (o.filter) p.push(`'filter': {'path': ${pyStr(o.filter.path)}, 'op': ${pyStr(o.filter.op)}, 'value': ${pyStr(o.filter.value)}}`);
   if (o.unit) p.push(`'unit': ${pyStr(o.unit)}`);
+  if (o.value_range) {
+    const vr = [];
+    if (o.value_range.min !== undefined) vr.push(`'min': ${floatPy(o.value_range.min)}`);
+    if (o.value_range.max !== undefined) vr.push(`'max': ${floatPy(o.value_range.max)}`);
+    p.push(`'value_range': {${vr.join(", ")}}`);
+  }
   if (o.calc) p.push(`'calc': ${pyStr(o.calc)}`);
   if (o.calc_path) p.push(`'calc_path': ${pyStr(o.calc_path)}`);
   if (o.summary) p.push(`'summary': ${pyStr(o.summary)}`);

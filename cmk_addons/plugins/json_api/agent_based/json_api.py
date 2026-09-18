@@ -98,6 +98,29 @@ _UNIT_RATE_METRIC = {
 _AGE_METRIC = "json_api_age"
 
 
+def _boundaries(value_range: object) -> tuple[float | None, float | None] | None:
+    """The rule's value range as the ``boundaries`` a Metric takes.
+
+    ``None`` for an absent or unusable range, and for a range with neither end -
+    the ruleset rejects that, but a hand-written rule is not bound by the form.
+    An end that is present but not a number is dropped on its own rather than
+    voiding the other: half a range still fixes half the scale.
+    """
+    if not isinstance(value_range, dict):
+        return None
+
+    def _end(key: str) -> float | None:
+        value = value_range.get(key)
+        return (
+            float(value)
+            if isinstance(value, (int, float)) and not isinstance(value, bool)
+            else None
+        )
+
+    low, high = _end("min"), _end("max")
+    return None if low is None and high is None else (low, high)
+
+
 def _metric_name(unit: object) -> str:
     return _UNIT_METRIC.get(unit if isinstance(unit, str) else None, "json_api_value")
 
@@ -187,6 +210,11 @@ class Item:
     render_func: Callable[[float], str] | None
     path: str
     url: str
+    # The value's configured range as ``(min, max)``, either end possibly None -
+    # the metric's boundaries. Presentation only: it fixes the scale of the
+    # graph, the dial of a gauge dashboard widget and the fill of the service
+    # list's bar, and never touches the state.
+    boundaries: tuple[float | None, float | None] | None = None
     # How to read the value: as it stands, as a counter, or as a timestamp.
     value_as: _ValueAs = None
     # The transform's second operand, resolved by the agent in this service's own
@@ -529,6 +557,7 @@ def parse_json_api(string_table: StringTable) -> Section | None:
             calc=_coerce_calc(result.get("calc")),
             calc_other=_optional_number(result.get("calc_other")),
             unit=result.get("unit"),
+            boundaries=_boundaries(result.get("value_range")),
             metric_name=_metric_name(result.get("unit")),
             render_func=_render_func(result.get("unit")),
             path=result.get("path", ""),
@@ -1017,6 +1046,7 @@ def _value_results(
             metric_name=metric_name,
             label=label,
             render_func=render_func,
+            boundaries=entry.boundaries,
         )
         return
 
@@ -1061,7 +1091,7 @@ def _value_results(
         else:
             shown = _fmt_number(number) if (entry.calc or derived) else _render_value(entry.value)
         yield Result(state=State.OK, summary=f"{label}: {shown}")
-        yield Metric(metric_name, number)
+        yield Metric(metric_name, number, boundaries=entry.boundaries)
     else:
         yield Result(state=State.OK, summary=f"{label}: {_render_value(entry.value)}")
 
