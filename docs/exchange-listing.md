@@ -113,6 +113,14 @@ included. One rule. Any API. Done.
   scale** instead of rescaling to whatever the last hour contained, a **gauge
   dashboard widget** has a dial to draw, and the bar fills against the real
   maximum. It never changes the state — presentation only, and optional.
+- 📛 **Name the metric yourself** — the **Gauge**, **Single metric** and **Bar
+  chart** dashboard widgets are each bound to one metric *by name*, and their
+  dropdown only lists a service's real names once the widget is filtered to a
+  host **and** a service — so a widget configured the other way round points at
+  a name the service never emits and stays blank. Give a field an explicit
+  **metric name** and that is what it records, so you can point a widget
+  straight at it. Validated against Checkmk's own naming rule, in Setup and in
+  the wizard.
 - 🏷️ **Labels from the response** — attach Checkmk **host** and **service labels**
   built from fields (`json_api/version`, `json_api/region`), so views, rules and
   filters can key off what the API says about itself. The hosts a `[*]` rule
@@ -158,6 +166,8 @@ Tick `status` (expect `UP`) and `components.db.status` → instant services
 
 ## Details
 
-- **Checkmk 2.4+**, any edition. Tested on real 2.4 and 2.5 sites.
+- **Checkmk 2.4+**, any edition — and verified on **3.0**. CI runs the suite
+  inside the official Checkmk container for every release line that publishes
+  one.
 - Install via `mkp add` / `mkp enable`, or **Setup → Extension packages**.
 - Source, docs & issues: <https://github.com/otAAAh/checkmk-json-agent> · GPL-2.0-only
