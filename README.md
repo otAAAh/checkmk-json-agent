@@ -5,6 +5,7 @@
 [![Frontend build](https://github.com/otAAAh/checkmk-json-agent/actions/workflows/frontend-build.yml/badge.svg)](https://github.com/otAAAh/checkmk-json-agent/actions/workflows/frontend-build.yml)
 [![Checkmk agent 2.4+](https://img.shields.io/badge/Checkmk_agent-2.4%2B-15d1a0?logo=checkmk&logoColor=white)](https://github.com/otAAAh/checkmk-json-agent/actions/workflows/ci.yml)
 [![Checkmk explorer 2.5+](https://img.shields.io/badge/Checkmk_explorer-2.5%2B-15d1a0?logo=checkmk&logoColor=white)](https://github.com/otAAAh/checkmk-json-agent/actions/workflows/frontend-build.yml)
+[![Checkmk 3.0 ready](https://img.shields.io/badge/Checkmk_3.0-ready-15d1a0?logo=checkmk&logoColor=white)](#compatibility)
 [![License: GPL v2](https://img.shields.io/badge/License-GPLv2-blue.svg)](LICENSE)
 
 A generic Checkmk **special agent for monitoring any HTTP/JSON API** — query a
@@ -14,7 +15,8 @@ development per integration: it's all one Setup rule.
 
 Targets **Checkmk 2.4+** and the current stable plugin APIs
 (`cmk.agent_based.v2`, `cmk.rulesets.v1`, `cmk.server_side_calls.v1`,
-`cmk.graphing.v1`).
+`cmk.graphing.v1`). See [Compatibility](#compatibility) for what that covers on
+the 3.0 line.
 
 ## Features
 
@@ -165,6 +167,19 @@ Targets **Checkmk 2.4+** and the current stable plugin APIs
 ## Requirements
 
 - Checkmk 2.4.0 or newer (any edition)
+
+## Compatibility
+
+| Checkmk line | Status |
+| --- | --- |
+| **2.4** | Supported. Covered by CI on every push (`2.4.0-latest`). |
+| **2.5** | Supported. Covered by CI on every push (newest published daily). |
+| **3.0** | Supported. Verified by hand — the plugin installs and all of its modules import against 3.0's `cmk.agent_based.v2`, `cmk.rulesets.v1`, `cmk.server_side_calls.v1` and `cmk.graphing.v1` on Python 3.14. **Not yet covered by CI**, because no public `checkmk/check-mk-raw` 3.0 image exists to run it against; the CI job already asks for one on every run and starts testing 3.0 the day it appears. |
+
+The agent branches on the password-store API (public
+`cmk.password_store.v1_unstable` on 2.5+, an internal fallback on 2.4), which is
+the only place the lines differ for this plugin. The MKP declares a minimum of
+2.4.0 and no upper bound, so it installs on any newer line.
 
 ## Installation
 
