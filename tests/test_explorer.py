@@ -17,6 +17,7 @@ site and simply skips where Node is unavailable.
 
 import ast
 import json
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -427,3 +428,44 @@ def test_explorer_emits_a_value_range_the_ruleset_accepts(rule_value: dict, expl
     # The agent command line mirrors the rule.
     cli_extractions = {e["service"]: e for e in explorer_output["cli"][0]["extractions"]}
     assert cli_extractions["Node"]["value_range"] == {"min": 0, "max": 1000}
+
+
+def _ruleset_assignment(name: str) -> ast.expr:
+    """The value assigned to a module-level ``name`` in the ruleset.
+
+    AST again, not an import: this file's whole point is running without
+    ``cmk.*`` (the CI 'explorer' job is a plain Python with no Checkmk).
+    """
+    tree = ast.parse(_RULESET.read_text())
+    for node in tree.body:
+        if isinstance(node, ast.Assign) and any(
+            isinstance(t, ast.Name) and t.id == name for t in node.targets
+        ):
+            return node.value
+    raise AssertionError(f"the ruleset no longer defines {name}")
+
+
+def test_explorers_metric_name_pattern_matches_the_rulesets():
+    """The Explorer is standalone, so it mirrors the ruleset's metric-name rules
+    by hand. A drift here means it hands you a rule Setup then refuses, which is
+    the one thing this tool exists not to do."""
+    call = _ruleset_assignment("_METRIC_NAME")  # re.compile(r"...")
+    assert isinstance(call, ast.Call)
+    (pattern,) = [a.value for a in call.args if isinstance(a, ast.Constant)]
+
+    source = (_ROOT / "explorer" / "index.html").read_text()
+    assert f"/{pattern}/" in source, f"the Explorer does not carry the ruleset's {pattern!r}"
+
+
+def test_explorers_reserved_metrics_match_the_rulesets():
+    call = _ruleset_assignment("_DECLARED_METRICS")  # frozenset({...})
+    assert isinstance(call, ast.Call)
+    (literal,) = call.args
+    declared = {e.value for e in literal.elts if isinstance(e, ast.Constant)}
+    assert declared, "could not read the reserved names out of the ruleset"
+
+    source = (_ROOT / "explorer" / "index.html").read_text()
+    block = re.search(r"const DECLARED_METRICS = new Set\(\[(.*?)\]\)", source, re.S)
+    assert block, "the Explorer no longer declares DECLARED_METRICS"
+    # Compared as a set, not as text: order and wrapping are free to differ.
+    assert set(re.findall(r'"([^"]+)"', block.group(1))) == declared
