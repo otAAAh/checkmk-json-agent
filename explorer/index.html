@@ -776,6 +776,8 @@ function renderFields() {
       `</select></div>` +
       `<div class="row"><label>Value range</label><span class="lvls"><input type="text" data-f="vr_min" data-i="${i}" value="${escAttr(e.vr_min)}" placeholder="lowest (e.g. 0)"><input type="text" data-f="vr_max" data-i="${i}" value="${escAttr(e.vr_max)}" placeholder="highest (e.g. 100)"></span></div>` +
       `<div class="row"><label>Metric name</label><input type="text" data-f="metricName" data-i="${i}" value="${escAttr(e.metricName)}" placeholder="(optional) name a Gauge / Single metric widget can be pointed at"></div>` +
+      (metricNameError(e.metricName)
+        ? `<div class="subnote err">${escAttr(metricNameError(e.metricName))}</div>` : "") +
       `<div class="row"><label>Transform</label><input type="text" data-f="calc" data-i="${i}" value="${escAttr(e.calc)}" placeholder="e.g. value / 1024 / 1024, or value / other * 100"></div>` +
       `<div class="row"><label>Second path ('other')</label><input type="text" data-f="calcPath" data-i="${i}" value="${escAttr(e.calcPath)}" placeholder="(optional) e.g. total — only with 'other' in the transform"></div>` +
       `<div class="row"><label>Summary text</label><input type="text" data-f="summary" data-i="${i}" value="${escAttr(e.summary)}" placeholder="extra text, e.g. {message} (leader {leader})"></div>` +
@@ -827,6 +829,30 @@ function renderFields() {
 // A value range as the rule stores it: {min, max}, either end optional, both
 // numbers. Anything unparseable is dropped rather than written into the rule -
 // the ruleset would reject it, and a range is presentation only anyway.
+// What Checkmk accepts as a metric name, and what the ruleset reserves. Both
+// mirror cmk_addons/plugins/json_api/rulesets/special_agent.py — this Explorer
+// is standalone and dependency-free, so it cannot import them. Its whole job is
+// to hand you a rule you can paste, and a rule Setup refuses is not that.
+const METRIC_NAME_RE = /^[a-zA-Z0-9][a-zA-Z0-9_]*$/;
+const DECLARED_METRICS = new Set([
+  "json_api_value", "json_api_count", "json_api_bytes", "json_api_seconds",
+  "json_api_percent", "json_api_rate", "json_api_count_rate",
+  "json_api_bytes_rate", "json_api_seconds_rate", "json_api_percent_rate",
+  "json_api_age", "json_api_response_time", "json_api_response_size",
+  "json_api_cert_expiry",
+]);
+
+/** Why this metric name would be rejected by Setup, or "" if it is fine. */
+function metricNameError(name) {
+  const v = (name || "").trim();
+  if (!v) return "";                       // unset is the normal case
+  if (!METRIC_NAME_RE.test(v))
+    return "Letters, digits and underscores only, starting with a letter or a digit.";
+  if (DECLARED_METRICS.has(v))
+    return `'${v}' is one of the plugin's own metrics — the field would inherit its unit and colour.`;
+  return "";
+}
+
 function valueRange(low, high) {
   const num = v => {
     const s = String(v ?? "").trim();
