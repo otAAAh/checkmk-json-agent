@@ -65,9 +65,19 @@ jobs:
   #
   # The plugin targets 2.4+, and the agent branches on the password-store API
   # (public cmk.password_store.v1_unstable on 2.5+, internal fallback on 2.4),
-  # so we exercise BOTH lines: the stable 2.4 image and the newest 2.5 build.
-  # 2.5 has no floating '-latest' tag yet and its dated dailies are eventually
-  # pruned, so the 2.5 tag is resolved at run time instead of hard-coded.
+  # so every release line with a public image is exercised: 2.4, 2.5 and 3.0.
+  #
+  # Each line is resolved at run time rather than hard-coded, because they are
+  # published differently and that changes over time: a released line carries a
+  # floating '<line>-latest', an in-development one only dated dailies that are
+  # eventually pruned, and a line too new to have either has no image at all.
+  # A line with no image is skipped with a notice rather than failing the build
+  # - that is what lets 3.0 sit here and start testing itself the day its images
+  # appear, at no cost until then. The flip side is that a silent skip is how a
+  # line quietly stops being covered, so the step is loud about what it found:
+  # it annotates a line it could not resolve, warns when the newest image a line
+  # offers has gone stale, and fails outright if NOTHING resolved (which would
+  # otherwise be a green run that tested nothing).
   test:
     runs-on: ubuntu-latest
     steps:
@@ -75,16 +85,42 @@ jobs:
       - name: Resolve the Checkmk images to test against
         id: images
         run: |
-          set -euo pipefail
-          newest_daily() {
+          set -uo pipefail
+          # The newest image for a release line: its floating '-latest' where it
+          # has one, else the newest dated daily, else nothing.
+          newest() {
             curl -fsSL "https://hub.docker.com/v2/repositories/checkmk/check-mk-raw/tags/?page_size=100&name=$1" \
-              | python3 -c "import sys, json; ts=[t['name'] for t in json.load(sys.stdin)['results'] if t['name'].startswith('$1')]; print(sorted(ts)[-1] if ts else '')"
+              | python3 -c "import sys, json; p='$1'; t=[x['name'] for x in json.load(sys.stdin)['results'] if x['name'].startswith(p)]; l=[x for x in t if x.endswith('-latest')]; d=sorted(x for x in t if x.startswith(p+'-2')); print(l[0] if l else (d[-1] if d else ''))"
           }
-          images="checkmk/check-mk-raw:2.4.0-latest"
-          v25="$(newest_daily 2.5.0-2 || true)"
-          [ -n "$v25" ] && images="$images checkmk/check-mk-raw:$v25"
+          # Age of a dated tag in days; nothing for a floating one.
+          age_days() {
+            d="${1##*-}"
+            case "$d" in
+              [0-9][0-9][0-9][0-9].[0-9][0-9].[0-9][0-9])
+                echo $(( ( $(date +%s) - $(date -d "${d//./-}" +%s) ) / 86400 )) ;;
+            esac
+          }
+          images=""
+          for line in 2.4.0 2.5.0 3.0.0; do
+            tag="$(newest "$line" || true)"
+            if [ -z "$tag" ]; then
+              echo "::notice::no public check-mk-raw image for $line yet - that line is not tested"
+              continue
+            fi
+            images="$images checkmk/check-mk-raw:$tag"
+            age="$(age_days "$tag")"
+            if [ -n "$age" ] && [ "$age" -gt 120 ]; then
+              echo "::warning::$line resolves to $tag, $age days old - the newest daily published for that line. Its coverage is that old too."
+            else
+              echo "$line -> $tag${age:+ ($age days old)}"
+            fi
+          done
+          if [ -z "$images" ]; then
+            echo "::error::no Checkmk image resolved for any release line - refusing to report a pass that tested nothing"
+            exit 1
+          fi
           echo "list=$images" >> "$GITHUB_OUTPUT"
-          echo "Testing against: $images"
+          echo "Testing against:$images"
       - name: Run pytest inside each Checkmk site Python
         run: |
           set -uo pipefail
