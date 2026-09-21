@@ -102,8 +102,12 @@ description:
  dashboard widgets need: each is bound to one metric chosen BY NAME, and their
  dropdown only offers a service's real names once the widget is filtered to a
  host and a service. A field whose metric name has to be known in advance can
- state it in the rule. A field written to the inventory instead of a service
- cannot report into a shared one.
+ state it in the rule; that costs the service its Perf-O-Meter, since every bar
+ this plugin draws is declared against one of its own metrics. Two fields of one
+ shared service that would resolve to the SAME metric name are rejected by
+ Setup: the check can only disambiguate them by position, so reordering the
+ fields would make two metrics trade histories. A field written to the inventory
+ instead of a service cannot report into a shared one.
 
  Two endpoints extracting the same fields would produce two services with the
  same name, the later one disambiguated with a {(2)} suffix that says nothing

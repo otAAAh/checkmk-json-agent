@@ -111,6 +111,11 @@ def _first_match(perfometers_module, service_metrics: dict[str, set[str]]) -> st
         # A service holding several fields names its metrics after them at
         # runtime, so there is nothing to match: no bar, by design.
         ({"json_api_value_queue_depth": {"crit"}}, None),
+        # Same for a name stated in the rule ('Metric name'), which is the
+        # price of choosing it: every bar here is declared against one of this
+        # plugin's own metrics, so a name of the operator's own matches none.
+        # A field that needs both keeps the derived name.
+        ({"disk_free_pct": {"crit"}}, None),
     ],
 )
 def test_the_right_bar_is_drawn(perfometers, service_metrics, expected):
