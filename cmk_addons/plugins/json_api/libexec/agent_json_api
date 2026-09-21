@@ -1847,6 +1847,9 @@ def _result(
         # quietly computing with a stand-in.
         "calc_other": calc_other,
         "unit": spec.get("unit"),
+        # The metric name the rule states, if any. Untouched here for the same
+        # reason as value_range: only the check emits metrics.
+        "metric_name": spec.get("metric_name"),
         # The range this value moves in, when the rule states one. Untouched
         # here: the check turns it into the metric's boundaries, and only the
         # check emits metrics.

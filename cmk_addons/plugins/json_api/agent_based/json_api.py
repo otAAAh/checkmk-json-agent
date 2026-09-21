@@ -19,7 +19,7 @@ import json
 import math
 import re
 import time
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
@@ -206,10 +206,18 @@ class Item:
     match: _Match
     calc: str | None
     unit: object
+    # The metric name derived from the unit - what this field emits unless the
+    # rule overrode it (metric_override) or it shares a service.
     metric_name: str
     render_func: Callable[[float], str] | None
     path: str
     url: str
+    # The metric name stated in the rule, used verbatim when set. The escape
+    # hatch for a name that has to be known in advance: the Gauge / Single
+    # metric / Bar chart dashboard widgets are bound to one metric BY NAME, and
+    # a shared service's generated names are neither obvious nor offered by the
+    # widget's dropdown until it is filtered to a host and a service.
+    metric_override: str | None = None
     # The value's configured range as ``(min, max)``, either end possibly None -
     # the metric's boundaries. Presentation only: it fixes the scale of the
     # graph, the dial of a gauge dashboard widget and the fill of the service
@@ -559,6 +567,7 @@ def parse_json_api(string_table: StringTable) -> Section | None:
             unit=result.get("unit"),
             boundaries=_boundaries(result.get("value_range")),
             metric_name=_metric_name(result.get("unit")),
+            metric_override=_optional_str(result.get("metric_name")),
             render_func=_render_func(result.get("unit")),
             path=result.get("path", ""),
             url=result.get("url", ""),
@@ -989,6 +998,10 @@ def _line_metric_name(metric_name: str, line: str | None) -> str:
     routinely share a unit - two byte counts would otherwise both be
     'json_api_bytes' and collide. The line's own name disambiguates them.
 
+    Not enough on its own: the slug folds every non-alphanumeric run to '_', so
+    'Root used' and 'Root-used' still arrive here as the same name. That last
+    collision is resolved by _unique_metric_name, over the whole service.
+
     The result is not one of the metrics the graphing module declares, so
     Checkmk titles it after the name itself and renders it as a plain number.
     That is the price of a service holding an open set of fields; a field that
@@ -997,14 +1010,81 @@ def _line_metric_name(metric_name: str, line: str | None) -> str:
     return metric_name if line is None else f"{metric_name}_{_metric_slug(line)}"
 
 
+def _unique_metric_name(name: str, taken: set[str]) -> str:
+    """``name``, suffixed '_2', '_3', ... until this service has not used it.
+
+    The sibling of _unique_name, which does the same for service items. It
+    cannot be that helper: Checkmk accepts only letters, digits and underscores
+    in a metric name, so ' (2)' is not available here.
+
+    ``taken`` is updated in place - the caller allocates the whole service's
+    names through one set.
+    """
+    candidate = name
+    suffix = 2
+    while candidate in taken:
+        candidate = f"{name}_{suffix}"
+        suffix += 1
+    taken.add(candidate)
+    return candidate
+
+
+def _emitted_metric_name(entry: Item) -> str:
+    """The metric ``entry`` will emit, from its configuration alone.
+
+    Mirrors the name _derive returns on the branches that go on to emit a
+    metric; on the branches that cannot derive a number it emits none, so the
+    two can never disagree about a name that is actually used (asserted by
+    test_the_predicted_metric_name_matches_what_derive_returns).
+
+    Reading this from the configuration rather than from the value is the point:
+    the names of a shared service's fields must not depend on what the API
+    happened to answer this time round. A field that is briefly missing, or a
+    counter still waiting for its second reading, would otherwise renumber the
+    fields after it and split their history.
+    """
+    if entry.value_as is None:
+        return entry.metric_name
+    if entry.value_as[0] == "counter":
+        return _rate_metric_name(entry.unit)
+    # A timestamp becomes an age: seconds, unless the rule named a unit itself.
+    return entry.metric_name if isinstance(entry.unit, str) else _AGE_METRIC
+
+
+def _field_metric_name(entry: Item) -> str:
+    """The name this field asks for, before the service-wide uniqueness pass.
+
+    A name stated in the rule is used verbatim, in a shared service too: the
+    whole point of the option is a name the operator already knows, so appending
+    the line's slug to it would defeat it.
+    """
+    if entry.metric_override is not None:
+        return entry.metric_override
+    return _line_metric_name(_emitted_metric_name(entry), entry.label)
+
+
+def _service_metric_names(entries: Sequence[Item]) -> list[str]:
+    """One metric name per entry of a service, unique within it.
+
+    Allocated for EVERY entry, in section order, including the ones that will
+    not emit a metric at all (an inventory-only field, a non-numeric value):
+    an entry's name then depends only on the rule, never on this run's data.
+    """
+    taken: set[str] = set()
+    return [_unique_metric_name(_field_metric_name(entry), taken) for entry in entries]
+
+
 def _value_results(
     entry: Item,
     levels_upper: _Levels,
     levels_lower: _Levels,
     match: _Match,
+    metric_name: str,
 ) -> CheckResult:
-    number, metric_name, render_func, extra = _derive(entry)
-    metric_name = _line_metric_name(metric_name, entry.label)
+    # The metric's name is allocated for the whole service at once (see
+    # _service_metric_names), not derived here: only the caller can see the
+    # sibling fields this one has to stay distinct from.
+    number, _derived_name, render_func, extra = _derive(entry)
     yield from extra
     if entry.value_as is not None and number is None:
         return  # _derive already explained why (UNKNOWN / no rate yet)
@@ -1167,7 +1247,8 @@ def check_json_api(item: str, params: Mapping[str, object], section: Section) ->
     # several fields), so it is not applied to one: those fields keep the levels
     # and matching the agent rule gave them, which the details spell out.
     combined = len(entries) > 1
-    for entry in entries:
+    metric_names = _service_metric_names(entries)
+    for index, entry in enumerate(entries):
         if entry.inventory is not None and not entry.inventory.keep_service:
             continue  # an inventory-only field of a shared service
         # Effective parameters: a check-parameters rule (or the discovered
@@ -1217,7 +1298,9 @@ def check_json_api(item: str, params: Mapping[str, object], section: Section) ->
             yield from _response_context(entry)
             continue
 
-        yield from _with_summary(_value_results(entry, levels_upper, levels_lower, match), extra)
+        yield from _with_summary(
+            _value_results(entry, levels_upper, levels_lower, match, metric_names[index]), extra
+        )
         yield from _context(entry, match)
         yield from _response_context(entry)
 

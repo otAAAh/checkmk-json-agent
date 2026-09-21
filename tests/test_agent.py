@@ -3535,3 +3535,18 @@ def test_the_value_range_travels_with_the_result(agent):
 
     assert by_service["Count"]["value_range"] == {"min": 0, "max": 100}
     assert by_service["Health"]["value_range"] is None
+
+
+def test_the_metric_name_travels_with_the_result(agent):
+    """Same as the value range: the agent emits no metrics, so it only carries
+    the name from the rule to the check, which is the only place it means
+    anything."""
+    specs = [
+        {"path": "items[0].count", "service": "Count", "metric_name": "queue_depth"},
+        {"path": "status", "service": "Health"},
+    ]
+
+    by_service = {r["service"]: r for r in agent._extract(DOC, specs, "http://test/h")}
+
+    assert by_service["Count"]["metric_name"] == "queue_depth"
+    assert by_service["Health"]["metric_name"] is None

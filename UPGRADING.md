@@ -12,6 +12,47 @@ this list needs none.
 `scripts/gen_changelog.py --version X.Y.Z` appends the matching section to the
 GitHub Release body, so these notes travel with the release people actually read.
 
+## [0.20.0]
+
+### Fields in a shared service that collided now each keep their own metric
+
+Only affects a service built from **several fields** (*Report in a shared
+service named*) where two of the field names differ only in punctuation —
+`Root used` and `Root-used`, say, or `CPU/core` and `CPU core`.
+
+Each line's metric is named after the line, and the name is built by folding
+every run of non-alphanumeric characters to `_`. Names that differed only there
+produced the *same* metric name, so the service emitted it twice: Checkmk kept
+one of the two values and dropped the other, chosen by iteration order, with
+nothing in the UI saying so. The second and any further colliding field now get
+`_2`, `_3`, … appended instead.
+
+**Effect:** the field that used to win keeps its metric and its full history —
+nothing is renamed. The field that used to lose starts recording under the new
+suffixed name, so its graph begins at the upgrade rather than showing the other
+field's data. Check any graph or dashboard widget over such a service: a line
+that looked wrong there was the collision, and it is now two lines.
+
+Fields whose names already differed by more than punctuation are unaffected, as
+is every service built from a single field.
+
+### New: a field can state its own metric name
+
+*Metric name* (optional, per field) sets the name Checkmk stores the metric
+under, instead of the one the plugin derives. Nothing changes for a field that
+leaves it unset.
+
+It exists for the dashboard widgets that are bound to one metric **by name** —
+*Gauge*, *Single metric* and *Bar chart*. Their metric dropdown only lists a
+service's real metric names once the widget is filtered to a host **and** a
+service; configured the other way round it offers the plugin's declared names
+(`json_api_value`, `json_api_bytes`, …), which a shared service never emits, and
+the widget then stays blank. Naming the metric in the rule gives you a name to
+point the widget at directly.
+
+Setting it on a field that already has history starts a new history under the
+new name; the old one is not migrated.
+
 ## [0.17.0]
 
 ### A prefixed endpoint's own service is renamed to sort with its group

@@ -1885,6 +1885,141 @@ def test_metric_slugs_are_identifiers(check):
     assert check._metric_slug("  ...  ") == "value"
 
 
+def test_labels_that_slug_alike_still_get_one_metric_each(check):
+    # The slug folds every non-alphanumeric run to '_', so these three labels
+    # all arrive as 'root_used'. Without the service-wide disambiguation they
+    # would emit one name three times and Checkmk would keep a single value,
+    # picked by iteration order.
+    section = _section(
+        check,
+        [
+            _grouped("Disks", "Root used", value=1024, unit="bytes"),
+            _grouped("Disks", "Root-used", value=2048, unit="bytes"),
+            _grouped("Disks", "Root/used", value=4096, unit="bytes"),
+        ],
+    )
+    metrics = [m for m in check.check_json_api("Disks", {}, section) if isinstance(m, Metric)]
+    assert [m.name for m in metrics] == [
+        "json_api_bytes_root_used",
+        "json_api_bytes_root_used_2",
+        "json_api_bytes_root_used_3",
+    ]
+    # Every value survives: that is what the collision used to cost.
+    assert [m.value for m in metrics] == [1024.0, 2048.0, 4096.0]
+
+
+def test_a_metric_name_does_not_move_when_a_sibling_has_no_value(check):
+    # The names are allocated from the rule, not from this run's data. A field
+    # that is missing (or not numeric) must not renumber the fields after it -
+    # that would split their history at an arbitrary check.
+    def names(first_found):
+        section = _section(
+            check,
+            [
+                _grouped(
+                    "Disks",
+                    "Root used",
+                    found=first_found,
+                    value=1024 if first_found else None,
+                    error=None if first_found else "path not found",
+                    unit="bytes",
+                ),
+                _grouped("Disks", "Root-used", value=2048, unit="bytes"),
+            ],
+        )
+        return [m.name for m in check.check_json_api("Disks", {}, section) if isinstance(m, Metric)]
+
+    assert names(True) == ["json_api_bytes_root_used", "json_api_bytes_root_used_2"]
+    # The first field is gone this time; the second keeps the name it had.
+    assert names(False) == ["json_api_bytes_root_used_2"]
+
+
+def test_a_lone_field_keeps_the_unsuffixed_name(check):
+    # The disambiguation must not reach the overwhelmingly common case: one
+    # field, one service, the declared metric name, no suffix.
+    section = _section(check, [_entry("Used", value=1024, unit="bytes")])
+    metrics = [m.name for m in check.check_json_api("Used", {}, section) if isinstance(m, Metric)]
+    assert metrics == ["json_api_bytes"]
+
+
+def test_a_stated_metric_name_is_used_verbatim(check):
+    # The point of the option is a name the operator already knows, so it is
+    # NOT suffixed with the line's slug the way a generated name is.
+    section = _section(
+        check,
+        [
+            _grouped("Disks", "Root used", value=1024, unit="bytes", metric_name="root_used"),
+            _grouped("Disks", "Data used", value=2048, unit="bytes"),
+        ],
+    )
+    metrics = [m.name for m in check.check_json_api("Disks", {}, section) if isinstance(m, Metric)]
+    assert metrics == ["root_used", "json_api_bytes_data_used"]
+
+
+def test_a_stated_metric_name_overrides_the_unit_and_the_rate(check, monkeypatch):
+    # It wins over the unit's declared metric on a service of its own, and over
+    # the rate metric a counter would otherwise get.
+    section = _section(check, [_entry("Used", value=1024, unit="bytes", metric_name="disk_used")])
+    assert [m.name for m in check.check_json_api("Used", {}, section) if isinstance(m, Metric)] == [
+        "disk_used"
+    ]
+
+    store: dict = {}
+    _counter_store(check, monkeypatch, store)
+    _fixed_clock(check, monkeypatch, 1000.0)
+    rate_kw = {"value_as": ["counter", None], "unit": "count", "metric_name": "reqs"}
+    list(check.check_json_api("Reqs", {}, _section(check, [_entry("Reqs", value=100, **rate_kw)])))
+    _fixed_clock(check, monkeypatch, 1030.0)
+    results = check.check_json_api(
+        "Reqs", {}, _section(check, [_entry("Reqs", value=160, **rate_kw)])
+    )
+    assert [m.name for m in results if isinstance(m, Metric)] == ["reqs"]
+
+
+def test_stated_metric_names_that_collide_are_still_made_unique(check):
+    # The rule can state the same name twice; one service still cannot emit one
+    # name twice, so the second is disambiguated rather than dropped.
+    section = _section(
+        check,
+        [
+            _grouped("Disks", "Root", value=1, metric_name="used"),
+            _grouped("Disks", "Data", value=2, metric_name="used"),
+        ],
+    )
+    metrics = [m for m in check.check_json_api("Disks", {}, section) if isinstance(m, Metric)]
+    assert [m.name for m in metrics] == ["used", "used_2"]
+    assert [m.value for m in metrics] == [1.0, 2.0]
+
+
+@pytest.mark.parametrize(
+    "kw",
+    [
+        {"value": 5},
+        {"value": 5, "unit": "bytes"},
+        {"value": 5, "unit": "percent"},
+        {"value": 5, "value_as": ["counter", {}]},
+        {"value": 5, "unit": "bytes", "value_as": ["counter", {}]},
+        {"value": "2020-01-01T00:00:00Z", "value_as": ["timestamp", {}]},
+        {"value": "2020-01-01T00:00:00Z", "unit": "seconds", "value_as": ["timestamp", {}]},
+    ],
+)
+def test_the_predicted_metric_name_matches_what_derive_returns(check, monkeypatch, kw):
+    # _emitted_metric_name reads the name off the configuration so the caller
+    # can allocate names before any value is looked at. It has to agree with
+    # _derive, which reads it off the value, on every branch that emits a
+    # metric at all.
+    _counter_store(check, monkeypatch, {})
+    (entry,) = _section(check, [_entry("X", **kw)]).items["X"]
+    # A counter needs a previous reading, and a tick between the two, before it
+    # produces a rate; the second call is the one that emits.
+    _fixed_clock(check, monkeypatch, 1000.0)
+    check._derive(entry)
+    _fixed_clock(check, monkeypatch, 1030.0)
+    number, derived_name, _render, _extra = check._derive(entry)
+    assert number is not None, "this config should derive a number"
+    assert check._emitted_metric_name(entry) == derived_name
+
+
 def test_a_combined_service_ignores_the_check_parameters_rule(check):
     # One set of levels cannot describe several fields, so the rule is not
     # applied to such a service: the lines keep what the agent rule gave them.

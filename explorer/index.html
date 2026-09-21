@@ -718,7 +718,7 @@ function addExtraction(path) {
     aggregate: "",
     valueAs: "", tsFormat: "auto",
     flPath: "", flOp: "not_equals", flValue: "",
-    unit: "", vr_min: "", vr_max: "",
+    unit: "", metricName: "", vr_min: "", vr_max: "",
     calc: "", calcPath: "", summary: "", lu_w: "", lu_c: "", ll_w: "", ll_c: "",
     invNode: "", invKey: "", invKeepService: false,
     matchMode: "", mmPattern: "", mmState: "2",
@@ -775,6 +775,7 @@ function renderFields() {
           `<option value="${u}"${e.unit === u ? " selected" : ""}>${u || "no unit"}</option>`).join("") +
       `</select></div>` +
       `<div class="row"><label>Value range</label><span class="lvls"><input type="text" data-f="vr_min" data-i="${i}" value="${escAttr(e.vr_min)}" placeholder="lowest (e.g. 0)"><input type="text" data-f="vr_max" data-i="${i}" value="${escAttr(e.vr_max)}" placeholder="highest (e.g. 100)"></span></div>` +
+      `<div class="row"><label>Metric name</label><input type="text" data-f="metricName" data-i="${i}" value="${escAttr(e.metricName)}" placeholder="(optional) name a Gauge / Single metric widget can be pointed at"></div>` +
       `<div class="row"><label>Transform</label><input type="text" data-f="calc" data-i="${i}" value="${escAttr(e.calc)}" placeholder="e.g. value / 1024 / 1024, or value / other * 100"></div>` +
       `<div class="row"><label>Second path ('other')</label><input type="text" data-f="calcPath" data-i="${i}" value="${escAttr(e.calcPath)}" placeholder="(optional) e.g. total — only with 'other' in the transform"></div>` +
       `<div class="row"><label>Summary text</label><input type="text" data-f="summary" data-i="${i}" value="${escAttr(e.summary)}" placeholder="extra text, e.g. {message} (leader {leader})"></div>` +
@@ -864,6 +865,10 @@ function extractionObjs(e) {
     if (x.flPath && x.flPath.trim())
       o.filter = { path: x.flPath.trim(), op: x.flOp || "equals", value: x.flValue || "" };
     if (x.unit) o.unit = x.unit;
+    // An explicit metric name: the Gauge / Single metric / Bar chart widgets
+    // are bound to one metric BY NAME, so a field whose metric has to be known
+    // in advance says so here instead of being discovered from the perfdata.
+    if (x.metricName && x.metricName.trim()) o.metric_name = x.metricName.trim();
     // The range the value moves in: the metric's boundaries, so the graph keeps
     // a steady scale and a gauge widget has a dial. Either end may stand alone.
     const vr = valueRange(x.vr_min, x.vr_max);
@@ -919,6 +924,7 @@ function pyExtraction(o) {
   }
   if (o.filter) p.push(`'filter': {'path': ${pyStr(o.filter.path)}, 'op': ${pyStr(o.filter.op)}, 'value': ${pyStr(o.filter.value)}}`);
   if (o.unit) p.push(`'unit': ${pyStr(o.unit)}`);
+  if (o.metric_name) p.push(`'metric_name': ${pyStr(o.metric_name)}`);
   if (o.value_range) {
     const vr = [];
     if (o.value_range.min !== undefined) vr.push(`'min': ${floatPy(o.value_range.min)}`);
