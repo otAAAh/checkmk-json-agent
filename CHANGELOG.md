@@ -3,6 +3,20 @@
 All notable changes to this project, one section per released version.
 Generated from the git history by `scripts/gen_changelog.py`.
 
+## [0.20.0] - 2026-09-21
+
+### Fixes
+
+- The Explorer flags a metric name Setup would refuse ([#211](https://github.com/otAAAh/checkmk-json-agent/pull/211)) ([`8769f08`](https://github.com/otAAAh/checkmk-json-agent/commit/8769f08))
+- Reject two fields of one service sharing a metric ([#208](https://github.com/otAAAh/checkmk-json-agent/pull/208)) ([`c9ff6dd`](https://github.com/otAAAh/checkmk-json-agent/commit/c9ff6dd))
+
+### Other
+
+- CI: test every release line that has a public image (adds 3.0) ([#210](https://github.com/otAAAh/checkmk-json-agent/pull/210)) ([`5662edf`](https://github.com/otAAAh/checkmk-json-agent/commit/5662edf))
+- Unique metric names in a shared service, and a way to name one yourself ([#207](https://github.com/otAAAh/checkmk-json-agent/pull/207)) ([`455a4c7`](https://github.com/otAAAh/checkmk-json-agent/commit/455a4c7))
+- Deps: Bump ruff from 0.16.7 to 0.16.8 ([#204](https://github.com/otAAAh/checkmk-json-agent/pull/204)) ([`ade95d1`](https://github.com/otAAAh/checkmk-json-agent/commit/ade95d1))
+- Bump the actions group with 2 updates ([#205](https://github.com/otAAAh/checkmk-json-agent/pull/205)) ([`c18baa1`](https://github.com/otAAAh/checkmk-json-agent/commit/c18baa1))
+
 ## [0.19.0] - 2026-09-18
 
 ### Features
