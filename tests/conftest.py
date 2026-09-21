@@ -62,7 +62,10 @@ def ssc():
 
 @pytest.fixture(scope="session")
 def ruleset():
-    return _load("ja_ruleset", "rulesets/special_agent.py")
+    try:
+        return _load("ja_ruleset", "rulesets/special_agent.py")
+    except ImportError as exc:
+        pytest.skip(f"the ruleset module needs the Checkmk plugin APIs: {exc}")
 
 
 @pytest.fixture(scope="session")
