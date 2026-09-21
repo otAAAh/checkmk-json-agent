@@ -37,8 +37,9 @@ site or a Checkmk dev virtualenv. Two things need a Python:
   PYTHON=/path/to/checkmk/.venv/bin/python make test
   ```
 
-  (CI runs the suite inside the official Checkmk containers for both the 2.4 and
-  2.5 lines — you don't need both locally.)
+  (CI runs the suite inside the official Checkmk container for every release
+  line that has a public image — 2.4, 2.5 and 3.0 — so you don't need any of
+  them locally.)
 
 ## Before you open a PR
 
@@ -117,8 +118,17 @@ tests/                 pytest suite
 The plugin targets **Checkmk 2.4+** and the current stable plugin APIs
 (`cmk.agent_based.v2`, `cmk.rulesets.v1`, `cmk.server_side_calls.v1`,
 `cmk.graphing.v1`). The agent branches on the password-store API to support both
-2.4 and 2.5+, so please keep changes working across that range (CI exercises
-both).
+2.4 and 2.5+, so please keep changes working across that range.
+
+CI runs the suite against **every release line that has a public
+`checkmk/check-mk-raw` image**, resolved at run time rather than hard-coded:
+2.4 from its floating `-latest`, 2.5 and 3.0 from the newest dated daily. A line
+with no public image yet is skipped with a notice, so a new line starts being
+tested the day its images appear and costs nothing until then. Two things the
+job is deliberately loud about, because a silently skipped line is how coverage
+disappears unnoticed: it **warns** when the newest image a line offers is more
+than 120 days old (its coverage is that old too), and it **fails** if no line
+resolved at all, rather than reporting a pass that tested nothing.
 
 ## License
 
