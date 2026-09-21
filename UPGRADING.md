@@ -51,7 +51,45 @@ the widget then stays blank. Naming the metric in the rule gives you a name to
 point the widget at directly.
 
 Setting it on a field that already has history starts a new history under the
-new name; the old one is not migrated.
+new name; the old one is not migrated. It also costs the service its
+**Perf-O-Meter**: every bar this plugin draws is declared against one of its own
+metrics, so a name of your own matches none and the service list shows an empty
+bar. A field that needs its bar is better off keeping the derived name and
+filtering the dashboard widget to a host and a service instead.
+
+The plugin's own metric names (`json_api_value`, `json_api_bytes`, `json_api_age`
+and the rest) are **reserved**. A field given one of those would inherit that
+metric's unit, colour and Perf-O-Meter — a percentage named `json_api_bytes`
+renders as `11.5 B` — so Setup rejects it.
+
+### Setup now rejects two fields of one shared service that would share a metric
+
+**This can reject a rule that saved before the upgrade**, so it is worth knowing
+before you next open one.
+
+The fix above stops the two fields *losing* a value, but it can only
+disambiguate them positionally — the first gets `…_root_used`, the second
+`…_root_used_2`, in rule order. Reorder the fields and the suffix moves to the
+other one, so two metrics silently trade histories, graphs and any dashboard
+widget bound to the name. That is the same hazard as duplicate endpoint names
+(#116), one level down, and the same answer: catch it at config time, where both
+fields are in front of you.
+
+Saving an endpoint whose shared service holds two fields that resolve to one
+metric name now fails, naming the fields, the service and the metric. Only that
+exact case is rejected:
+
+- fields in **different** shared services never collide — metric names only have
+  to be unique within a service;
+- fields with the **same slug but different units** are two names
+  (`json_api_bytes_root_used` vs `json_api_count_root_used`) and are accepted;
+- **ungrouped** fields each own their service and cannot collide.
+
+**Effect:** if you hit it, rename one of the two fields so they differ by more
+than punctuation, or set *Metric name* on all but one. Nothing changes for
+rules that do not have such a pair, and the runtime disambiguation stays in
+place as a backstop for hand-written `--endpoint` blobs, which never pass
+through Setup.
 
 ## [0.17.0]
 

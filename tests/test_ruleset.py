@@ -71,7 +71,163 @@ def test_calc_accepts_the_second_operand(ruleset):
 
 @pytest.mark.parametrize("name", ["used", "json_api_bytes_root", "x", "0disk", "A_b_9"])
 def test_valid_metric_names_pass(ruleset, name):
+    # 'json_api_bytes_root' is fine: it is not one of the DECLARED metrics, only
+    # a name in the same shape. Only the declared set is reserved.
     ruleset._validate_metric_name(name)  # must not raise
+
+
+@pytest.mark.parametrize("name", ["json_api_value", "json_api_bytes", "json_api_age"])
+def test_the_plugins_own_metrics_are_reserved(ruleset, name):
+    # Taking a declared name does not just label the field, it inherits that
+    # metric's unit, colour and Perf-O-Meter - a percentage named
+    # 'json_api_bytes' renders as bytes.
+    with pytest.raises(ValidationError, match="own metrics"):
+        ruleset._validate_metric_name(name)
+
+
+def test_the_reserved_names_are_exactly_the_declared_metrics(ruleset, graphing):
+    declared = {getattr(graphing, n).name for n in dir(graphing) if n.startswith("metric_")}
+    assert declared == ruleset._DECLARED_METRICS
+
+
+def test_the_rulesets_slug_matches_the_checks(ruleset, check):
+    for line in ["Root used", "Root-used", "CPU / core 0", "  ...  ", "Größe", "a"]:
+        assert ruleset._metric_slug(line) == check._metric_slug(line), line
+
+
+@pytest.mark.parametrize(
+    "entry",
+    [
+        {"service": "Root used"},
+        {"service": "Root used", "unit": "bytes"},
+        {"service": "Root used", "unit": "percent"},
+        {"service": "Root used", "unit": "count", "value_as": ["counter", None]},
+        {"service": "Root used", "value_as": ["counter", None]},
+        {"service": "Root used", "value_as": ["timestamp", {"format": "auto"}]},
+        {"service": "Root used", "unit": "seconds", "value_as": ["timestamp", {"format": "auto"}]},
+    ],
+)
+def test_the_rulesets_metric_base_matches_the_checks(ruleset, check, entry):
+    # The ruleset predicts the metric name from the rule so it can reject a
+    # collision at config time; the check derives the same name at runtime. If
+    # the two drift, Setup accepts a pair the check then has to disambiguate
+    # positionally - the very thing the validator exists to prevent.
+    section = _check_section(check, entry)
+    (item,) = section.items["Cap"]
+    expected = check._line_metric_name(check._emitted_metric_name(item), item.label)
+    assert ruleset._field_metric_name({**entry, "group": "Cap"}) == expected
+
+
+def _check_section(check, entry):
+    import json
+
+    payload = {
+        "url": "u",
+        "error": None,
+        "host_labels": {},
+        "endpoints": [],
+        "results": [
+            {
+                "service": "Cap",
+                "label": entry["service"],
+                "path": "p",
+                "found": True,
+                "value": 1,
+                "error": None,
+                "levels_upper": None,
+                "levels_lower": None,
+                "expected": None,
+                "unit": entry.get("unit"),
+                "value_as": entry.get("value_as"),
+                "metric_name": entry.get("metric_name"),
+            }
+        ],
+    }
+    return check.parse_json_api([[json.dumps(payload)]])
+
+
+def _extractions(*entries):
+    return list(entries)
+
+
+def test_two_fields_of_one_group_that_slug_alike_are_rejected(ruleset):
+    with pytest.raises(ValidationError, match="differ by more than punctuation"):
+        ruleset._validate_unique_group_metrics(
+            _extractions(
+                {"service": "Root used", "group": "Disks", "unit": "bytes", "path": "a"},
+                {"service": "Root-used", "group": "Disks", "unit": "bytes", "path": "b"},
+            )
+        )
+
+
+def test_the_same_slug_with_a_different_unit_is_fine(ruleset):
+    # 'json_api_bytes_root_used' and 'json_api_count_root_used' are two names;
+    # rejecting this pair would break configurations that work today.
+    ruleset._validate_unique_group_metrics(
+        _extractions(
+            {"service": "Root used", "group": "Disks", "unit": "bytes", "path": "a"},
+            {"service": "Root-used", "group": "Disks", "unit": "count", "path": "b"},
+        )
+    )
+
+
+def test_the_same_slug_in_different_groups_is_fine(ruleset):
+    # Metric names only have to be unique WITHIN a service.
+    ruleset._validate_unique_group_metrics(
+        _extractions(
+            {"service": "Root used", "group": "Disks", "unit": "bytes", "path": "a"},
+            {"service": "Root-used", "group": "Volumes", "unit": "bytes", "path": "b"},
+        )
+    )
+
+
+def test_ungrouped_fields_never_collide(ruleset):
+    # Each owns its service, and a duplicated service name is disambiguated as
+    # a service, not as a metric.
+    ruleset._validate_unique_group_metrics(
+        _extractions(
+            {"service": "Root used", "unit": "bytes", "path": "a"},
+            {"service": "Root-used", "unit": "bytes", "path": "b"},
+        )
+    )
+
+
+def test_an_explicit_metric_name_resolves_the_collision(ruleset):
+    ruleset._validate_unique_group_metrics(
+        _extractions(
+            {"service": "Root used", "group": "Disks", "unit": "bytes", "path": "a"},
+            {
+                "service": "Root-used",
+                "group": "Disks",
+                "unit": "bytes",
+                "metric_name": "root_used_data",
+                "path": "b",
+            },
+        )
+    )
+
+
+def test_two_fields_stating_the_same_metric_name_are_rejected(ruleset):
+    with pytest.raises(ValidationError, match="differ by more than punctuation"):
+        ruleset._validate_unique_group_metrics(
+            _extractions(
+                {"service": "A", "group": "Disks", "metric_name": "used", "path": "a"},
+                {"service": "B", "group": "Disks", "metric_name": "used", "path": "b"},
+            )
+        )
+
+
+def test_the_rejection_names_the_fields_and_the_metric(ruleset):
+    with pytest.raises(ValidationError) as exc:
+        ruleset._validate_unique_group_metrics(
+            _extractions(
+                {"service": "Root used", "group": "Disks", "unit": "bytes", "path": "a"},
+                {"service": "Root-used", "group": "Disks", "unit": "bytes", "path": "b"},
+            )
+        )
+    text = str(exc.value)
+    assert "Root used" in text and "Root-used" in text
+    assert "Disks" in text and "json_api_bytes_root_used" in text
 
 
 @pytest.mark.parametrize(
