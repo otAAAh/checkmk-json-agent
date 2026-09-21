@@ -63,6 +63,7 @@ def test_basic_command_line(ssc):
             "piggyback_labels": [],
             "filter": None,
             "unit": None,
+            "metric_name": None,
             "value_range": None,
             "labels": [],
             "levels_upper": None,

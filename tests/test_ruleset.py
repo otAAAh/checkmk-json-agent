@@ -69,6 +69,30 @@ def test_calc_accepts_the_second_operand(ruleset):
     ruleset._validate_calc("value / other * 100")  # must not raise
 
 
+@pytest.mark.parametrize("name", ["used", "json_api_bytes_root", "x", "0disk", "A_b_9"])
+def test_valid_metric_names_pass(ruleset, name):
+    ruleset._validate_metric_name(name)  # must not raise
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "",
+        "_leading",  # must start with a letter or a digit
+        "root used",  # no spaces
+        "root-used",  # no dashes
+        "root.used",
+        "größe",  # Checkmk's own pattern is ASCII
+    ],
+)
+def test_invalid_metric_names_rejected(ruleset, name):
+    # The pattern is Checkmk's own (cmk.gui.graphing MetricName): anything it
+    # would refuse must be refused here, or the name an operator types into a
+    # Gauge widget could never match the one the check emits.
+    with pytest.raises(ValidationError):
+        ruleset._validate_metric_name(name)
+
+
 def test_piggyback_labels_need_a_piggyback_host(ruleset):
     ruleset._validate_extraction(
         {"piggyback_host": "name", "piggyback_labels": [{"path": "region"}]}
@@ -194,6 +218,7 @@ def test_extraction_form_has_the_expected_keys(ruleset):
         "filter",
         "value_as",
         "unit",
+        "metric_name",
         "value_range",
         "levels_upper",
         "levels_lower",

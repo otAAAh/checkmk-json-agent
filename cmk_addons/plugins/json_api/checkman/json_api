@@ -98,8 +98,12 @@ description:
  is not applied to such a service (one set of levels cannot describe several
  fields; the thresholds stay in the agent rule) and each line's metric is named
  after the line, which keeps their histories apart at the cost of the declared
- unit. A field written to the inventory instead of a service cannot report into a
- shared one.
+ unit. That runtime name is also what the Gauge, Single metric and Bar chart
+ dashboard widgets need: each is bound to one metric chosen BY NAME, and their
+ dropdown only offers a service's real names once the widget is filtered to a
+ host and a service. A field whose metric name has to be known in advance can
+ state it in the rule. A field written to the inventory instead of a service
+ cannot report into a shared one.
 
  Two endpoints extracting the same fields would produce two services with the
  same name, the later one disambiguated with a {(2)} suffix that says nothing

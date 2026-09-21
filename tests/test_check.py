@@ -1942,6 +1942,55 @@ def test_a_lone_field_keeps_the_unsuffixed_name(check):
     assert metrics == ["json_api_bytes"]
 
 
+def test_a_stated_metric_name_is_used_verbatim(check):
+    # The point of the option is a name the operator already knows, so it is
+    # NOT suffixed with the line's slug the way a generated name is.
+    section = _section(
+        check,
+        [
+            _grouped("Disks", "Root used", value=1024, unit="bytes", metric_name="root_used"),
+            _grouped("Disks", "Data used", value=2048, unit="bytes"),
+        ],
+    )
+    metrics = [m.name for m in check.check_json_api("Disks", {}, section) if isinstance(m, Metric)]
+    assert metrics == ["root_used", "json_api_bytes_data_used"]
+
+
+def test_a_stated_metric_name_overrides_the_unit_and_the_rate(check, monkeypatch):
+    # It wins over the unit's declared metric on a service of its own, and over
+    # the rate metric a counter would otherwise get.
+    section = _section(check, [_entry("Used", value=1024, unit="bytes", metric_name="disk_used")])
+    assert [m.name for m in check.check_json_api("Used", {}, section) if isinstance(m, Metric)] == [
+        "disk_used"
+    ]
+
+    store: dict = {}
+    _counter_store(check, monkeypatch, store)
+    _fixed_clock(check, monkeypatch, 1000.0)
+    rate_kw = {"value_as": ["counter", None], "unit": "count", "metric_name": "reqs"}
+    list(check.check_json_api("Reqs", {}, _section(check, [_entry("Reqs", value=100, **rate_kw)])))
+    _fixed_clock(check, monkeypatch, 1030.0)
+    results = check.check_json_api(
+        "Reqs", {}, _section(check, [_entry("Reqs", value=160, **rate_kw)])
+    )
+    assert [m.name for m in results if isinstance(m, Metric)] == ["reqs"]
+
+
+def test_stated_metric_names_that_collide_are_still_made_unique(check):
+    # The rule can state the same name twice; one service still cannot emit one
+    # name twice, so the second is disambiguated rather than dropped.
+    section = _section(
+        check,
+        [
+            _grouped("Disks", "Root", value=1, metric_name="used"),
+            _grouped("Disks", "Data", value=2, metric_name="used"),
+        ],
+    )
+    metrics = [m for m in check.check_json_api("Disks", {}, section) if isinstance(m, Metric)]
+    assert [m.name for m in metrics] == ["used", "used_2"]
+    assert [m.value for m in metrics] == [1.0, 2.0]
+
+
 @pytest.mark.parametrize(
     "kw",
     [

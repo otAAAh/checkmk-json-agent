@@ -231,6 +231,7 @@ Each **field to monitor** has:
 | **Interpret the value as** | Optional: *a counter* — monitor the change **per second** rather than the total (the first check, and any check after the counter went backwards, keeps the previous state because no rate can be computed yet); or *a timestamp* — monitor its **age in seconds** (format `auto` / epoch seconds / epoch milliseconds / ISO 8601; no time zone means UTC). The derived number is what the transform, levels and metric use; string matching does not apply to it |
 | **Unit** | Optional: `count` / `bytes` / `seconds` / `percent` — renders the value in the summary/details *and* the metric and graph with that unit (numeric values only) |
 | **Value range** | Optional lowest/highest value this field can take (a battery is 0–100, a queue with a cap is 0–that cap). It never changes the state: it tells Checkmk what "full" means, so the graph keeps a steady scale instead of rescaling to whatever the last hour contained, a **gauge dashboard widget** has a dial to draw, and the service list's bar is filled against the real maximum. Either end may be given alone; with both ends the Perf-O-Meter uses the range, otherwise it falls back to the critical level |
+| **Metric name** | Optional: the name Checkmk stores this field's metric under. Unset, the plugin picks one — the unit's metric for a field with a service of its own (`json_api_bytes`), or that plus the line's name for a field in a shared service (`json_api_bytes_root_used`). Set it where the name has to be known in advance: the **Gauge**, **Single metric** and **Bar chart** dashboard widgets are bound to one metric *by name*. Letters, digits and underscores only, starting with a letter or a digit (Checkmk's own rule). Changing it later starts a new history under the new name |
 | **Transform the numeric value** | Optional arithmetic expression on the variable `value` (e.g. `value / 1024 / 1024`), applied to a numeric value before levels and the metric; only numbers, parentheses and `+ - * /` are allowed |
 | **Second path for the transform** | Optional second field, available to the transform as `other` — which is what turns a used/total pair into a percentage (`value / other * 100`). Resolved in the **same scope** as the value: within each `[*]` element, or the response root without a wildcard, so every element is compared against its own total. The transform must use `other` and `other` requires this path — either alone is rejected in Setup. A path that does not resolve fails the calculation rather than substituting a value |
 | **Extra text in the service summary** | Optional text appended to the summary, after the value. `{path}` inserts another field of the same response — resolved *within the current element* for a `[*]` wildcard, from the response root otherwise — e.g. `{message} (leader {leader})`. A path that is not in the response renders as `(n/a)`; a value that is an object or array renders as its size. Presentation only: it never changes the state, the levels or the metric. Put on one line and truncated if long |
@@ -589,6 +590,17 @@ Two things change, both because one service now holds several fields:
   metrics the plugin declares, so it renders as a plain number rather than in the
   field's unit. A field that needs its unit on the graph is better off with a
   service of its own.
+
+  That runtime name also decides which **dashboard widgets** can use the field.
+  A *Graph* widget draws whatever the service carries, so it is unaffected;
+  *Gauge*, *Single metric* and *Bar chart* are each bound to one metric **chosen
+  by name**, and their dropdown only lists a service's real metric names once
+  the widget is filtered to a host **and** a service. Configured the other way
+  round — widget first, metric second — the dropdown offers the declared names
+  (`json_api_value`, `json_api_bytes`, …), which a shared service never emits,
+  and the widget then stays permanently blank with nothing saying why. Either
+  filter the widget down before picking the metric, or set **Metric name** on
+  the field and point the widget at that.
 
 A field written to the **inventory** creates no service, so it cannot report into
 a shared one either; Setup rejects that combination unless *Also create a service

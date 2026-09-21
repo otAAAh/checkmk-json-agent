@@ -98,6 +98,23 @@ def _validate_calc(value: str) -> None:
             raise validators.ValidationError(Message("Only numeric constants are allowed."))
 
 
+# What Checkmk itself accepts as a metric name (cmk.gui.graphing MetricName):
+# letters, digits and underscores, starting with a letter or a digit. Rejecting
+# anything else here means the name an operator types into a Gauge / Single
+# metric / Bar chart widget is the name the check actually emits.
+_METRIC_NAME = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_]*$")
+
+
+def _validate_metric_name(value: str) -> None:
+    if not _METRIC_NAME.match(value):
+        raise validators.ValidationError(
+            Message(
+                "A metric name must consist of letters, digits and underscores "
+                "only, and start with a letter or a digit."
+            )
+        )
+
+
 def _unique_or_duplicates(value: object, key: str) -> list[str]:
     """The non-empty values of ``key`` across the endpoints that occur twice."""
     if not isinstance(value, (list, tuple)):
@@ -800,10 +817,18 @@ def _extraction() -> Dictionary:
                         "'Generic JSON API' check-parameters rule cannot describe "
                         "it and is not applied to it, so thresholds for these "
                         "fields live here; and each line's metric is named after "
-                        "the line, which keeps the history of several fields "
-                        "apart but renders as a plain number rather than in the "
-                        "field's unit. A field that needs its unit on the graph, "
-                        "or per-service thresholds, is better off with a service "
+                        "the line ('json_api_bytes_root_used'), which keeps the "
+                        "history of several fields apart but renders as a plain "
+                        "number rather than in the field's unit. That runtime "
+                        "name also decides which dashboard widgets can use the "
+                        "field: a Graph widget draws whatever the service "
+                        "carries and is unaffected, but Gauge, Single metric and "
+                        "Bar chart are bound to one metric CHOSEN BY NAME, and "
+                        "their dropdown only offers a service's real names once "
+                        "the widget is filtered to a host and a service - set "
+                        "'Metric name' below to pick the name yourself instead. "
+                        "A field that needs its unit on the graph, or "
+                        "per-service thresholds, is better off with a service "
                         "of its own."
                     ),
                     custom_validate=(validators.LengthInRange(min_value=1),),
@@ -1183,6 +1208,29 @@ def _extraction() -> Dictionary:
                             ),
                         ),
                     },
+                ),
+            ),
+            "metric_name": DictElement(
+                required=False,
+                parameter_form=String(
+                    title=Title("Metric name"),
+                    help_text=Help(
+                        "The name Checkmk stores this field's metric under. "
+                        "Leave it unset and the plugin picks one: the unit's "
+                        "metric for a field with a service of its own "
+                        "('json_api_bytes'), or that name plus the line's own "
+                        "name for a field in a shared service "
+                        "('json_api_bytes_root_used'). Set it where you need to "
+                        "KNOW the name in advance - the Gauge, Single metric and "
+                        "Bar chart dashboard widgets are bound to one metric "
+                        "chosen by name, and their dropdown only lists the names "
+                        "a service really has once the widget is filtered to a "
+                        "host and a service. Letters, digits and underscores "
+                        "only, starting with a letter or a digit. Changing it "
+                        "later starts a new history under the new name, so pick "
+                        "it before the service has data worth keeping."
+                    ),
+                    custom_validate=(_validate_metric_name,),
                 ),
             ),
             "levels_upper": DictElement(

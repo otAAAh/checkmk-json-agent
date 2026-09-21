@@ -206,10 +206,18 @@ class Item:
     match: _Match
     calc: str | None
     unit: object
+    # The metric name derived from the unit - what this field emits unless the
+    # rule overrode it (metric_override) or it shares a service.
     metric_name: str
     render_func: Callable[[float], str] | None
     path: str
     url: str
+    # The metric name stated in the rule, used verbatim when set. The escape
+    # hatch for a name that has to be known in advance: the Gauge / Single
+    # metric / Bar chart dashboard widgets are bound to one metric BY NAME, and
+    # a shared service's generated names are neither obvious nor offered by the
+    # widget's dropdown until it is filtered to a host and a service.
+    metric_override: str | None = None
     # The value's configured range as ``(min, max)``, either end possibly None -
     # the metric's boundaries. Presentation only: it fixes the scale of the
     # graph, the dial of a gauge dashboard widget and the fill of the service
@@ -559,6 +567,7 @@ def parse_json_api(string_table: StringTable) -> Section | None:
             unit=result.get("unit"),
             boundaries=_boundaries(result.get("value_range")),
             metric_name=_metric_name(result.get("unit")),
+            metric_override=_optional_str(result.get("metric_name")),
             render_func=_render_func(result.get("unit")),
             path=result.get("path", ""),
             url=result.get("url", ""),
@@ -1042,6 +1051,18 @@ def _emitted_metric_name(entry: Item) -> str:
     return entry.metric_name if isinstance(entry.unit, str) else _AGE_METRIC
 
 
+def _field_metric_name(entry: Item) -> str:
+    """The name this field asks for, before the service-wide uniqueness pass.
+
+    A name stated in the rule is used verbatim, in a shared service too: the
+    whole point of the option is a name the operator already knows, so appending
+    the line's slug to it would defeat it.
+    """
+    if entry.metric_override is not None:
+        return entry.metric_override
+    return _line_metric_name(_emitted_metric_name(entry), entry.label)
+
+
 def _service_metric_names(entries: Sequence[Item]) -> list[str]:
     """One metric name per entry of a service, unique within it.
 
@@ -1050,10 +1071,7 @@ def _service_metric_names(entries: Sequence[Item]) -> list[str]:
     an entry's name then depends only on the rule, never on this run's data.
     """
     taken: set[str] = set()
-    return [
-        _unique_metric_name(_line_metric_name(_emitted_metric_name(entry), entry.label), taken)
-        for entry in entries
-    ]
+    return [_unique_metric_name(_field_metric_name(entry), taken) for entry in entries]
 
 
 def _value_results(

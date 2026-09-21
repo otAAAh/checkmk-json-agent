@@ -149,6 +149,10 @@ class Extraction(BaseModel, frozen=True):
     # server-side call; the agent applies it). Serialized via model_dump below.
     filter: FilterSpec | None = None
     unit: str | None = None
+    # The metric name stated in the rule, overriding the one the check would
+    # derive from the unit (and, in a shared service, the line's name). Opaque
+    # here; the check is the only place that emits a metric.
+    metric_name: str | None = None
     # Carried through to the check, which turns it into the metric's boundaries.
     value_range: ValueRange | None = None
     # Fields attached as SERVICE labels on this service (resolved per '[*]'
