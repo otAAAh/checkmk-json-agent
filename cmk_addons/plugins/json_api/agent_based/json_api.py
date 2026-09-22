@@ -1162,6 +1162,17 @@ def _value_results(
             render_func=render_func,
             boundaries=entry.boundaries,
         )
+        if match is not None and not derived:
+            # The levels decide the state of a numeric value, so the matching
+            # configured alongside them never runs. Said out loud rather than
+            # dropped in silence: the Details otherwise list the pattern (see
+            # _context) as though it applied, and a state map that quietly does
+            # nothing is exactly the kind of thing an operator finds out about
+            # during the incident it was written for.
+            yield Result(
+                state=State.OK,
+                notice="String matching is not applied when levels are configured",
+            )
         return
 
     # Levels configured on a value that is not numeric: a misconfiguration we

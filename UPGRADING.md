@@ -56,6 +56,15 @@ but a view, report or *Search hosts by inventory data* query that names the
 path has no wildcard is a plain attribute of its node, has no key column, and is
 not affected at all.
 
+### String matching alongside levels now says it is not applied
+
+A numeric value with **both** levels and string matching configured has always
+been decided by the levels alone — the matching never ran. The service Details
+list the pattern (they list everything the extraction was configured with), so
+they read as though it applied. They now carry one more line saying it does not.
+
+**Effect:** Details only. No state, metric or summary changes.
+
 ## [0.20.0]
 
 ### Fields in a shared service that collided now each keep their own metric

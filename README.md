@@ -649,6 +649,10 @@ you leave untouched keep the agent-rule defaults.
   first, and the transformed value is what the levels check, what the metric
   records, and what the service shows; a broken expression or a non-finite
   result makes the service UNKNOWN
+- **Numeric value with levels *and* string matching** → the levels decide, and
+  the Details say the matching was not applied; matching a number against a
+  regex while levels already answer the same question is a contradiction rather
+  than a combination
 - **Value with must-match string matching** → OK if it fully matches the regex,
   otherwise your chosen no-match state (default CRIT)
 - **Value with a state map** → tried against the OK, WARN, then CRIT regexes in
