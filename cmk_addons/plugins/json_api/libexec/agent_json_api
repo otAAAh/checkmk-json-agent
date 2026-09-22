@@ -2435,6 +2435,32 @@ def _endpoint_record(
     }
 
 
+# A '--endpoint' blob that is not a JSON object. Carried INSIDE the endpoint
+# dict rather than raised, so the failure travels the same path as every other
+# per-endpoint failure and lands on that endpoint's own service.
+_BLOB_ERROR = "_blob_error"
+
+
+def _parse_endpoint(raw: str) -> dict:
+    """One '--endpoint' argument as a dict, or a dict carrying why it is not.
+
+    Parsing all of them up front with a bare ``json.loads`` meant one malformed
+    blob raised before anything was written: no section at all, so EVERY service
+    of EVERY endpoint on the host goes stale - the one outcome the rest of this
+    program is written to avoid, and the loudest possible answer to the smallest
+    possible cause. Setup cannot produce such a blob, but a hand-written rule or
+    a program call edited by hand can, and that is exactly when the operator is
+    already debugging something.
+    """
+    try:
+        endpoint = json.loads(raw)
+    except ValueError as exc:
+        return {_BLOB_ERROR: f"Endpoint configuration is not valid JSON: {exc}"}
+    if not isinstance(endpoint, dict):
+        return {_BLOB_ERROR: f"Endpoint configuration is a {type(endpoint).__name__}, not an object"}
+    return endpoint
+
+
 def _process_endpoint(
     args: argparse.Namespace, index: int, endpoint: dict
 ) -> tuple[list[dict], dict, dict]:
@@ -2476,6 +2502,12 @@ def _process_endpoint(
             {},
             _endpoint_record(endpoint, url, False, error, meta),
         )
+
+    if (blob_error := endpoint.get(_BLOB_ERROR)) is not None:
+        # Unparseable: there is no URL, no name and no extraction to hang this
+        # on, so it becomes the one service the endpoint always has.
+        _debug(debug, f"  {blob_error}")
+        return _fail(str(blob_error))
 
     try:
         secret = _reveal_secret(args, f"secret_{index}") if endpoint.get("auth") else None
@@ -2544,7 +2576,7 @@ def _split_by_host(
 def main(argv: Sequence[str] | None = None) -> int:
     args = parse_arguments(sys.argv[1:] if argv is None else argv)
 
-    endpoints = [json.loads(raw) for raw in args.endpoint]
+    endpoints = [_parse_endpoint(raw) for raw in args.endpoint]
     results: list[dict] = []
     host_labels: dict[str, str] = {}
     endpoint_records: list[dict] = []
