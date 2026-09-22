@@ -585,6 +585,41 @@ def test_inventory_key_is_optional_but_validated(ruleset):
         ruleset._validate_inventory_key("Build Id")
 
 
+def test_an_inventory_column_cannot_be_the_tables_key_column(ruleset):
+    # For a '[*]' wildcard the rows are keyed by an 'element' column, and a
+    # column of that name would also BE the key column - which Checkmk refuses
+    # while writing the tree, failing the host's whole inventory. So it has to
+    # fail in Setup instead.
+    with pytest.raises(ValidationError):
+        ruleset._validate_extraction(
+            {
+                "service": "Node",
+                "path": "nodes[*].element",
+                "inventory": {"node": "software.applications.x", "key": "element"},
+            }
+        )
+
+
+def test_a_wildcard_free_inventory_field_may_be_called_element(ruleset):
+    # No wildcard, no table, no key column: it is a plain attribute of the node.
+    ruleset._validate_extraction(
+        {
+            "service": "Element",
+            "path": "element",
+            "inventory": {"node": "software.applications.x", "key": "element"},
+        }
+    )
+    # The natural column of a wildcard collection stays available, which is the
+    # bug this reservation replaced: 'name' used to be the key column.
+    ruleset._validate_extraction(
+        {
+            "service": "Node",
+            "path": "nodes[*].name",
+            "inventory": {"node": "software.applications.x", "key": "name"},
+        }
+    )
+
+
 def test_inventory_form_has_the_expected_keys(ruleset):
     form = ruleset._extraction().elements["inventory"].parameter_form
     assert set(form.elements) == {"node", "key", "keep_service"}

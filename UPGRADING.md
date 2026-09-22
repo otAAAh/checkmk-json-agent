@@ -35,6 +35,27 @@ after the upgrade cannot compute a rate for these lines (there is no per-line
 reading yet), so the service keeps its previous state for one interval. A
 counter in a service of its own is untouched, history included.
 
+### Inventory tables are keyed by an `element` column
+
+Only affects fields written into the **HW/SW inventory** from a path with a `[*]`
+wildcard — the ones that become one table row per element.
+
+The rows were keyed by a column called `name`, which is also the most natural
+column such a table could have (`nodes[*].name`, `pods[*].metadata.name`).
+Checkmk refuses a column that is also the key column, and it refuses it while
+writing the tree — so configuring it did not produce a warning, it failed the
+**whole host's** inventory, every field of every rule with it. The key column is
+now called `element`, and `element` is in turn rejected as an attribute name for
+a wildcard field (Setup says so when you save the rule).
+
+**Effect:** on the next inventory run the affected tables are rebuilt under the
+new key: the old rows disappear and equivalent rows appear, which the inventory
+history records as a change. No data is lost and nothing needs re-configuring —
+but a view, report or *Search hosts by inventory data* query that names the
+`name` column of one of these tables has to name `element` instead. A field whose
+path has no wildcard is a plain attribute of its node, has no key column, and is
+not affected at all.
+
 ## [0.20.0]
 
 ### Fields in a shared service that collided now each keep their own metric

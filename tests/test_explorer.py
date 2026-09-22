@@ -457,6 +457,17 @@ def test_explorers_metric_name_pattern_matches_the_rulesets():
     assert f"/{pattern}/" in source, f"the Explorer does not carry the ruleset's {pattern!r}"
 
 
+def test_explorers_reserved_inventory_column_matches_the_rulesets():
+    """The column a '[*]' wildcard's inventory table is keyed by, which an
+    attribute name therefore cannot be. Reserved in the ruleset and mirrored by
+    hand here; a drift means the Explorer offers a rule Setup refuses."""
+    constant = _ruleset_assignment("_INVENTORY_ROW_KEY")
+    assert isinstance(constant, ast.Constant)
+
+    source = (_ROOT / "explorer" / "index.html").read_text()
+    assert f'const INVENTORY_ROW_KEY = "{constant.value}"' in source
+
+
 def test_explorers_reserved_metrics_match_the_rulesets():
     call = _ruleset_assignment("_DECLARED_METRICS")  # frozenset({...})
     assert isinstance(call, ast.Call)

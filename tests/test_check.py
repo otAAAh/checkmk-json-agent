@@ -1622,8 +1622,71 @@ def test_inventory_writes_one_table_row_per_wildcard_element(check):
     )
     rows = list(check.inventory_json_api(section))
     assert all(isinstance(row, TableRow) for row in rows)
-    assert [row.key_columns for row in rows] == [{"name": "n1"}, {"name": "n2"}]
+    assert [row.key_columns for row in rows] == [{"element": "n1"}, {"element": "n2"}]
     assert [row.inventory_columns for row in rows] == [{"version": "4.2"}, {"version": "4.1"}]
+
+
+def test_inventory_writes_a_name_column_beside_the_element_key(check):
+    # 'nodes[*].name' is the most natural column there is, and the key column
+    # used to be called 'name' too - so TableRow refused the row outright
+    # ("conflicting key: 'name'"), and the exception failed the whole HOST's
+    # inventory, every field of every rule with it.
+    section = _section(
+        check,
+        [
+            _entry(
+                "Node name",
+                value="node-01",
+                inventory=_inv("software.applications.json_api.nodes", "name", row_key="0"),
+            )
+        ],
+    )
+    (row,) = list(check.inventory_json_api(section))
+    assert row.key_columns == {"element": "0"}
+    assert row.inventory_columns == {"name": "node-01"}
+
+
+def test_inventory_drops_a_column_that_would_be_the_key_column(check):
+    # Setup reserves 'element', so only a column name DERIVED from the path can
+    # still ask for it. Dropping that one column is the smallest thing that can
+    # go wrong: raising here would fail the host's whole inventory.
+    section = _section(
+        check,
+        [
+            _entry(
+                "Element",
+                value="x",
+                inventory=_inv("software.applications.json_api.nodes", "element", row_key="0"),
+            ),
+            _entry(
+                "Version",
+                value="4.2",
+                inventory=_inv("software.applications.json_api.nodes", "version", row_key="0"),
+            ),
+        ],
+    )
+    rows = list(check.inventory_json_api(section))
+    assert [row.inventory_columns for row in rows] == [{"version": "4.2"}]
+
+
+def test_the_reserved_inventory_column_is_the_one_setup_rejects(check, ruleset):
+    # Two literals that have to agree: the check writes the key column, the
+    # ruleset refuses an attribute name that would collide with it. They cannot
+    # import each other (Checkmk loads them independently), so the agreement is
+    # asserted instead - a rename in one place alone is exactly how the crash
+    # this reservation prevents would come back.
+    assert check._INVENTORY_ROW_KEY == ruleset._INVENTORY_ROW_KEY
+
+
+def test_a_plain_attribute_may_still_be_called_element(check):
+    # The conflict is a TABLE one: a node's attributes have no key column, so a
+    # wildcard-free field keeps every name it could have before.
+    section = _section(
+        check,
+        [_entry("Element", value="x", inventory=_inv("software.x", "element"))],
+    )
+    (result,) = list(check.inventory_json_api(section))
+    assert result.inventory_attributes == {"element": "x"}
 
 
 def test_inventory_skips_a_field_that_was_not_found(check):

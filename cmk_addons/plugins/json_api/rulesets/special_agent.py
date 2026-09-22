@@ -401,6 +401,13 @@ def _calc_uses_other(expression: object) -> bool:
     return any(isinstance(node, ast.Name) and node.id == "other" for node in ast.walk(tree))
 
 
+# The column a '[*]' wildcard's inventory table is keyed by. Mirrors
+# _INVENTORY_ROW_KEY in agent_based/json_api.py, which is the module that writes
+# the tree; kept as a literal rather than imported, because the ruleset and the
+# check are loaded independently by Checkmk.
+_INVENTORY_ROW_KEY = "element"
+
+
 def _validate_extraction(value: object) -> None:
     """The transform and its second path must agree.
 
@@ -416,6 +423,27 @@ def _validate_extraction(value: object) -> None:
     # into a shared service is therefore a contradiction rather than a
     # combination, and silently ignoring one half of it would be worse.
     inventory = value.get("inventory")
+    # For a '[*]' wildcard the tree holds one table ROW per element, keyed by an
+    # 'element' column (see _INVENTORY_ROW_KEY in agent_based/json_api.py). A
+    # column of that name would also BE the key column, which Checkmk refuses -
+    # while writing the tree, where the failure takes the host's WHOLE inventory
+    # with it rather than one field. So it is refused here, where it is still a
+    # form error. A wildcard-free field is a plain attribute of the node, has no
+    # key column, and keeps every name it could ever have.
+    if (
+        isinstance(inventory, dict)
+        and isinstance(inventory.get("key"), str)
+        and inventory["key"].strip() == _INVENTORY_ROW_KEY
+        and isinstance(value.get("path"), str)
+        and "[*]" in value["path"]
+    ):
+        raise validators.ValidationError(
+            Message(
+                "'element' is the column the table rows of a '[*]' wildcard are "
+                "keyed by, so it cannot also name a column. Choose another "
+                "attribute name."
+            )
+        )
     if value.get("group") and isinstance(inventory, dict) and not inventory.get("keep_service"):
         raise validators.ValidationError(
             Message(
@@ -567,11 +595,12 @@ def _inventory() -> Dictionary:
             "forever, and which the inventory can do something with that services "
             "cannot: it is searchable ACROSS hosts ('which hosts still run a "
             "version below 4.2?') and keeps a history of its own. For a '[*]' "
-            "wildcard the elements become one table row each, keyed by the "
-            "element's name. Point this at values that rarely change: every change "
-            "is recorded in the inventory history, so a counter here grows those "
-            "files without bound. Inventory runs on its own (slower) schedule, not "
-            "at every check interval."
+            "wildcard the elements become one table row each, keyed by an "
+            "'element' column holding the element's name. Point this at values "
+            "that rarely change: every change is recorded in the inventory "
+            "history, so a counter here grows those files without bound. "
+            "Inventory runs on its own (slower) schedule, not at every check "
+            "interval."
         ),
         elements={
             "node": DictElement(
@@ -593,7 +622,9 @@ def _inventory() -> Dictionary:
                     title=Title("Attribute name"),
                     help_text=Help(
                         "Name of the attribute (or, for a '[*]' wildcard, the "
-                        "column). Defaults to the JSON path's last segment."
+                        "column). Defaults to the JSON path's last segment. For "
+                        "a '[*]' wildcard it cannot be 'element': that is the "
+                        "column the table rows themselves are keyed by."
                     ),
                     custom_validate=(_validate_inventory_key,),
                 ),
