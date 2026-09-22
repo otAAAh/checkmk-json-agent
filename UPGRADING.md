@@ -12,6 +12,29 @@ this list needs none.
 `scripts/gen_changelog.py --version X.Y.Z` appends the matching section to the
 GitHub Release body, so these notes travel with the release people actually read.
 
+## [0.21.0]
+
+### Counters sharing a service each keep their own reading
+
+Only affects a service built from **several fields** (*Report in a shared
+service named*) where more than one of them is read as a **counter** — which
+includes a `[*]` wildcard reporting into a shared service, since that fans out
+into one line per element.
+
+The previous reading a rate is computed from was stored per *service*, so every
+counter line of one service read and wrote the same reading. Each line was
+differenced against whichever line happened to be stored last: one reported a
+rate that was arithmetic over two unrelated counters, and the next saw its
+counter "go backwards" and reported no rate at all, keeping its previous state —
+alternating on every check. Every line now keeps a reading of its own.
+
+**Effect:** the rates on such a service become correct. They will also *change*,
+because the old ones were wrong — check any levels you tuned against them, since
+a threshold picked to fit a nonsense rate now fires differently. The first check
+after the upgrade cannot compute a rate for these lines (there is no per-line
+reading yet), so the service keeps its previous state for one interval. A
+counter in a service of its own is untouched, history included.
+
 ## [0.20.0]
 
 ### Fields in a shared service that collided now each keep their own metric
