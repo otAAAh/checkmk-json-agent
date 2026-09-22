@@ -225,7 +225,10 @@ msgid ""
 "'Labels for the created host' needs 'Create one host per element, named by "
 "this field' - without it the element stays a service on this host and there "
 "is no host to label."
-msgstr "Etichete pentru gazda creată"
+msgstr ""
+"„Etichete pentru gazda creată” are nevoie de „Creează câte o gazdă pentru "
+"fiecare element, denumită după acest câmp”: fără aceasta elementul rămâne un "
+"serviciu pe această gazdă și nu există nicio gazdă de etichetat."
 
 #: cmk_addons/plugins/json_api/rulesets/special_agent.py:474
 msgid ""

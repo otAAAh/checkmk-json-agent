@@ -222,7 +222,10 @@ msgid ""
 "'Labels for the created host' needs 'Create one host per element, named by "
 "this field' - without it the element stays a service on this host and there "
 "is no host to label."
-msgstr "Labels voor de aangemaakte host"
+msgstr ""
+"'Labels voor de aangemaakte host' vereist 'Eén host per element aanmaken, "
+"vernoemd naar dit veld' - zonder dat blijft het element een service op deze "
+"host en is er geen host om te labelen."
 
 #: cmk_addons/plugins/json_api/rulesets/special_agent.py:474
 msgid ""

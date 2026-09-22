@@ -218,7 +218,10 @@ msgid ""
 "'Labels for the created host' needs 'Create one host per element, named by "
 "this field' - without it the element stays a service on this host and there "
 "is no host to label."
-msgstr "作成されたホストのラベル"
+msgstr ""
+"「作成されたホストのラベル」には「要素ごとに 1 つのホストを作成し、このフィー"
+"ルドで名前を付ける」が必要です。それがないと要素はこのホスト上のサービスのま"
+"まで、ラベルを付けるホストが存在しません。"
 
 #: cmk_addons/plugins/json_api/rulesets/special_agent.py:474
 msgid ""
