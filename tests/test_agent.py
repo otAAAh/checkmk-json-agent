@@ -524,12 +524,15 @@ def test_build_session_basic_auth_and_headers(agent):
 
 
 class _FakeResponse:
-    def __init__(self, body=b'{"ok": 1}', status_code=200, headers=None):
+    def __init__(self, body=b'{"ok": 1}', status_code=200, headers=None, url="http://x"):
         self._body = body
         self.status_code = status_code
         self.headers = headers or {}
-        # requests exposes the final URL after redirects; _fetch records it.
-        self.url = "http://x"
+        # requests exposes the URL the response actually came FROM, which is the
+        # requested one unless a redirect moved it. Pagination resolves its next
+        # links against this, so a fake that always claims one URL cannot show
+        # the difference - hence the parameter.
+        self.url = url
 
     def __enter__(self):
         return self
@@ -3035,24 +3038,29 @@ def test_extract_without_the_setting_attaches_nothing(agent):
 # answer that is wrong rather than missing.
 
 
-def _paged(agent, monkeypatch, pages, status=None):
+def _paged(agent, monkeypatch, pages, status=None, redirects=None):
     """Serve a map of {url: body} and record the URLs that were requested.
 
     ``status`` optionally maps a URL to an HTTP status code, for the pages that
     are supposed to fail. A URL nothing was configured for answers 404, so a
     test can tell "the agent followed a link it should not have" from "the agent
     stopped".
+
+    ``redirects`` maps a requested URL to the URL it is served from, the way a
+    redirect requests has already followed looks to the agent: the body comes
+    from the target and ``response.url`` says so.
     """
     seen = []
 
     def fake_request(_self, _method, url, **_kwargs):
         seen.append(url)
-        code = (status or {}).get(url, 200 if url in pages else 404)
-        body = pages.get(url, b"{}")
+        served = (redirects or {}).get(url, url)
+        code = (status or {}).get(served, 200 if served in pages else 404)
+        body = pages.get(served, b"{}")
         headers = {}
         if isinstance(body, tuple):
             body, headers = body
-        return _FakeResponse(body=body, status_code=code, headers=headers)
+        return _FakeResponse(body=body, status_code=code, headers=headers, url=served)
 
     monkeypatch.setattr(agent.requests.Session, "request", fake_request)
     return seen
@@ -3250,6 +3258,66 @@ def test_pagination_refuses_a_link_to_another_host(agent, monkeypatch):
     assert "another host (evil.example)" in meta["pagination_stopped"]
 
 
+def test_pagination_resolves_a_relative_link_against_the_redirected_url(agent, monkeypatch):
+    """A redirected endpoint's next page comes from where the first page did.
+
+    The rule names '/jobs' and the API serves it from '/v2/jobs'. Resolved
+    against the rule's URL instead, page 2 was requested at the pre-redirect
+    path - a 404 that fails the ENDPOINT, taking every one of its services to
+    UNKNOWN on an API that is working.
+    """
+    seen = _paged(
+        agent,
+        monkeypatch,
+        {
+            "http://api/v2/jobs": _page([{"id": 1}], "?page=2"),
+            "http://api/v2/jobs?page=2": _page([{"id": 2}], None),
+        },
+        redirects={"http://api/jobs": "http://api/v2/jobs"},
+    )
+    doc, error, _meta = agent._fetch(PAGINATED, None)
+    assert error is None and [job["id"] for job in doc["items"]] == [1, 2]
+    assert seen == ["http://api/jobs", "http://api/v2/jobs?page=2"]
+
+
+def test_pagination_follows_links_to_the_host_it_was_redirected_to(agent, monkeypatch):
+    # api -> eu.api, and the links point where the pages actually live. Refusing
+    # those left the collection at page one and the endpoint reporting it as
+    # incomplete, for a redirect the rule allowed and the credentials already
+    # followed.
+    seen = _paged(
+        agent,
+        monkeypatch,
+        {
+            "http://eu.api/jobs": _page([{"id": 1}], "http://eu.api/jobs?page=2"),
+            "http://eu.api/jobs?page=2": _page([{"id": 2}], None),
+        },
+        redirects={"http://api/jobs": "http://eu.api/jobs"},
+    )
+    doc, error, meta = agent._fetch(PAGINATED, None)
+    assert error is None and len(doc["items"]) == 2
+    assert meta["pagination_stopped"] is None
+    assert seen[1] == "http://eu.api/jobs?page=2"
+
+
+def test_a_redirect_does_not_widen_pagination_to_a_third_host(agent, monkeypatch):
+    # The host the pages may come from moves WITH the redirect; it does not
+    # become 'anywhere'. A link to somewhere else is still refused.
+    seen = _paged(
+        agent,
+        monkeypatch,
+        {
+            "http://eu.api/jobs": _page([{"id": 1}], "http://evil.example/jobs?page=2"),
+            "http://evil.example/jobs?page=2": _page([{"id": 2}], None),
+        },
+        redirects={"http://api/jobs": "http://eu.api/jobs"},
+    )
+    doc, error, meta = agent._fetch(PAGINATED, None)
+    assert error is None and len(doc["items"]) == 1
+    assert seen == ["http://api/jobs"]
+    assert "another host (evil.example)" in meta["pagination_stopped"]
+
+
 def test_pagination_refuses_a_non_http_link(agent, monkeypatch):
     _paged(agent, monkeypatch, {"http://api/jobs": _page([{"id": 1}], "file:///etc/passwd")})
     _doc, error, meta = agent._fetch(PAGINATED, None)
@@ -3302,8 +3370,8 @@ def test_a_failed_page_is_retried_like_any_transient_failure(agent, monkeypatch)
         calls["n"] += 1
         # The second page fails once (a 503), then answers.
         if url.endswith("page=2") and calls["n"] == 2:
-            return _FakeResponse(body=b"", status_code=503)
-        return _FakeResponse(body=pages[url])
+            return _FakeResponse(body=b"", status_code=503, url=url)
+        return _FakeResponse(body=pages[url], url=url)
 
     monkeypatch.setattr(agent.requests.Session, "request", fake_request)
     monkeypatch.setattr(agent.time, "sleep", lambda _seconds: None)
@@ -3425,7 +3493,7 @@ def test_pagination_sends_every_page_the_same_request(agent, monkeypatch):
             if url == "http://api/jobs"
             else _page([{"id": 2}], None)
         )
-        return _FakeResponse(body=body)
+        return _FakeResponse(body=body, url=url)
 
     monkeypatch.setattr(agent.requests.Session, "request", fake_request)
     _doc, error, _meta = agent._fetch(

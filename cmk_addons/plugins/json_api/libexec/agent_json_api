@@ -1169,6 +1169,7 @@ def _follow_pagination(
     read_bytes: int,
     scrub: Callable[[str], str],
     debug: bool,
+    served_url: str = "",
 ) -> tuple[str | None, bool]:
     """Read the remaining pages and merge them into ``document``.
 
@@ -1185,6 +1186,10 @@ def _follow_pagination(
     Every page reuses the first page's session, headers, authentication and
     timeout - the same request, at a different URL - so a cursor that only the
     API understands needs no configuration here.
+
+    ``served_url`` is the URL the first page actually came from (``response.url``
+    after any redirects), which is what relative links resolve against and what
+    decides which host the following pages may come from.
     """
     source = _next_source(spec)
     items = _items_path(spec)
@@ -1203,10 +1208,24 @@ def _follow_pagination(
         ), False
 
     max_pages, max_elements = _pagination_limits(spec)
+    # Where the FIRST PAGE CAME FROM, not what the rule asked for. They differ
+    # when the endpoint redirects, and then the configured URL is the wrong
+    # answer to both questions this needs one for: a relative next link
+    # ('?page=2') resolves against the page that offered it, and the host the
+    # pages may come from is the host actually serving them. Using the rule's
+    # URL instead sent page 2 to the pre-redirect path (an endpoint-wide failure
+    # on an API that works) and refused every absolute link a cross-host
+    # redirect produced, reporting the collection as incomplete.
+    #
+    # It relaxes nothing: requests only followed that redirect because the rule
+    # allows redirects, and it is the same hop the credentials already travelled.
     url = endpoint.get("url", "")
-    origin = urlsplit(url).netloc.lower()
-    seen = {url}
-    current_url = url
+    served = served_url or url
+    origin = urlsplit(served).netloc.lower()
+    # Both, so an API linking back to the URL the rule names is still recognised
+    # as the loop it is.
+    seen = {url, served}
+    current_url = served
     page_document = document
     page_headers = headers
     pages = 1
@@ -1529,6 +1548,10 @@ def _attempt(
             len(raw),
             scrub,
             debug,
+            # response.url, not meta["final_url"]: the latter has the secret
+            # masked out of it (for the query-parameter auth mode), and a URL
+            # with '<redacted>' in it is not one to resolve links against.
+            getattr(response, "url", "") or "",
         )
         if error is not None:
             _timed()

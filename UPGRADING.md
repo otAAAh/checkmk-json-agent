@@ -65,6 +65,33 @@ they read as though it applied. They now carry one more line saying it does not.
 
 **Effect:** Details only. No state, metric or summary changes.
 
+## [0.21.0]
+
+### A redirected endpoint's pagination now follows the redirect
+
+Only affects endpoints with **Follow pagination** turned on whose URL is
+answered by a **redirect** — an `http` → `https` hop, a `/api` → `/api/v2`
+move, or a regional host.
+
+Next-page links were resolved against the URL written in the rule instead of
+the one the first page was actually served from. A relative link (`?page=2`)
+therefore pointed at the pre-redirect path, which answered 404 and failed the
+**whole endpoint** — every one of its services UNKNOWN, on an API that was
+working. An absolute link to the redirect's own host was refused as "another
+host", leaving the collection at its first page with the endpoint service
+reporting it as incomplete. Both now resolve against the URL the pages really
+come from.
+
+This widens nothing: the redirect was followed because the rule allows
+redirects, and the endpoint's credentials already travelled that hop. A link to
+a host that is neither is refused exactly as before.
+
+**Effect:** such an endpoint starts working — services that sat UNKNOWN report
+values again, and a collection that stopped at page one is now read whole, so
+counts and aggregations over it change to their true values. Check any levels
+tuned while the count was truncated. Endpoints that are not redirected, or do
+not follow pagination, are unaffected.
+
 ## [0.20.0]
 
 ### Fields in a shared service that collided now each keep their own metric

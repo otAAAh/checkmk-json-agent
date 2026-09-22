@@ -517,7 +517,10 @@ merge, exactly as a `[*]` wildcard already treats them alike.
 Every page is the first page's request at a different URL — same session,
 method, headers, authentication and timeout — so a cursor only the API
 understands needs no configuration here. A relative link (`/v1/jobs?page=2`) is
-resolved against the page it came from.
+resolved against the page it came from, which is the URL the first page was
+**served** from: where an endpoint redirects, the pages follow it to the host
+and path actually answering, not to the one the rule names. A link anywhere
+else is still refused.
 
 #### The caps, and why they are not optional
 
