@@ -27,6 +27,7 @@ import {
   type ExtractionValue,
   type FilterValue,
 } from '../../lib/rulevalue'
+import { elementNames, fieldNames, servicePrefix, type FieldNames } from '../../lib/servicenames'
 
 const { _t } = usei18n()
 const { state, status, createRuleOnSite, extractionsSpec } = useExplorer()
@@ -462,6 +463,9 @@ function tagLabel(s: StateKind): string {
 
 interface Row {
   service: string
+  // This field's name WITHIN its service, when several fields share one. null
+  // for the ordinary case, where the field IS the service.
+  line?: string | null
   path: string
   value: Json | undefined
   // Shown instead of the value when the monitored number is only computed on the
@@ -576,6 +580,7 @@ const reviews = computed<EndpointReview[]>(() =>
         hostLabels.push({ label: `json_api/${key}`, value: mark(value, l.filter) })
       }
     }
+    const prefix = servicePrefix(connection)
     const rows: Row[] = (services?.extractions ?? [])
       .filter((x) => extractionPath(x))
       .flatMap((x): Row[] => {
@@ -584,7 +589,11 @@ const reviews = computed<EndpointReview[]>(() =>
         const noService = inventoryOnly(x)
         const tag = (produced: Row[]): Row[] =>
           noService ? produced.map((row) => ({ ...row, inventoryOnly: true })) : produced
-        const name = extractionService(x) || _t('(unnamed)')
+        const field = extractionService(x) || _t('(unnamed)')
+        // The same two steps the agent takes: a shared service takes over the
+        // name and pushes the field's own name down to its line, and the
+        // endpoint's prefix goes in front of whatever that leaves.
+        const { service: name, line } = fieldNames(x, field, prefix)
         const path = extractionPath(x)
         const defined = definedSummary(x)
         const labels = (Array.isArray(x.labels) ? (x.labels as Record<string, unknown>[]) : []).map(
@@ -603,7 +612,7 @@ const reviews = computed<EndpointReview[]>(() =>
         const matches = sample !== null ? resolvePath(sample, path) : []
         if (!matches.length) {
           return tag([
-            { service: name, path, value: undefined, defined, state: 'none' as StateKind, labels },
+            { service: name, line, path, value: undefined, defined, state: 'none' as StateKind, labels },
           ])
         }
         if (aggregate) {
@@ -623,6 +632,7 @@ const reviews = computed<EndpointReview[]>(() =>
           return tag([
             {
               service: name,
+              line,
               path,
               value: undefined,
               note,
@@ -636,14 +646,23 @@ const reviews = computed<EndpointReview[]>(() =>
         // on a host of its own, so the label suffix the preview would otherwise
         // show is not what gets created.
         const perElementHost = piggybackField(x)
-        const serviceName = (label: string | undefined): string =>
-          perElementHost === null && matches.length > 1 && label ? `${name} ${label}` : name
+        // With a shared service the expansion fans out into LINES of that one
+        // service, so the element label lands on the line and the service name
+        // stays put — and with a host per element the host carries the identity
+        // and the service keeps its plain name.
+        const fansOut = matches.length > 1
+        const named = (label: string | undefined): FieldNames =>
+          elementNames({ service: name, line }, label, {
+            perElementHost: perElementHost !== null,
+            fansOut,
+          })
         return tag(
           matches.map((m): Row => {
             if (readAs !== null) {
-              const service = serviceName(m.label)
+              const { service, line: elementLine } = named(m.label)
               return {
                 service,
+                line: elementLine,
                 path,
                 value: m.value,
                 note:
@@ -655,7 +674,7 @@ const reviews = computed<EndpointReview[]>(() =>
                 labels,
               }
             }
-            const service = serviceName(m.label)
+            const { service, line: elementLine } = named(m.label)
             let value: Json = m.value
             // Transform the value when `calc` is set and it is numeric. On a bad
             // expression evalCalc returns null: leave the value shown and mark the
@@ -663,11 +682,11 @@ const reviews = computed<EndpointReview[]>(() =>
             if (calc !== null && typeof value === 'number') {
               const transformed = evalCalc(calc, value)
               if (transformed === null) {
-                return { service, path, value, defined, state: 'none' as StateKind, labels }
+                return { service, line: elementLine, path, value, defined, state: 'none' as StateKind, labels }
               }
               value = transformed
             }
-            return { service, path, value, defined, state: evalState(value, x), labels }
+            return { service, line: elementLine, path, value, defined, state: evalState(value, x), labels }
           }),
         )
       })
@@ -677,8 +696,12 @@ const reviews = computed<EndpointReview[]>(() =>
       hostLabels,
       // An inventory-only field is configured and shown, but it becomes a tree
       // entry, not a service - counting it as one would promise a service that
-      // never appears.
-      serviceCount: rows.filter((row) => !row.inventoryOnly).length,
+      // never appears. Counted by NAME, not by row: fields sharing a service
+      // are several rows and one service, and promising one per field is how
+      // this number gets the answer wrong for the whole feature.
+      serviceCount: new Set(
+        rows.filter((row) => !row.inventoryOnly).map((row) => row.service),
+      ).size,
       inventoryCount: rows.filter((row) => row.inventoryOnly).length,
       // The site follows this endpoint's pagination and merges the pages, but the
       // preview resolves against the ONE response the wizard fetched - so every
@@ -728,6 +751,7 @@ const reviews = computed<EndpointReview[]>(() =>
                 <div class="je-step-review__body">
                   <div class="je-step-review__line">
                     <span class="je-step-review__name">{{ row.service }}</span>
+                    <span v-if="row.line" class="je-step-review__line-name">{{ _t('line %{l}', { l: row.line }) }}</span>
                     <code class="je-step-review__path">{{ row.path }}</code>
                     <span class="je-step-review__value">{{ row.note ? row.note : `= ${fmtValue(row.value)}` }}</span>
                   </div>
@@ -831,6 +855,11 @@ const reviews = computed<EndpointReview[]>(() =>
 
 .je-step-review__body {
   min-width: 0;
+}
+
+.je-step-review__line-name {
+  font-style: italic;
+  opacity: 0.8;
 }
 
 .je-step-review__line {
