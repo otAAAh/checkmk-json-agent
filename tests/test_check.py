@@ -816,6 +816,59 @@ def test_counter_going_backwards_does_not_produce_a_negative_rate(check, monkeyp
     assert not [r for r in results if isinstance(r, Metric)]
 
 
+def test_a_counter_of_its_own_keeps_the_bare_value_store_key(check):
+    # The key an existing counter's reading is already stored under. Changing it
+    # would cost every such service one "no rate yet" check on upgrade, for no
+    # gain: a field that IS its service cannot collide with anything.
+    entry = _entry("Reqs", value=1, value_as=["counter", None])
+    (item,) = _section(check, [entry]).items["Reqs"]
+    assert check._counter_key(item) == "counter"
+
+
+def test_counters_sharing_a_service_do_not_share_their_reading(check, monkeypatch):
+    """Each line of a shared service differences against its OWN last reading.
+
+    The value store is scoped to the service, so every line of a shared service
+    used to read and write one key: each was differenced against whichever line
+    happened to be stored last, so one reported a nonsense rate and the next saw
+    its counter go backwards and reported none - alternating every check.
+    """
+    store = {}
+    _counter_store(check, monkeypatch, store)
+    _fixed_clock(check, monkeypatch, 1000.0)
+    lines = [
+        _entry("Traffic", label="Reqs", value=100, value_as=["counter", None]),
+        _entry("Traffic", label="Errs", value=10, value_as=["counter", None]),
+    ]
+    list(check.check_json_api("Traffic", {}, _section(check, lines)))
+    # One reading per line, not one for the service.
+    assert sorted(store) == ["counter.Errs", "counter.Reqs"]
+
+    _fixed_clock(check, monkeypatch, 1010.0)
+    lines[0]["value"] = 200  # +100 in 10 s -> 10/s
+    lines[1]["value"] = 20  # +10 in 10 s -> 1/s
+    results = list(check.check_json_api("Traffic", {}, _section(check, lines)))
+    assert not [r for r in results if isinstance(r, IgnoreResults)]
+    assert {m.name: m.value for m in results if isinstance(m, Metric)} == {
+        "json_api_rate_reqs": 10.0,
+        "json_api_rate_errs": 1.0,
+    }
+
+
+def test_wildcard_counters_in_one_shared_service_each_keep_a_reading(check, monkeypatch):
+    # The same collision, reached the common way: a '[*]' wildcard reporting
+    # into a shared service fans out into LINES of it, one per element.
+    store = {}
+    _counter_store(check, monkeypatch, store)
+    _fixed_clock(check, monkeypatch, 1000.0)
+    lines = [
+        _entry("Nodes", label="Reqs node-01", value=0, value_as=["counter", None]),
+        _entry("Nodes", label="Reqs node-02", value=0, value_as=["counter", None]),
+    ]
+    list(check.check_json_api("Nodes", {}, _section(check, lines)))
+    assert sorted(store) == ["counter.Reqs node-01", "counter.Reqs node-02"]
+
+
 # --- Timestamp -> age ---------------------------------------------------------
 
 

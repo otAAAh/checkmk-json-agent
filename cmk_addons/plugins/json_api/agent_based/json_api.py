@@ -900,6 +900,25 @@ def _parse_timestamp(value: object, fmt: str) -> float | None:
     return stamp if stamp is not None else _parse_http_date(value)
 
 
+def _counter_key(entry: Item) -> str:
+    """The value-store key this field's counter reading is kept under.
+
+    The store is scoped to the service, which is enough while a field IS a
+    service - but several fields can share one (see ``label``), and every line
+    of a '[*]' wildcard reporting into a shared service is such a field too.
+    They would then all read and write ONE reading: each line would be
+    differenced against whichever line was stored last, so one reports a
+    nonsense rate and the next sees its counter go backwards and reports none at
+    all - alternating on every check.
+
+    The line's own name is what distinguishes them, and it is stable across
+    checks (it carries the element's label for a wildcard). A field of its own
+    keeps the bare key, so an existing counter's stored reading survives this
+    change rather than costing every such service one "no rate yet" check.
+    """
+    return "counter" if entry.label is None else f"counter.{entry.label}"
+
+
 def _derive(entry: Item) -> tuple[float | None, str, Callable[[float], str] | None, CheckResult]:
     """Turn a counter / timestamp value into the number that is monitored.
 
@@ -934,7 +953,9 @@ def _derive(entry: Item) -> tuple[float | None, str, Callable[[float], str] | No
             )
         reading = Result(state=State.OK, notice=f"Counter reading: {_fmt_number(number)}")
         try:
-            rate = get_rate(get_value_store(), "counter", time.time(), number, raise_overflow=True)
+            rate = get_rate(
+                get_value_store(), _counter_key(entry), time.time(), number, raise_overflow=True
+            )
         except GetRateError as exc:
             # No previous reading yet (or the counter went backwards, e.g. the
             # monitored service restarted): keep the service's previous state
