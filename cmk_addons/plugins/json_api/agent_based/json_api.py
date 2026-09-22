@@ -183,6 +183,19 @@ def _fmt_rate(number: float) -> str:
     return _fmt_number(number) if number.is_integer() else f"{number:.6g}"
 
 
+# The column a '[*]' wildcard's inventory table is keyed by. Checkmk merges the
+# rows that share it, which is what lets several fields over one collection fill
+# in columns of the same row - so it has to be one name, chosen here rather than
+# in the rule.
+#
+# It cannot be a name a field is likely to want for a column of its own: a
+# column that is also the key column makes TableRow raise, which would fail the
+# host's whole inventory. It used to be 'name', which is the most natural column
+# a field could ask for ('nodes[*].name'), so it is now 'element' - a name that
+# describes what the column holds and that Setup reserves.
+_INVENTORY_ROW_KEY = "element"
+
+
 @dataclass(frozen=True)
 class InventoryTarget:
     """Where one field's value goes in the HW/SW inventory tree."""
@@ -1529,12 +1542,21 @@ def inventory_json_api(section: Section) -> InventoryResult:
                 path=list(target.path),
                 inventory_attributes={target.key: value},
             )
-        else:
-            yield TableRow(
-                path=list(target.path),
-                key_columns={"name": target.row_key},
-                inventory_columns={target.key: value},
-            )
+            continue
+        if target.key == _INVENTORY_ROW_KEY:
+            # A column cannot also be the key column: TableRow refuses that
+            # outright, and an exception here would take the WHOLE host's
+            # inventory with it, every field of every rule. Setup reserves the
+            # name so a rule cannot ask for this; only a column name DERIVED
+            # from the path (a JSON field literally called 'element' inside the
+            # collection) can still reach it, and dropping that one column is
+            # the smallest thing that can go wrong here.
+            continue
+        yield TableRow(
+            path=list(target.path),
+            key_columns={_INVENTORY_ROW_KEY: target.row_key},
+            inventory_columns={target.key: value},
+        )
 
 
 agent_section_json_api = AgentSection(

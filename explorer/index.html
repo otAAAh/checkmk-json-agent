@@ -783,6 +783,8 @@ function renderFields() {
       `<div class="row"><label>Summary text</label><input type="text" data-f="summary" data-i="${i}" value="${escAttr(e.summary)}" placeholder="extra text, e.g. {message} (leader {leader})"></div>` +
       `<div class="row"><label>Inventory node</label><input type="text" data-f="invNode" data-i="${i}" value="${escAttr(e.invNode)}" placeholder="(optional) e.g. software.applications.json_api — no service unless kept"></div>` +
       `<div class="row"><label>Inventory attribute</label><input type="text" data-f="invKey" data-i="${i}" value="${escAttr(e.invKey)}" placeholder="(optional) defaults to the path's last segment"></div>` +
+      (inventoryKeyError(e.invKey, e.path)
+        ? `<div class="subnote err">${escAttr(inventoryKeyError(e.invKey, e.path))}</div>` : "") +
       `<div class="row"><label>Also a service</label><input type="checkbox" data-fb="invKeepService" data-i="${i}"${e.invKeepService ? " checked" : ""}></div>` +
       `<div class="row"><label>Upper W/C</label><span class="lvls"><input type="text" data-f="lu_w" data-i="${i}" value="${escAttr(e.lu_w)}" placeholder="warn"><input type="text" data-f="lu_c" data-i="${i}" value="${escAttr(e.lu_c)}" placeholder="crit"></span></div>` +
       `<div class="row"><label>Lower W/C</label><span class="lvls"><input type="text" data-f="ll_w" data-i="${i}" value="${escAttr(e.ll_w)}" placeholder="warn"><input type="text" data-f="ll_c" data-i="${i}" value="${escAttr(e.ll_c)}" placeholder="crit"></span></div>` +
@@ -850,6 +852,27 @@ function metricNameError(name) {
     return "Letters, digits and underscores only, starting with a letter or a digit.";
   if (DECLARED_METRICS.has(v))
     return `'${v}' is one of the plugin's own metrics — the field would inherit its unit and colour.`;
+  return "";
+}
+
+// The inventory attribute name, and the one name the ruleset reserves: for a
+// '[*]' wildcard the table rows are keyed by an 'element' column, and a column
+// of that name would also be the key column - which Checkmk refuses while
+// writing the tree. Mirrors _validate_inventory_key and the reservation in
+// _validate_extraction, both in the ruleset.
+const INVENTORY_KEY_RE = /^[a-z][a-z0-9_]*$/;
+const INVENTORY_ROW_KEY = "element";
+
+/** Why this inventory attribute name would be rejected by Setup, or "". */
+function inventoryKeyError(name, path) {
+  const v = (name || "").trim();
+  if (!v) return "";                       // unset defaults to the path's last segment
+  if (!INVENTORY_KEY_RE.test(v))
+    return "Lower-case letters, digits and underscores only, starting with a letter.";
+  // Only a wildcard writes table rows; a plain attribute has no key column and
+  // may be called anything.
+  if (v === INVENTORY_ROW_KEY && String(path || "").includes("[*]"))
+    return "'element' is the column a '[*]' wildcard keys its table rows by — pick another name.";
   return "";
 }
 
