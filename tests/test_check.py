@@ -278,6 +278,51 @@ def test_check_levels_on_non_numeric_warns_even_with_expected(check):
     assert "not numeric" in result.summary
 
 
+def test_matching_a_numeric_value_with_levels_says_it_was_not_applied(check):
+    # Levels decide the state of a numeric value, so the matching configured
+    # alongside them never runs. The Details list the pattern either way (see
+    # _context), so staying silent about it left them claiming a state map that
+    # does nothing - found out during the incident it was written for.
+    section = _section(
+        check,
+        [
+            _entry(
+                "Code",
+                value=2,
+                levels_upper=["fixed", [10.0, 20.0]],
+                match=["state_map", {"crit": "2"}],
+            )
+        ],
+    )
+    results = list(check.check_json_api("Code", {}, section))
+    details = _details(results)
+    assert "String matching is not applied when levels are configured" in details
+    # Presentation only: the levels still decide, and they are not exceeded.
+    assert State.worst(*[r.state for r in results if isinstance(r, Result)]) == State.OK
+    assert "State map: CRIT /2/" in details
+
+
+def test_a_derived_value_with_levels_says_it_only_once(check, monkeypatch):
+    # The derived-value note already covers this case; a second note saying the
+    # same thing differently would just be noise.
+    _fixed_clock(check, monkeypatch, 1700000000.0)
+    section = _section(
+        check,
+        [
+            _entry(
+                "Backup",
+                value=1700000000,
+                value_as=["timestamp", {"format": "epoch"}],
+                levels_upper=["fixed", [10.0, 20.0]],
+                match=["must_match", {"pattern": "1700000000"}],
+            )
+        ],
+    )
+    details = _details(list(check.check_json_api("Backup", {}, section)))
+    assert "String matching does not apply to a derived age" in details
+    assert "String matching is not applied when levels are configured" not in details
+
+
 def test_check_failed_match_still_surfaces_misconfigured_levels(check):
     # The regex fails (CRIT) and levels are also misconfigured: the value stays
     # CRIT but the levels-misconfig note is appended, not hidden behind it.
