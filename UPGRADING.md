@@ -65,7 +65,15 @@ they read as though it applied. They now carry one more line saying it does not.
 
 **Effect:** Details only. No state, metric or summary changes.
 
-## [0.21.0]
+### A malformed endpoint in a hand-edited rule fails only that endpoint
+
+Only affects rules or program calls edited **by hand** — Setup cannot produce
+this. An `--endpoint` argument that was not valid JSON (or not a JSON object)
+used to abort the agent before it wrote anything, so **every** service of
+**every** endpoint on the host went stale. It now becomes one failed endpoint
+service saying what is wrong, and the other endpoints report normally.
+
+**Effect:** none for rules saved through Setup.
 
 ### A redirected endpoint's pagination now follows the redirect
 

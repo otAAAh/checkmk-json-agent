@@ -86,7 +86,8 @@ included. One rule. Any API. Done.
   not a CRIT and a notification. A 4xx or a non-JSON body is never retried, and
   the service reports when a retry *was* needed — it cannot hide a degrading API.
 - 🔗 **Many endpoints, one rule** — poll several APIs together, each with its own
-  method, auth, and fields; an unreachable one only affects its own services.
+  method, auth, and fields; an unreachable or misconfigured one only affects its
+  own services.
 - 🧩 **One service for several fields** — where a service per field is too much:
   name a shared service on each field and they become **lines** of one service,
   which takes the **worst** of their states. `status`, `component` and
