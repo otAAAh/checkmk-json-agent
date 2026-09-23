@@ -3,6 +3,23 @@
 All notable changes to this project, one section per released version.
 Generated from the git history by `scripts/gen_changelog.py`.
 
+## [0.21.0] - 2026-09-23
+
+### Fixes
+
+- The wizard's review previews the service names the site will create ([#220](https://github.com/otAAAh/checkmk-json-agent/pull/220)) ([`9167a07`](https://github.com/otAAAh/checkmk-json-agent/commit/9167a07))
+- A malformed '--endpoint' blob costs its own endpoint, not the section ([#219](https://github.com/otAAAh/checkmk-json-agent/pull/219)) ([`993fe9c`](https://github.com/otAAAh/checkmk-json-agent/commit/993fe9c))
+- All eight catalogs answered a validation message with a field title ([#218](https://github.com/otAAAh/checkmk-json-agent/pull/218)) ([`98e5971`](https://github.com/otAAAh/checkmk-json-agent/commit/98e5971))
+- A redirected endpoint's pagination follows the redirect ([#217](https://github.com/otAAAh/checkmk-json-agent/pull/217)) ([`e8efbce`](https://github.com/otAAAh/checkmk-json-agent/commit/e8efbce))
+- Say when string matching is not applied next to levels ([#216](https://github.com/otAAAh/checkmk-json-agent/pull/216)) ([`adc2171`](https://github.com/otAAAh/checkmk-json-agent/commit/adc2171))
+- An inventory column named 'name' no longer fails the host's inventory ([#215](https://github.com/otAAAh/checkmk-json-agent/pull/215)) ([`919c9fb`](https://github.com/otAAAh/checkmk-json-agent/commit/919c9fb))
+- Counters sharing a service each keep their own reading ([#214](https://github.com/otAAAh/checkmk-json-agent/pull/214)) ([`b8e2c48`](https://github.com/otAAAh/checkmk-json-agent/commit/b8e2c48))
+
+### Other
+
+- Prepare 0.21.0 - announcement and refreshed listings ([#221](https://github.com/otAAAh/checkmk-json-agent/pull/221)) ([`03c8a05`](https://github.com/otAAAh/checkmk-json-agent/commit/03c8a05))
+- Prepare 0.20.0 - announcement and refreshed listings ([#212](https://github.com/otAAAh/checkmk-json-agent/pull/212)) ([`e0a5ec3`](https://github.com/otAAAh/checkmk-json-agent/commit/e0a5ec3))
+
 ## [0.20.0] - 2026-09-21
 
 ### Fixes
