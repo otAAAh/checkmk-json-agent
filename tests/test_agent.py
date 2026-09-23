@@ -967,6 +967,54 @@ def test_main_isolates_endpoint_failure(agent, monkeypatch, capsys):
     assert by_service["Up"]["found"] is True and by_service["Up"]["value"] == "UP"
 
 
+def test_main_isolates_a_malformed_endpoint_blob(agent, monkeypatch, capsys):
+    """A '--endpoint' blob that is not JSON costs its own endpoint, nothing else.
+
+    Parsing them all up front raised before anything was written: no section at
+    all, so every service of every endpoint on the host went stale - the
+    loudest possible answer to the smallest possible cause, and exactly what
+    _process_endpoint is written to prevent for every other failure. Setup
+    cannot produce such a blob; a hand-edited program call can, which is
+    precisely when the operator is already debugging something.
+    """
+    monkeypatch.setattr(
+        agent, "_fetch", lambda endpoint, secret, debug=False: ({"s": "UP"}, None, {})
+    )
+    argv = [
+        "--endpoint",
+        "{not json",
+        "--endpoint",
+        json.dumps({"url": "http://up", "extractions": [{"path": "s", "service": "Up"}]}),
+    ]
+    rc = agent.main(argv)
+    payload = json.loads(capsys.readouterr().out.splitlines()[1])
+    assert rc == 0
+    # The good endpoint is untouched...
+    by_service = {r["service"]: r for r in payload["results"]}
+    assert by_service["Up"]["found"] is True and by_service["Up"]["value"] == "UP"
+    # ... and the bad one reports why, on its own service.
+    bad = payload["endpoints"][0]
+    assert bad["ok"] is False and "not valid JSON" in bad["error"]
+
+
+def test_main_isolates_an_endpoint_blob_that_is_not_an_object(agent, monkeypatch, capsys):
+    # Valid JSON, wrong shape: a list would otherwise reach _process_endpoint
+    # and fail on .get() with a message about attributes rather than config.
+    monkeypatch.setattr(
+        agent, "_fetch", lambda endpoint, secret, debug=False: ({"s": "UP"}, None, {})
+    )
+    argv = [
+        "--endpoint",
+        "[1, 2]",
+        "--endpoint",
+        json.dumps({"url": "http://up", "extractions": [{"path": "s", "service": "Up"}]}),
+    ]
+    assert agent.main(argv) == 0
+    payload = json.loads(capsys.readouterr().out.splitlines()[1])
+    assert "not an object" in payload["endpoints"][0]["error"]
+    assert payload["endpoints"][1]["ok"] is True
+
+
 def test_main_flushes_stdout(agent, monkeypatch):
     """The section is flushed before returning, so a consultant who copies the
     program call out of `cmk -D <host>` and runs it by hand on a TTY sees the
