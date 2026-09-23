@@ -224,7 +224,10 @@ msgid ""
 "'Labels for the created host' needs 'Create one host per element, named by "
 "this field' - without it the element stays a service on this host and there "
 "is no host to label."
-msgstr "Etiquetas para o anfitrião criado"
+msgstr ""
+"«Etiquetas para o anfitrião criado» precisa de «Criar um host por elemento, "
+"com o nome deste campo»: sem isso o elemento continua a ser um serviço neste "
+"host e não há nenhum host para etiquetar."
 
 #: cmk_addons/plugins/json_api/rulesets/special_agent.py:474
 msgid ""
