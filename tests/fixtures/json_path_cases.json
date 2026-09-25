@@ -126,6 +126,12 @@
       "values": []
     },
     {
+      "name": "a built-in object property is not a key",
+      "document": "health",
+      "path": "components.toString",
+      "values": []
+    },
+    {
       "name": "a key holding null is found, with the null",
       "document": "health",
       "path": "nothing",

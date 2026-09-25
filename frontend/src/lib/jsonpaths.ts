@@ -223,7 +223,9 @@ export function resolvePath(root: Json, path: string): ResolvedValue[] {
     const next: ResolvedValue[] = []
     for (const { label, value } of current) {
       if (step.kind === 'key') {
-        if (isRecord(value) && step.key in value) {
+        // Own keys only, like the agent's `key in dict`: the JS `in` would also
+        // find 'constructor', 'toString', ... on every object.
+        if (isRecord(value) && Object.hasOwn(value, step.key)) {
           next.push({ label, value: value[step.key]! })
         }
       } else if (step.kind === 'index') {
