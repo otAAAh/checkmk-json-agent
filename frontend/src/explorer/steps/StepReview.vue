@@ -19,7 +19,7 @@ import CmkHeading from '@/components/typography/CmkHeading.vue'
 import CmkParagraph from '@/components/typography/CmkParagraph.vue'
 
 import { useExplorer } from '../../composables/useExplorer'
-import { labelWarnings, resolveLabelled } from '../../lib/elementlabels'
+import { labelWarnings, resolveLabelled, type LabelledValue } from '../../lib/elementlabels'
 import { resolvePath, type Json } from '../../lib/jsonpaths'
 import {
   endpointUrl,
@@ -617,7 +617,12 @@ const reviews = computed<EndpointReview[]>(() =>
         // Named the way the agent names them: by the label path's field, the
         // position where it is missing, and a repeat suffixed with its position.
         const labelPath = typeof x.label_path === 'string' ? x.label_path : ''
-        const resolved = sample !== null ? resolveLabelled(sample, path, labelPath) : null
+        // With a host per element, each element's host is resolved too: one
+        // whose host field does not resolve stays on the polling host, under
+        // the labelled name.
+        const perElementHost = piggybackField(x)
+        const resolved =
+          sample !== null ? resolveLabelled(sample, path, labelPath, perElementHost ?? '') : null
         const matches = resolved?.values ?? []
         if (!matches.length) {
           return tag([
@@ -651,10 +656,9 @@ const reviews = computed<EndpointReview[]>(() =>
             },
           ])
         }
-        // With a host field, every element's service keeps the PLAIN name and lands
-        // on a host of its own, so the label suffix the preview would otherwise
-        // show is not what gets created.
-        const perElementHost = piggybackField(x)
+        // With a host field, every element whose host resolves keeps the PLAIN
+        // service name and lands on a host of its own, so the label suffix the
+        // preview would otherwise show is not what gets created for it.
         // With a shared service the expansion fans out into LINES of that one
         // service, so the element label lands on the line and the service name
         // stays put — and with a host per element the host carries the identity
@@ -662,14 +666,14 @@ const reviews = computed<EndpointReview[]>(() =>
         // over a collection of one: its single service still carries the
         // element's suffix on the site.
         const fansOut = path.includes('[*]')
-        const named = (label: string | undefined): FieldNames =>
-          elementNames({ service: name, line }, label, {
-            perElementHost: perElementHost !== null,
+        const named = (m: LabelledValue): FieldNames =>
+          elementNames({ service: name, line }, m.label, {
+            perElementHost: m.host !== null,
             fansOut,
           })
         const produced = matches.map((m): Row => {
           if (readAs !== null) {
-            const { service, line: elementLine } = named(m.label)
+            const { service, line: elementLine } = named(m)
             return {
               service,
               line: elementLine,
@@ -684,7 +688,7 @@ const reviews = computed<EndpointReview[]>(() =>
               labels,
             }
           }
-          const { service, line: elementLine } = named(m.label)
+          const { service, line: elementLine } = named(m)
           let value: Json = m.value
           // Transform the value when `calc` is set and it is numeric. On a bad
           // expression evalCalc returns null: leave the value shown and mark the
@@ -698,10 +702,10 @@ const reviews = computed<EndpointReview[]>(() =>
           }
           return { service, line: elementLine, path, value, defined, state: evalState(value, x), labels }
         })
-        // With a host per element the suffix never reaches a service name (the
-        // host carries the identity), so a repeat there is nothing to warn about.
-        const warnings =
-          resolved && perElementHost === null ? labelWarnings(resolved.issues, _t) : []
+        // With a host per element the suffix only reaches the services of the
+        // elements that stay on the polling host; resolveLabelled has already
+        // narrowed the issues to those.
+        const warnings = resolved ? labelWarnings(resolved.issues, _t) : []
         if (warnings.length && produced[0]) {
           produced[0] = { ...produced[0], warnings }
         }

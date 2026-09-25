@@ -16,8 +16,11 @@
 // names are really decided: the label path is resolved at EVERY wildcard level
 // against that level's element, a repeat is suffixed within its own container
 // (two pods may each have a container called 'app'), and the per-level parts
-// are joined with ' / '. The shared cases in tests/fixtures/label_path_cases.json
-// hold both sides to that. The standalone Explorer mirrors this file.
+// are joined with ' / '. With a host per element (_piggyback_host, resolved
+// against the leaf element) only the elements whose host does not resolve keep
+// the suffix - they stay on the polling host - so only their names are judged.
+// The shared cases in tests/fixtures/label_path_cases.json hold both sides to
+// that. The standalone Explorer mirrors this file.
 
 import { isRecord, tokenizePath, type Json, type Step } from './jsonpaths'
 
@@ -25,6 +28,10 @@ import { isRecord, tokenizePath, type Json, type Step } from './jsonpaths'
 export interface LabelledValue {
   label: string
   value: Json
+  /** The piggyback host the element becomes, when a host field is set and
+   * resolves; null otherwise - and then its service stays on the polling host
+   * under the labelled name. */
+  host: string | null
 }
 
 /** A label value shared by several elements of ONE container. */
@@ -48,6 +55,13 @@ export interface LabelIssues {
   empty: string[]
   /** The field is an object or a list: its whole rendering lands in the name. */
   nonScalar: string[]
+  /** With a host per element: the elements whose host field does not resolve,
+   * so their services stay on the polling host under the labelled name. */
+  fallback: string[]
+  /** The field is a whole number beyond 2^53: the browser has rounded it, so
+   * whether two of them are equal cannot be told here (the site reads them
+   * exactly). Never reported as a duplicate. */
+  imprecise: string[]
 }
 
 export interface LabelledResolution {
@@ -139,7 +153,45 @@ function pairsOf(container: Json): Array<[string, Json]> | null {
   return null
 }
 
-const noIssues = (): LabelIssues => ({ duplicates: [], missing: [], empty: [], nonScalar: [] })
+const noIssues = (): LabelIssues => ({
+  duplicates: [],
+  missing: [],
+  empty: [],
+  nonScalar: [],
+  fallback: [],
+  imprecise: [],
+})
+
+// The agent's _HOST_NAME_INVALID: a host name ends up in file paths and config.
+const HOST_NAME_INVALID = /[^-0-9A-Za-z_.]/g
+
+/** The agent's _label_value: a JSON scalar as text, null for null/object/list. */
+function labelValue(value: Json): string | null {
+  if (typeof value === 'boolean') return value ? 'true' : 'false'
+  if (typeof value === 'number') return String(value)
+  if (typeof value === 'string') return value
+  return null
+}
+
+/** The agent's _piggyback_host: the host an element becomes, or null when its
+ * field is missing, not a scalar, or sanitises to nothing - the element then
+ * stays on the polling host. */
+export function piggybackHost(element: Json, hostPath: string): string | null {
+  if (!hostPath.trim()) return null
+  const found = resolveAsAgent(element, hostPath.trim())
+  if (!found) return null
+  const text = labelValue(found.value)
+  if (text === null) return null
+  const cleaned = text
+    .trim()
+    .replace(HOST_NAME_INVALID, '_')
+    .replace(/^[_.]+|[_.]+$/g, '')
+  return cleaned || null
+}
+
+/** A whole number JavaScript cannot hold exactly: JSON.parse has rounded it. */
+const isImprecise = (value: Json): boolean =>
+  typeof value === 'number' && Number.isInteger(value) && !Number.isSafeInteger(value)
 
 /** Resolve a '[*]' path the way the agent does, naming each found value by the
  * suffix the site will give it, and collect what is wrong with those names.
@@ -148,7 +200,12 @@ const noIssues = (): LabelIssues => ({ duplicates: [], missing: [], empty: [], n
  * order); only the labels differ, because `resolvePath` names every element by
  * its position and ignores the label path. A path the port cannot parse
  * resolves to nothing, as it does there. */
-export function resolveLabelled(root: Json, path: string, labelPath: string): LabelledResolution {
+export function resolveLabelled(
+  root: Json,
+  path: string,
+  labelPath: string,
+  hostPath = '',
+): LabelledResolution {
   const issues = noIssues()
   const steps = tokenizePath(path)
   if (steps === null) return { values: [], issues }
@@ -161,16 +218,25 @@ export function resolveLabelled(root: Json, path: string, labelPath: string): La
   // An empty label path is no label path (the agent tests it for truthiness).
 
   const values: LabelledValue[] = []
+  // With a host per element, the positions (' / '-joined) of the leaves that
+  // stay on the polling host - the only ones whose names reach a service.
+  const onPollingHost: string[] = []
   const expand = (node: Json, level: number, parts: string[], positions: string[]): void => {
     if (level === groups.length - 1) {
       const found = walk(node, groups[level]!)
-      if (found) values.push({ label: parts.join(' / '), value: found.value })
+      if (!found) return
+      // Resolved against the LEAF element, as the agent does.
+      const host = hostPath ? piggybackHost(node, hostPath) : null
+      if (hostPath && host === null) onPollingHost.push(positions.join(' / '))
+      values.push({ label: parts.join(' / '), value: found.value, host })
       return
     }
     const container = walk(node, groups[level]!)
     const pairs = container ? pairsOf(container.value) : null
     if (pairs === null) return
     const at = (position: string): string => [...positions, position].join(' / ')
+    // The texts of the labels the browser has rounded (see isImprecise).
+    const rounded = new Set<string>()
     const labels = pairs.map(([position, element]) => {
       if (!labelPath) return position
       const found = resolveAsAgent(element, labelPath)
@@ -179,6 +245,10 @@ export function resolveLabelled(root: Json, path: string, labelPath: string): La
         return position
       }
       if (found.value !== null && typeof found.value === 'object') issues.nonScalar.push(at(position))
+      if (isImprecise(found.value)) {
+        issues.imprecise.push(at(position))
+        rounded.add(pyStr(found.value))
+      }
       const text = pyStr(found.value)
       if (text === '') issues.empty.push(at(position))
       return text
@@ -186,7 +256,9 @@ export function resolveLabelled(root: Json, path: string, labelPath: string): La
     const byLabel = new Map<string, number[]>()
     labels.forEach((label, index) => byLabel.set(label, [...(byLabel.get(label) ?? []), index]))
     for (const [label, indices] of byLabel) {
-      if (indices.length > 1) {
+      // A repeat of a rounded number may be two distinct IDs the site tells
+      // apart: not claimed - the 'imprecise' note says why.
+      if (indices.length > 1 && !rounded.has(label)) {
         issues.duplicates.push({
           label,
           elements: indices.map((i) => at(pairs[i]![0])),
@@ -207,7 +279,35 @@ export function resolveLabelled(root: Json, path: string, labelPath: string): La
   // repeat once, under duplicates, rather than twice.
   const emptyRepeats = new Set(issues.duplicates.filter((d) => d.label === '').flatMap((d) => d.elements))
   issues.empty = issues.empty.filter((e) => !emptyRepeats.has(e))
+  if (hostPath) restrictToPollingHost(issues, onPollingHost)
   return { values, issues }
+}
+
+/** With a host per element, keep only what concerns the elements that stay on
+ * the polling host: the others each get a host of their own and keep the plain
+ * service name, so their suffix never reaches a service. An issue's element
+ * (possibly an outer level of a nested expansion) counts when any leaf under it
+ * stays behind. A repeat is only kept while at least two of its elements do:
+ * only then do two services on ONE host depend on the order. */
+function restrictToPollingHost(issues: LabelIssues, leaves: string[]): void {
+  const concerns = (element: string): boolean =>
+    leaves.some((leaf) => leaf === element || leaf.startsWith(`${element} / `))
+  issues.duplicates = issues.duplicates.flatMap((dup) => {
+    const kept = dup.elements.flatMap((element, i) => (concerns(element) ? [i] : []))
+    if (kept.length < 2) return []
+    return [
+      {
+        label: dup.label,
+        elements: kept.map((i) => dup.elements[i]!),
+        names: kept.map((i) => dup.names[i]!),
+      },
+    ]
+  })
+  issues.missing = issues.missing.filter(concerns)
+  issues.empty = issues.empty.filter(concerns)
+  issues.nonScalar = issues.nonScalar.filter(concerns)
+  issues.imprecise = issues.imprecise.filter(concerns)
+  issues.fallback = leaves
 }
 
 /** Whether the sample found anything worth warning about. */
@@ -216,7 +316,9 @@ export function hasLabelIssues(issues: LabelIssues): boolean {
     issues.duplicates.length > 0 ||
     issues.missing.length > 0 ||
     issues.empty.length > 0 ||
-    issues.nonScalar.length > 0
+    issues.nonScalar.length > 0 ||
+    issues.fallback.length > 0 ||
+    issues.imprecise.length > 0
   )
 }
 
@@ -263,12 +365,28 @@ export function labelWarnings(issues: LabelIssues, t: Translate): string[] {
       }),
     )
   }
+  if (issues.imprecise.length) {
+    warnings.push(
+      t(
+        'The name field is a whole number too large for the browser to read exactly in %{n} element(s) (%{elements}): the names shown here are rounded, and whether two of them repeat cannot be told here. The site reads them exactly.',
+        { n: issues.imprecise.length, elements: listOf(issues.imprecise, false) },
+      ),
+    )
+  }
   if (issues.nonScalar.length) {
     warnings.push(
       t('The name field is an object or a list in %{n} element(s) (%{elements}): its whole content becomes part of the name.', {
         n: issues.nonScalar.length,
         elements: listOf(issues.nonScalar, false),
       }),
+    )
+  }
+  if (issues.fallback.length) {
+    warnings.push(
+      t(
+        'The host field does not resolve in %{n} element(s) (%{elements}): those get no host of their own - their services stay on the polling host, named by the element.',
+        { n: issues.fallback.length, elements: listOf(issues.fallback, false) },
+      ),
     )
   }
   return warnings

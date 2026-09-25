@@ -586,6 +586,8 @@ def test_explorer_names_the_elements_as_the_agent_does(explorer_output: dict, in
 
     assert answer["labels"] == case["labels"]
     assert answer["issues"] == case["issues"]
+    if "hosts" in case:
+        assert answer["hosts"] == case["hosts"]
 
 
 def test_explorer_warns_when_a_name_suffix_repeats(explorer_output: dict):
@@ -603,11 +605,35 @@ def test_explorer_warns_when_a_name_suffix_repeats(explorer_output: dict):
     )
 
 
-@pytest.mark.parametrize("setting", ["aggregated", "perHost", "noSample"])
+@pytest.mark.parametrize("setting", ["aggregated", "allHosted", "noSample"])
 def test_explorer_does_not_warn_where_no_element_name_reaches_a_service(
     explorer_output: dict, setting: str
 ):
-    """An aggregation creates one service with no element names, a host per
-    element keeps the plain service name, and without a sample there is nothing
-    to judge - a warning in any of these would be noise."""
+    """An aggregation creates one service with no element names, an element on
+    a host of its own keeps the plain service name, and without a sample there
+    is nothing to judge - a warning in any of these would be noise."""
     assert explorer_output["labelWarnings"][setting] == []
+
+
+def test_explorer_warns_about_the_elements_left_on_the_polling_host(explorer_output: dict):
+    """With a host per element, an element whose host field does not resolve is
+    not dropped: the agent keeps its service on the polling host, under the
+    labelled name - so its name is worth warning about after all. The hosted
+    'web' pair is not: each lands on its own host under the plain name."""
+    assert explorer_output["labelWarnings"]["perHost"] == [
+        "The name field is missing in 1 element(s) (3): "
+        "the site names those by their position instead.",
+        "The host field does not resolve in 1 element(s) (3): those get no host "
+        "of their own - their services stay on the polling host, named by the element.",
+    ]
+
+
+def test_explorer_does_not_claim_a_repeat_among_rounded_ids(explorer_output: dict):
+    """The browser rounds integers beyond 2^53, so two distinct 64-bit IDs read
+    as one - a clash the agent, with exact Python ints, never has. The Explorer
+    says it cannot tell instead of warning about a swap that will not happen."""
+    assert explorer_output["labelWarnings"]["bigIds"] == [
+        "The name field is a whole number too large for the browser to read "
+        "exactly in 2 element(s) (0, 1): the names shown here are rounded, and "
+        "whether two of them repeat cannot be told here. The site reads them exactly."
+    ]

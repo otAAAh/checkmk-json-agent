@@ -31,3 +31,11 @@ def test_the_agent_names_the_shared_label_path_cases(agent, case):
     assert [
         " / ".join(labels) for labels, found, _value, _error, _element in leaves if found
     ] == case["labels"]
+    if "hosts" in case:
+        # The host each found leaf becomes, resolved against the LEAF element as
+        # the agent's collector does; None = its services stay on the polling host.
+        assert [
+            agent._piggyback_host(element, case["piggyback_host"])
+            for _labels, found, _value, _error, element in leaves
+            if found
+        ] == case["hosts"]
