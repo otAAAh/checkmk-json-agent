@@ -69,7 +69,7 @@ function valueType(v: Json): string {
   return Array.isArray(v) ? 'array' : v === null ? 'null' : typeof v
 }
 
-function isRecord(v: Json): v is { [k: string]: Json } {
+export function isRecord(v: Json): v is { [k: string]: Json } {
   return typeof v === 'object' && v !== null && !Array.isArray(v)
 }
 
@@ -169,12 +169,12 @@ export interface ResolvedValue {
   value: Json
 }
 
-type Step = { kind: 'key'; key: string } | { kind: 'index'; index: number } | { kind: 'wildcard' }
+export type Step = { kind: 'key'; key: string } | { kind: 'index'; index: number } | { kind: 'wildcard' }
 
 /** Tokenize a path into steps, or null if any part is unparseable — callers
  * must treat null as "no match" rather than resolving only the parsed prefix
  * (which would show a misleading value/state for a malformed path). */
-function tokenizePath(rawPath: string): Step[] | null {
+export function tokenizePath(rawPath: string): Step[] | null {
   let path = rawPath.trim()
   if (path.startsWith('$.')) {
     path = path.slice(2)

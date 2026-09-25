@@ -1,0 +1,148 @@
+{
+  "comment": [
+    "Shared cases for what a '[*]' element is CALLED on the site, read by THREE",
+    "sides: tests/test_label_path_parity.py drives the special agent's own",
+    "_expand_wildcards / _element_labels (the only place the names are decided),",
+    "frontend/src/lib/elementlabels.test.ts drives the wizard's port, and",
+    "tests/test_explorer.py drives the standalone Explorer's mirror.",
+    "'labels' is the ' / '-joined suffix of every FOUND leaf, in order. 'issues'",
+    "is what the wizard and the Explorer warn about; the agent has no such notion",
+    "and only answers 'labels'. Elements in 'issues' are named by position (index",
+    "or key, ' / '-joined when nested)."
+  ],
+  "cases": [
+    {
+      "name": "unique names need no warning",
+      "document": {"nodes": [{"name": "node-a", "up": true}, {"name": "node-b", "up": false}]},
+      "path": "nodes[*].up",
+      "label_path": "name",
+      "labels": ["node-a", "node-b"],
+      "issues": {"duplicates": [], "missing": [], "empty": [], "nonScalar": []}
+    },
+    {
+      "name": "without a label path the position names the element",
+      "document": {"nodes": [{"name": "web", "up": true}, {"name": "web", "up": false}]},
+      "path": "nodes[*].up",
+      "label_path": "",
+      "labels": ["0", "1"],
+      "issues": {"duplicates": [], "missing": [], "empty": [], "nonScalar": []}
+    },
+    {
+      "name": "a repeated name is suffixed with its position, every occurrence",
+      "document": {"nodes": [{"name": "web", "up": 1}, {"name": "db", "up": 1}, {"name": "cache", "up": 1}, {"name": "web", "up": 0}]},
+      "path": "nodes[*].up",
+      "label_path": "name",
+      "labels": ["web [0]", "db", "cache", "web [3]"],
+      "issues": {
+        "duplicates": [{"label": "web", "elements": ["0", "3"], "names": ["web [0]", "web [3]"]}],
+        "missing": [], "empty": [], "nonScalar": []
+      }
+    },
+    {
+      "name": "a missing field falls back to the position",
+      "document": {"nodes": [{"name": "web", "up": 1}, {"up": 0}]},
+      "path": "nodes[*].up",
+      "label_path": "name",
+      "labels": ["web", "1"],
+      "issues": {"duplicates": [], "missing": ["1"], "empty": [], "nonScalar": []}
+    },
+    {
+      "name": "a fallback position can clash with a real name",
+      "document": {"nodes": [{"up": 1}, {"name": "0", "up": 0}]},
+      "path": "nodes[*].up",
+      "label_path": "name",
+      "labels": ["0 [0]", "0 [1]"],
+      "issues": {
+        "duplicates": [{"label": "0", "elements": ["0", "1"], "names": ["0 [0]", "0 [1]"]}],
+        "missing": ["0"], "empty": [], "nonScalar": []
+      }
+    },
+    {
+      "name": "an object map is suffixed by enumeration index, not by key",
+      "document": {"components": {"db": {"kind": "sql", "status": "UP"}, "disk": {"kind": "fs", "status": "UP"}, "db2": {"kind": "sql", "status": "DOWN"}}},
+      "path": "components[*].status",
+      "label_path": "kind",
+      "labels": ["sql [0]", "fs", "sql [2]"],
+      "issues": {
+        "duplicates": [{"label": "sql", "elements": ["db", "db2"], "names": ["sql [0]", "sql [2]"]}],
+        "missing": [], "empty": [], "nonScalar": []
+      }
+    },
+    {
+      "name": "names only have to be unique within their own container",
+      "document": {"pods": [
+        {"name": "p1", "containers": [{"name": "app", "ready": true}, {"name": "app", "ready": false}]},
+        {"name": "p2", "containers": [{"name": "app", "ready": true}]}
+      ]},
+      "path": "pods[*].containers[*].ready",
+      "label_path": "name",
+      "labels": ["p1 / app [0]", "p1 / app [1]", "p2 / app"],
+      "issues": {
+        "duplicates": [{"label": "app", "elements": ["0 / 0", "0 / 1"], "names": ["app [0]", "app [1]"]}],
+        "missing": [], "empty": [], "nonScalar": []
+      }
+    },
+    {
+      "name": "a non-string name is rendered the way Python renders it",
+      "document": {"items": [{"id": 7, "v": 1}, {"id": true, "v": 2}, {"id": null, "v": 3}, {"id": "it's", "v": 4}]},
+      "path": "items[*].v",
+      "label_path": "id",
+      "labels": ["7", "True", "None", "it's"],
+      "issues": {"duplicates": [], "missing": [], "empty": [], "nonScalar": []}
+    },
+    {
+      "name": "an object as the name lands in the service name whole",
+      "document": {"items": [{"id": {"a": 1, "b": "x"}, "v": 1}, {"id": ["p", "q"], "v": 2}]},
+      "path": "items[*].v",
+      "label_path": "id",
+      "labels": ["{'a': 1, 'b': 'x'}", "['p', 'q']"],
+      "issues": {"duplicates": [], "missing": [], "empty": [], "nonScalar": ["0", "1"]}
+    },
+    {
+      "name": "one empty name gets no suffix at all",
+      "document": {"items": [{"id": "", "v": 1}, {"id": "b", "v": 2}]},
+      "path": "items[*].v",
+      "label_path": "id",
+      "labels": ["", "b"],
+      "issues": {"duplicates": [], "missing": [], "empty": ["0"], "nonScalar": []}
+    },
+    {
+      "name": "two empty names are a repeat, reported once",
+      "document": {"items": [{"id": "", "v": 1}, {"id": "", "v": 2}]},
+      "path": "items[*].v",
+      "label_path": "id",
+      "labels": [" [0]", " [1]"],
+      "issues": {
+        "duplicates": [{"label": "", "elements": ["0", "1"], "names": [" [0]", " [1]"]}],
+        "missing": [], "empty": [], "nonScalar": []
+      }
+    },
+    {
+      "name": "an element whose value is missing still takes part in the naming",
+      "document": {"items": [{"id": "a", "v": 1}, {"id": "a"}]},
+      "path": "items[*].v",
+      "label_path": "id",
+      "labels": ["a [0]"],
+      "issues": {
+        "duplicates": [{"label": "a", "elements": ["0", "1"], "names": ["a [0]", "a [1]"]}],
+        "missing": [], "empty": [], "nonScalar": []
+      }
+    },
+    {
+      "name": "a blank label path names the element by its whole content",
+      "document": {"items": [{"v": 1}]},
+      "path": "items[*].v",
+      "label_path": "  ",
+      "labels": ["{'v': 1}"],
+      "issues": {"duplicates": [], "missing": [], "empty": [], "nonScalar": ["0"]}
+    },
+    {
+      "name": "a nested label path is resolved within the element",
+      "document": {"items": [{"meta": {"name": "x"}, "v": 1}, {"meta": {"name": "y"}, "v": 2}]},
+      "path": "$.items[*].v",
+      "label_path": "meta.name",
+      "labels": ["x", "y"],
+      "issues": {"duplicates": [], "missing": [], "empty": [], "nonScalar": []}
+    }
+  ]
+}

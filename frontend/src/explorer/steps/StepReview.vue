@@ -19,6 +19,7 @@ import CmkHeading from '@/components/typography/CmkHeading.vue'
 import CmkParagraph from '@/components/typography/CmkParagraph.vue'
 
 import { useExplorer } from '../../composables/useExplorer'
+import { labelWarnings, resolveLabelled } from '../../lib/elementlabels'
 import { resolvePath, type Json } from '../../lib/jsonpaths'
 import {
   endpointUrl,
@@ -477,6 +478,10 @@ interface Row {
   // The field goes into the inventory tree and creates no service. Still shown -
   // it IS configured - but it must not be counted as a service that will appear.
   inventoryOnly?: boolean
+  // What the sample says is wrong with the '[*]' elements' names (a repeat the
+  // site can only tell apart by position, a missing name field, ...). On the
+  // field's first row only, so a field with fifty elements warns once.
+  warnings?: string[]
 }
 interface EndpointReview {
   url: string
@@ -609,7 +614,11 @@ const reviews = computed<EndpointReview[]>(() =>
         // what the site will do instead of showing a value that might differ.
         const aggregate = titleOf(x.aggregate)
         const readAs = valueAsKind(x.value_as)
-        const matches = sample !== null ? resolvePath(sample, path) : []
+        // Named the way the agent names them: by the label path's field, the
+        // position where it is missing, and a repeat suffixed with its position.
+        const labelPath = typeof x.label_path === 'string' ? x.label_path : ''
+        const resolved = sample !== null ? resolveLabelled(sample, path, labelPath) : null
+        const matches = resolved?.values ?? []
         if (!matches.length) {
           return tag([
             { service: name, line, path, value: undefined, defined, state: 'none' as StateKind, labels },
@@ -649,46 +658,54 @@ const reviews = computed<EndpointReview[]>(() =>
         // With a shared service the expansion fans out into LINES of that one
         // service, so the element label lands on the line and the service name
         // stays put — and with a host per element the host carries the identity
-        // and the service keeps its plain name.
-        const fansOut = matches.length > 1
+        // and the service keeps its plain name. Any '[*]' path fans out, also
+        // over a collection of one: its single service still carries the
+        // element's suffix on the site.
+        const fansOut = path.includes('[*]')
         const named = (label: string | undefined): FieldNames =>
           elementNames({ service: name, line }, label, {
             perElementHost: perElementHost !== null,
             fansOut,
           })
-        return tag(
-          matches.map((m): Row => {
-            if (readAs !== null) {
-              const { service, line: elementLine } = named(m.label)
-              return {
-                service,
-                line: elementLine,
-                path,
-                value: m.value,
-                note:
-                  readAs === 'counter'
-                    ? _t('%{v} → the rate is computed on the site', { v: fmtValue(m.value) })
-                    : _t('%{v} → the age is computed on the site', { v: fmtValue(m.value) }),
-                defined,
-                state: 'none' as StateKind,
-                labels,
-              }
-            }
+        const produced = matches.map((m): Row => {
+          if (readAs !== null) {
             const { service, line: elementLine } = named(m.label)
-            let value: Json = m.value
-            // Transform the value when `calc` is set and it is numeric. On a bad
-            // expression evalCalc returns null: leave the value shown and mark the
-            // preview unresolved rather than crashing.
-            if (calc !== null && typeof value === 'number') {
-              const transformed = evalCalc(calc, value)
-              if (transformed === null) {
-                return { service, line: elementLine, path, value, defined, state: 'none' as StateKind, labels }
-              }
-              value = transformed
+            return {
+              service,
+              line: elementLine,
+              path,
+              value: m.value,
+              note:
+                readAs === 'counter'
+                  ? _t('%{v} → the rate is computed on the site', { v: fmtValue(m.value) })
+                  : _t('%{v} → the age is computed on the site', { v: fmtValue(m.value) }),
+              defined,
+              state: 'none' as StateKind,
+              labels,
             }
-            return { service, line: elementLine, path, value, defined, state: evalState(value, x), labels }
-          }),
-        )
+          }
+          const { service, line: elementLine } = named(m.label)
+          let value: Json = m.value
+          // Transform the value when `calc` is set and it is numeric. On a bad
+          // expression evalCalc returns null: leave the value shown and mark the
+          // preview unresolved rather than crashing.
+          if (calc !== null && typeof value === 'number') {
+            const transformed = evalCalc(calc, value)
+            if (transformed === null) {
+              return { service, line: elementLine, path, value, defined, state: 'none' as StateKind, labels }
+            }
+            value = transformed
+          }
+          return { service, line: elementLine, path, value, defined, state: evalState(value, x), labels }
+        })
+        // With a host per element the suffix never reaches a service name (the
+        // host carries the identity), so a repeat there is nothing to warn about.
+        const warnings =
+          resolved && perElementHost === null ? labelWarnings(resolved.issues, _t) : []
+        if (warnings.length && produced[0]) {
+          produced[0] = { ...produced[0], warnings }
+        }
+        return tag(produced)
       })
     return {
       url: endpointUrl(connection) || _t('Endpoint %{n}', { n: ei + 1 }),
@@ -769,6 +786,13 @@ const reviews = computed<EndpointReview[]>(() =>
                       :content="_t('%{s}', { s: lab })"
                     />
                   </div>
+                  <CmkAlertBox
+                    v-for="(warning, wi) in row.warnings ?? []"
+                    :key="`w${wi}`"
+                    class="je-step-review__warning"
+                    variant="warning"
+                    size="small"
+                  >{{ warning }}</CmkAlertBox>
                 </div>
               </li>
             </ul>
@@ -917,6 +941,10 @@ const reviews = computed<EndpointReview[]>(() =>
 
 .je-step-review__note {
   color: var(--font-color-dimmed);
+}
+
+.je-step-review__warning {
+  margin-top: 4px;
 }
 
 .je-step-review__create {

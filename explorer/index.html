@@ -77,6 +77,8 @@
   .outblock { margin-bottom:14px; }
   .outblock .hdr { display:flex; justify-content:space-between; align-items:center; margin-bottom:4px; }
   .err { color:var(--crit); }
+  .subnote.warn { color:var(--warn); }
+  .subnote.warn:empty { display:none; }
   hr { border:0; border-top:1px solid var(--line); margin:12px 0; }
 </style>
 </head>
@@ -765,6 +767,7 @@ function renderFields() {
       `<div class="row"><label>Service</label><input type="text" data-f="service" data-i="${i}" value="${escAttr(e.service)}"></div>` +
       `<div class="row"><label>Shared service</label><input type="text" data-f="group" data-i="${i}" value="${escAttr(e.group || "")}" placeholder="(optional) report into this one service instead — worst line wins; 'Service' above then names the line"></div>` +
       (wild ? `<div class="row"><label>Name suffix</label><input type="text" data-f="label_path" data-i="${i}" value="${escAttr(e.label_path)}" placeholder="field in each element, appended to the name, e.g. name"></div>` : "") +
+      (wild ? `<div class="subnote warn" data-lpnote="${i}">${labelPathNote(e)}</div>` : "") +
       (wild ? `<div class="row"><label>One host per element</label><input type="text" data-f="pbHost" data-i="${i}" value="${escAttr(e.pbHost)}" placeholder="(optional) field holding the host name, e.g. name — makes each element its own Checkmk host"></div>` : "") +
       (wild && e.pbHost.trim() ? `<div class="row"><label>Labels for that host</label><input type="text" data-f="pbLabels" data-i="${i}" value="${escAttr(e.pbLabels)}" placeholder="(optional) fields within the element, comma-separated, e.g. region, role — host labels on the created host"></div>` : "") +
       `<div class="row"><label>Aggregate</label><select data-f="aggregate" data-i="${i}">` +
@@ -830,6 +833,11 @@ function renderFields() {
     const evt = inp.tagName === "SELECT" ? "onchange" : "oninput";
     inp[evt] = () => {
       ep().extractions[+inp.dataset.i][inp.dataset.f] = inp.value;
+      // The element-name warning depends on several inputs (suffix, host,
+      // aggregation); refresh just its box, since re-rendering the panel would
+      // take the cursor out of the input being typed in.
+      const note = box.querySelector(`[data-lpnote="${inp.dataset.i}"]`);
+      if (note) note.innerHTML = labelPathNote(ep().extractions[+inp.dataset.i]);
       if (inp.dataset.rerender) renderFields();
       renderOutputs();
     };
@@ -912,6 +920,114 @@ function inventoryKeyError(name, path) {
   if (v === INVENTORY_ROW_KEY && String(path || "").includes("[*]"))
     return "'element' is the column a '[*]' wildcard keys its table rows by — pick another name.";
   return "";
+}
+
+// What each '[*]' element is CALLED on the site. The agent names it by the
+// 'Name suffix' field, else its position, and keeps the names unique by
+// appending the position to EVERY occurrence of a repeat - 'web [0]', 'web [3]'.
+// That keeps the services apart but ties them to the order the API lists its
+// elements in: reorder the array and the two services swap readings, and
+// nothing on the site says so. The sample here can, before the rule exists.
+// Mirrors the agent's _split_wildcards / _expand_wildcards / _element_labels
+// (the label path is resolved at every wildcard level, a repeat is suffixed
+// within its own container, the parts are joined with ' / '); the wizard's
+// frontend/src/lib/elementlabels.ts is the same port, and all three answer
+// tests/fixtures/label_path_cases.json.
+
+/** Python's repr() of a JSON value; str() is the same except for a string. */
+function pyRepr(v) {
+  if (v === null) return "None";
+  if (v === true) return "True";
+  if (v === false) return "False";
+  if (typeof v === "number") return String(v);  // '1.0' has arrived as 1 already
+  if (typeof v === "string") {
+    const q = v.includes("'") && !v.includes('"') ? '"' : "'";
+    return q + v.replace(/\\/g, "\\\\").split(q).join("\\" + q) + q;
+  }
+  if (Array.isArray(v)) return "[" + v.map(pyRepr).join(", ") + "]";
+  return "{" + Object.keys(v).map(k => pyRepr(k) + ": " + pyRepr(v[k])).join(", ") + "}";
+}
+const pyStrOf = v => typeof v === "string" ? v : pyRepr(v);
+
+/** The agent's _resolve_path: {value} when found, else undefined. */
+function resolveFound(node, p) {
+  if (!p) return { value: node };
+  const v = resolvePath(node, p);
+  return v === undefined ? undefined : { value: v };
+}
+
+/** Every found leaf of a '[*]' path, named as the site names it, plus what is
+ *  wrong with those names. Elements in `issues` are named by position (index
+ *  or key, ' / '-joined when nested). */
+function elementLabels(root, path, labelPath) {
+  const issues = { duplicates: [], missing: [], empty: [], nonScalar: [] };
+  const parts = path.split("[*]");
+  const segs = [parts[0], ...parts.slice(1).map(s => s.startsWith(".") ? s.slice(1) : s)];
+  const labels = [];
+  const expand = (node, level, names, positions) => {
+    if (level === segs.length - 1) {
+      if (resolveFound(node, segs[level])) labels.push(names.join(" / "));
+      return;
+    }
+    const found = resolveFound(node, segs[level]);
+    const c = found && found.value;
+    const pairs = Array.isArray(c) ? c.map((el, i) => [String(i), el])
+      : (c && typeof c === "object") ? Object.keys(c).map(k => [k, c[k]]) : null;
+    if (!pairs) return;
+    const at = pos => [...positions, pos].join(" / ");
+    const own = pairs.map(([pos, el]) => {
+      if (!labelPath) return pos;
+      const f = resolveFound(el, labelPath);
+      if (!f) { issues.missing.push(at(pos)); return pos; }
+      if (f.value !== null && typeof f.value === "object") issues.nonScalar.push(at(pos));
+      const text = pyStrOf(f.value);
+      if (text === "") issues.empty.push(at(pos));
+      return text;
+    });
+    const byLabel = new Map();
+    own.forEach((l, i) => byLabel.set(l, [...(byLabel.get(l) || []), i]));
+    for (const [label, idx] of byLabel) {
+      if (idx.length > 1) issues.duplicates.push({
+        label, elements: idx.map(i => at(pairs[i][0])), names: idx.map(i => `${label} [${i}]`),
+      });
+    }
+    // Suffixed with the ENUMERATION index, also for an object map, as the agent does.
+    pairs.forEach(([pos, el], i) => {
+      const l = own[i];
+      expand(el, level + 1, [...names, byLabel.get(l).length > 1 ? `${l} [${i}]` : l], [...positions, pos]);
+    });
+  };
+  expand(root, 0, [], []);
+  // Two elements named '' are a repeat: reported once, under duplicates.
+  const repeated = new Set(issues.duplicates.filter(d => d.label === "").flatMap(d => d.elements));
+  issues.empty = issues.empty.filter(e => !repeated.has(e));
+  return { labels, issues };
+}
+
+/** The sample's warnings about a field's element names, one sentence each -
+ *  non-blocking: the agent copes with all of these, but only here can you see
+ *  HOW. Nothing when there is no sample, no wildcard, an aggregation (one
+ *  service, no element names) or a host per element (the host carries the
+ *  identity and the service keeps its plain name). */
+function labelPathWarnings(e, root) {
+  if (root == null || !e.path.includes("[*]") || e.aggregate || (e.pbHost || "").trim()) return [];
+  const { issues } = elementLabels(root, e.path, e.label_path || "");
+  const list = (xs, quote) => {
+    const shown = xs.slice(0, 5).map(x => quote ? `'${x}'` : x);
+    return xs.length > 5 ? shown.join(", ") + ", …" : shown.join(", ");
+  };
+  const out = issues.duplicates.map(d =>
+    `'${d.label}' names ${d.elements.length} elements (${list(d.elements)}). The site tells them apart by position, as ` +
+    `${list(d.names, true)} - so their services swap readings when the API reorders its elements. ` +
+    `A field that is unique per element avoids that.`);
+  if (issues.missing.length) out.push(`The name field is missing in ${issues.missing.length} element(s) (${list(issues.missing)}): the site names those by their position instead.`);
+  if (issues.empty.length) out.push(`The name field is empty in ${issues.empty.length} element(s) (${list(issues.empty)}): those get no suffix at all.`);
+  if (issues.nonScalar.length) out.push(`The name field is an object or a list in ${issues.nonScalar.length} element(s) (${list(issues.nonScalar)}): its whole content becomes part of the name.`);
+  return out;
+}
+
+function labelPathNote(e) {
+  return labelPathWarnings(e, ep().parsedRoot).map(w => `<div>${esc(w)}</div>`).join("");
 }
 
 function valueRange(low, high) {
@@ -1403,6 +1519,8 @@ function doParse() {
   }
   renderTree();
   renderHeaders();
+  // The fields' element-name warnings are judged against this sample.
+  renderFields();
 }
 
 function renderSubTabs() {

@@ -547,3 +547,45 @@ def test_explorers_reserved_metrics_match_the_rulesets():
     assert block, "the Explorer no longer declares DECLARED_METRICS"
     # Compared as a set, not as text: order and wrapping are free to differ.
     assert set(re.findall(r'"([^"]+)"', block.group(1))) == declared
+
+
+_LABEL_CASES = json.loads((_ROOT / "tests" / "fixtures" / "label_path_cases.json").read_text())
+
+
+@pytest.mark.parametrize(
+    "index", range(len(_LABEL_CASES["cases"])), ids=[c["name"] for c in _LABEL_CASES["cases"]]
+)
+def test_explorer_names_the_elements_as_the_agent_does(explorer_output: dict, index: int):
+    """The 'Name suffix' warning is only worth showing if the Explorer names the
+    '[*]' elements exactly as the agent will. The agent answers the same cases in
+    tests/test_label_path_parity.py and the wizard in elementlabels.test.ts."""
+    case = _LABEL_CASES["cases"][index]
+    answer = explorer_output["labelCases"][index]
+
+    assert answer["labels"] == case["labels"]
+    assert answer["issues"] == case["issues"]
+
+
+def test_explorer_warns_when_a_name_suffix_repeats(explorer_output: dict):
+    """A repeated suffix is resolved by the agent with the elements' POSITIONS,
+    which move when the API reorders its elements - so the warning has to say
+    which value repeats, where, and what the services will be called."""
+    plain = explorer_output["labelWarnings"]["plain"]
+    assert len(plain) == 2
+    assert plain[0].startswith("'web' names 2 elements (0, 2).")
+    assert "'web [0]', 'web [2]'" in plain[0]
+    assert "swap readings" in plain[0]
+    assert plain[1] == (
+        "The name field is missing in 1 element(s) (3): "
+        "the site names those by their position instead."
+    )
+
+
+@pytest.mark.parametrize("setting", ["aggregated", "perHost", "noSample"])
+def test_explorer_does_not_warn_where_no_element_name_reaches_a_service(
+    explorer_output: dict, setting: str
+):
+    """An aggregation creates one service with no element names, a host per
+    element keeps the plain service name, and without a sample there is nothing
+    to judge - a warning in any of these would be noise."""
+    assert explorer_output["labelWarnings"][setting] == []
