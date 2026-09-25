@@ -220,9 +220,13 @@ function makeEndpoint(withSample) {
     // whole response body.
     context_bytes: "", context_source: "element",
     // Follow the API's pagination and merge the pages: where the next page's URL
-    // is ("" = off | body | link_header), the path to it for the body mode, the
-    // collection each page carries, and the two caps.
+    // is ("" = off | body | link_header | page_number | offset), the path to it
+    // for the body mode, the collection each page carries, and the two caps. The
+    // two counted modes (no link: the agent counts) add the query parameter, the
+    // first page's number (page_number only), an optional page size and the
+    // parameter it is sent as, and an optional path to the total.
     page_mode: "", page_next: "", page_items: "", page_max: "10", page_max_elements: "",
+    page_param: "", page_start: "1", page_size: "", page_size_param: "", page_total: "",
     proxy_mode: "default", proxy_url: "",   // default (env) | url | no_proxy
     ca_bundle: "", client_cert: "", client_key: "",
     json: withSample ? JSON.stringify(SAMPLE, null, 2) : "",
@@ -431,9 +435,17 @@ function renderConn() {
          <option value="" ${!e.page_mode ? "selected" : ""}>No (one page only)</option>
          <option value="body" ${e.page_mode === "body" ? "selected" : ""}>Next page URL in the body</option>
          <option value="link_header" ${e.page_mode === "link_header" ? "selected" : ""}>Next page URL in the 'Link' header</option>
+         <option value="page_number" ${e.page_mode === "page_number" ? "selected" : ""}>No link: count the pages ('?page=2')</option>
+         <option value="offset" ${e.page_mode === "offset" ? "selected" : ""}>No link: count the elements ('?offset=50')</option>
        </select>
        ${e.page_mode ? `
        ${e.page_mode === "body" ? `<label>Next page path</label><input type="text" id="c-pagenext" value="${escAttr(e.page_next)}" placeholder="e.g. links.next">` : ""}
+       ${isCountedPaging(e) ? `
+       <label>Query parameter</label><input type="text" id="c-pageparam" value="${escAttr(e.page_param)}" placeholder="${e.page_mode === "offset" ? "offset" : "page"}">
+       ${e.page_mode === "page_number" ? `<label>Number of the first page</label><input type="text" id="c-pagestart" value="${escAttr(e.page_start)}" placeholder="1">` : ""}
+       <label>Page size</label><input type="text" id="c-pagesize" value="${escAttr(e.page_size)}" placeholder="(optional) a shorter page is the last one">
+       <label>Send the page size as</label><input type="text" id="c-pagesizeparam" value="${escAttr(e.page_size_param)}" placeholder="(optional) e.g. limit, per_page">
+       <label>Total path</label><input type="text" id="c-pagetotal" value="${escAttr(e.page_total)}" placeholder="(optional) e.g. meta.total">` : ""}
        <label>Collection to merge</label><input type="text" id="c-pageitems" value="${escAttr(e.page_items)}" placeholder="e.g. data.items ('$' = the response IS the array)">
        <label>Max pages</label><input type="text" id="c-pagemax" value="${escAttr(e.page_max)}" placeholder="10">
        <label>Max elements</label><input type="text" id="c-pagemaxel" value="${escAttr(e.page_max_elements)}" placeholder="(optional) stop after N elements">` : ""}
@@ -474,6 +486,11 @@ function renderConn() {
   bind("c-pageitems", () => { e.page_items = $("c-pageitems").value; renderOutputs(); });
   bind("c-pagemax", () => { e.page_max = $("c-pagemax").value; renderOutputs(); });
   bind("c-pagemaxel", () => { e.page_max_elements = $("c-pagemaxel").value; renderOutputs(); });
+  bind("c-pageparam", () => { e.page_param = $("c-pageparam").value; renderOutputs(); });
+  bind("c-pagestart", () => { e.page_start = $("c-pagestart").value; renderOutputs(); });
+  bind("c-pagesize", () => { e.page_size = $("c-pagesize").value; renderOutputs(); });
+  bind("c-pagesizeparam", () => { e.page_size_param = $("c-pagesizeparam").value; renderOutputs(); });
+  bind("c-pagetotal", () => { e.page_total = $("c-pagetotal").value; renderOutputs(); });
   bind("c-proxyurl", () => { e.proxy_url = $("c-proxyurl").value; renderOutputs(); });
   bind("c-cabundle", () => { e.ca_bundle = $("c-cabundle").value; renderOutputs(); });
   bind("c-clientcert", () => { e.client_cert = $("c-clientcert").value; renderOutputs(); });
@@ -1108,6 +1125,32 @@ function contextObj(e) {
 // half-filled form emits nothing rather than a rule the ruleset would reject.
 // max_pages is clamped to the ruleset's range (1-100); an unparseable one falls
 // back to its default rather than being emitted as NaN.
+function isCountedPaging(e) {
+  return e.page_mode === "page_number" || e.page_mode === "offset";
+}
+
+// The settings of the two counted modes, shaped like the server-side call's
+// CountedPages dump: every key present, null where unset, and 'start' always
+// there (1 when not asked for - the offset mode has no first page to number).
+// An empty parameter takes the ruleset's prefill ('page' / 'offset'). A size
+// parameter without a size is dropped, as the ruleset would refuse it.
+function countedPagingObj(e) {
+  const param = String(e.page_param || "").trim()
+    || (e.page_mode === "offset" ? "offset" : "page");
+  const start = parseInt(e.page_start, 10);
+  const size = parseInt(e.page_size, 10);
+  const pageSize = !Number.isNaN(size) && size >= 1 ? size : null;
+  const sizeParam = String(e.page_size_param || "").trim();
+  const total = String(e.page_total || "").trim();
+  return {
+    parameter: param,
+    start: e.page_mode === "page_number" && !Number.isNaN(start) && start >= 0 ? start : 1,
+    page_size: pageSize,
+    size_parameter: pageSize != null && sizeParam ? sizeParam : null,
+    total: total || null,
+  };
+}
+
 function paginationObj(e) {
   const items = String(e.page_items || "").trim();
   const next = String(e.page_next || "").trim();
@@ -1115,7 +1158,9 @@ function paginationObj(e) {
   if (e.page_mode === "body" && !next) return null;
   const pages = parseInt(e.page_max, 10);
   const o = {
-    next: e.page_mode === "link_header" ? ["link_header", null] : ["body", next],
+    next: e.page_mode === "link_header" ? ["link_header", null]
+      : isCountedPaging(e) ? [e.page_mode, countedPagingObj(e)]
+      : ["body", next],
     items,
     max_pages: Number.isNaN(pages) ? 10 : Math.min(Math.max(pages, 1), 100),
   };
@@ -1208,9 +1253,22 @@ function pyEndpoint(e, indent) {
   if (pg) {
     // 'next' is a CascadingSingleChoice, i.e. a TUPLE in the rule value; the
     // 'Link' header branch is a FixedValue, whose value is None.
-    const nx = pg.next[0] === "link_header"
-      ? "('link_header', None)"
-      : `('body', ${pyStr(pg.next[1])})`;
+    // The counted branches are a Dictionary: only what is set goes in, plus
+    // 'start', which the page-number branch requires.
+    let nx;
+    if (pg.next[0] === "link_header") {
+      nx = "('link_header', None)";
+    } else if (pg.next[0] === "body") {
+      nx = `('body', ${pyStr(pg.next[1])})`;
+    } else {
+      const c = pg.next[1];
+      const cp = [`'parameter': ${pyStr(c.parameter)}`];
+      if (pg.next[0] === "page_number") cp.push(`'start': ${c.start}`);
+      if (c.page_size != null) cp.push(`'page_size': ${c.page_size}`);
+      if (c.size_parameter != null) cp.push(`'size_parameter': ${pyStr(c.size_parameter)}`);
+      if (c.total != null) cp.push(`'total': ${pyStr(c.total)}`);
+      nx = `(${pyStr(pg.next[0])}, {${cp.join(", ")}})`;
+    }
     const parts = [`'next': ${nx}`, `'items': ${pyStr(pg.items)}`, `'max_pages': ${pg.max_pages}`];
     if (pg.max_elements != null) parts.push(`'max_elements': ${pg.max_elements}`);
     lines.push(`${i}'pagination': {${parts.join(", ")}},`);
