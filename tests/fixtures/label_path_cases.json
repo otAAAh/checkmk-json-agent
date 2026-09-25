@@ -8,7 +8,14 @@
     "'labels' is the ' / '-joined suffix of every FOUND leaf, in order. 'issues'",
     "is what the wizard and the Explorer warn about; the agent has no such notion",
     "and only answers 'labels'. Elements in 'issues' are named by position (index",
-    "or key, ' / '-joined when nested)."
+    "or key, ' / '-joined when nested).",
+    "'piggyback_host' (optional) is the extraction's host-per-element field;",
+    "'hosts' then lists the host each FOUND leaf becomes (null = it stays on the",
+    "polling host), answered by the agent's own _piggyback_host. With a host",
+    "field, 'issues' only concern the elements that stay on the polling host.",
+    "'imprecise' (whole numbers beyond 2^53, rounded by the browser) is the",
+    "ports' notion alone: the agent reads them exactly, so no case can hold",
+    "both sides to one; elementlabels.test.ts and test_explorer.py cover it."
   ],
   "cases": [
     {
@@ -17,7 +24,7 @@
       "path": "nodes[*].up",
       "label_path": "name",
       "labels": ["node-a", "node-b"],
-      "issues": {"duplicates": [], "missing": [], "empty": [], "nonScalar": []}
+      "issues": {"duplicates": [], "missing": [], "empty": [], "nonScalar": [], "fallback": [], "imprecise": []}
     },
     {
       "name": "without a label path the position names the element",
@@ -25,7 +32,7 @@
       "path": "nodes[*].up",
       "label_path": "",
       "labels": ["0", "1"],
-      "issues": {"duplicates": [], "missing": [], "empty": [], "nonScalar": []}
+      "issues": {"duplicates": [], "missing": [], "empty": [], "nonScalar": [], "fallback": [], "imprecise": []}
     },
     {
       "name": "a repeated name is suffixed with its position, every occurrence",
@@ -35,7 +42,7 @@
       "labels": ["web [0]", "db", "cache", "web [3]"],
       "issues": {
         "duplicates": [{"label": "web", "elements": ["0", "3"], "names": ["web [0]", "web [3]"]}],
-        "missing": [], "empty": [], "nonScalar": []
+        "missing": [], "empty": [], "nonScalar": [], "fallback": [], "imprecise": []
       }
     },
     {
@@ -44,7 +51,7 @@
       "path": "nodes[*].up",
       "label_path": "name",
       "labels": ["web", "1"],
-      "issues": {"duplicates": [], "missing": ["1"], "empty": [], "nonScalar": []}
+      "issues": {"duplicates": [], "missing": ["1"], "empty": [], "nonScalar": [], "fallback": [], "imprecise": []}
     },
     {
       "name": "a fallback position can clash with a real name",
@@ -54,7 +61,7 @@
       "labels": ["0 [0]", "0 [1]"],
       "issues": {
         "duplicates": [{"label": "0", "elements": ["0", "1"], "names": ["0 [0]", "0 [1]"]}],
-        "missing": ["0"], "empty": [], "nonScalar": []
+        "missing": ["0"], "empty": [], "nonScalar": [], "fallback": [], "imprecise": []
       }
     },
     {
@@ -65,7 +72,7 @@
       "labels": ["sql [0]", "fs", "sql [2]"],
       "issues": {
         "duplicates": [{"label": "sql", "elements": ["db", "db2"], "names": ["sql [0]", "sql [2]"]}],
-        "missing": [], "empty": [], "nonScalar": []
+        "missing": [], "empty": [], "nonScalar": [], "fallback": [], "imprecise": []
       }
     },
     {
@@ -79,7 +86,7 @@
       "labels": ["p1 / app [0]", "p1 / app [1]", "p2 / app"],
       "issues": {
         "duplicates": [{"label": "app", "elements": ["0 / 0", "0 / 1"], "names": ["app [0]", "app [1]"]}],
-        "missing": [], "empty": [], "nonScalar": []
+        "missing": [], "empty": [], "nonScalar": [], "fallback": [], "imprecise": []
       }
     },
     {
@@ -88,7 +95,7 @@
       "path": "items[*].v",
       "label_path": "id",
       "labels": ["7", "True", "None", "it's"],
-      "issues": {"duplicates": [], "missing": [], "empty": [], "nonScalar": []}
+      "issues": {"duplicates": [], "missing": [], "empty": [], "nonScalar": [], "fallback": [], "imprecise": []}
     },
     {
       "name": "an object as the name lands in the service name whole",
@@ -96,7 +103,7 @@
       "path": "items[*].v",
       "label_path": "id",
       "labels": ["{'a': 1, 'b': 'x'}", "['p', 'q']"],
-      "issues": {"duplicates": [], "missing": [], "empty": [], "nonScalar": ["0", "1"]}
+      "issues": {"duplicates": [], "missing": [], "empty": [], "nonScalar": ["0", "1"], "fallback": [], "imprecise": []}
     },
     {
       "name": "one empty name gets no suffix at all",
@@ -104,7 +111,7 @@
       "path": "items[*].v",
       "label_path": "id",
       "labels": ["", "b"],
-      "issues": {"duplicates": [], "missing": [], "empty": ["0"], "nonScalar": []}
+      "issues": {"duplicates": [], "missing": [], "empty": ["0"], "nonScalar": [], "fallback": [], "imprecise": []}
     },
     {
       "name": "two empty names are a repeat, reported once",
@@ -114,7 +121,7 @@
       "labels": [" [0]", " [1]"],
       "issues": {
         "duplicates": [{"label": "", "elements": ["0", "1"], "names": [" [0]", " [1]"]}],
-        "missing": [], "empty": [], "nonScalar": []
+        "missing": [], "empty": [], "nonScalar": [], "fallback": [], "imprecise": []
       }
     },
     {
@@ -125,7 +132,7 @@
       "labels": ["a [0]"],
       "issues": {
         "duplicates": [{"label": "a", "elements": ["0", "1"], "names": ["a [0]", "a [1]"]}],
-        "missing": [], "empty": [], "nonScalar": []
+        "missing": [], "empty": [], "nonScalar": [], "fallback": [], "imprecise": []
       }
     },
     {
@@ -134,7 +141,7 @@
       "path": "items[*].v",
       "label_path": "  ",
       "labels": ["{'v': 1}"],
-      "issues": {"duplicates": [], "missing": [], "empty": [], "nonScalar": ["0"]}
+      "issues": {"duplicates": [], "missing": [], "empty": [], "nonScalar": ["0"], "fallback": [], "imprecise": []}
     },
     {
       "name": "a nested label path is resolved within the element",
@@ -142,7 +149,7 @@
       "path": "$.items[*].v",
       "label_path": "meta.name",
       "labels": ["x", "y"],
-      "issues": {"duplicates": [], "missing": [], "empty": [], "nonScalar": []}
+      "issues": {"duplicates": [], "missing": [], "empty": [], "nonScalar": [], "fallback": [], "imprecise": []}
     },
     {
       "name": "a label path is read as the agent scans it, junk between tokens skipped",
@@ -150,7 +157,7 @@
       "path": "items[*].v",
       "label_path": "meta..name",
       "labels": ["x", "y"],
-      "issues": {"duplicates": [], "missing": [], "empty": [], "nonScalar": []}
+      "issues": {"duplicates": [], "missing": [], "empty": [], "nonScalar": [], "fallback": [], "imprecise": []}
     },
     {
       "name": "a built-in object property is not a field of the element",
@@ -158,7 +165,60 @@
       "path": "items[*].v",
       "label_path": "constructor",
       "labels": ["0", "1"],
-      "issues": {"duplicates": [], "missing": ["0", "1"], "empty": [], "nonScalar": []}
+      "issues": {"duplicates": [], "missing": ["0", "1"], "empty": [], "nonScalar": [], "fallback": [], "imprecise": []}
+    },
+    {
+      "name": "with a host per element, a repeat among elements that get a host is no concern",
+      "document": {"nodes": [{"host": "a", "role": "web", "up": 1}, {"host": "b", "role": "web", "up": 1}]},
+      "path": "nodes[*].up",
+      "label_path": "role",
+      "piggyback_host": "host",
+      "labels": ["web [0]", "web [1]"],
+      "hosts": ["a", "b"],
+      "issues": {"duplicates": [], "missing": [], "empty": [], "nonScalar": [], "fallback": [], "imprecise": []}
+    },
+    {
+      "name": "elements without a host stay on the polling host, where a repeat is warned about",
+      "document": {"nodes": [{"host": "a", "role": "web", "up": 1}, {"role": "web", "up": 1}, {"host": "", "role": "web", "up": 0}, {"host": "c", "role": "db", "up": 1}, {"host": "!!", "up": 1}]},
+      "path": "nodes[*].up",
+      "label_path": "role",
+      "piggyback_host": "host",
+      "labels": ["web [0]", "web [1]", "web [2]", "db", "4"],
+      "hosts": ["a", null, null, "c", null],
+      "issues": {
+        "duplicates": [{"label": "web", "elements": ["1", "2"], "names": ["web [1]", "web [2]"]}],
+        "missing": ["4"], "empty": [], "nonScalar": [], "fallback": ["1", "2", "4"], "imprecise": []
+      }
+    },
+    {
+      "name": "one element on the polling host repeating a hosted one swaps with nothing",
+      "document": {"nodes": [{"host": "a", "role": "web", "up": 1}, {"role": "web", "up": 1}]},
+      "path": "nodes[*].up",
+      "label_path": "role",
+      "piggyback_host": "host",
+      "labels": ["web [0]", "web [1]"],
+      "hosts": ["a", null],
+      "issues": {"duplicates": [], "missing": [], "empty": [], "nonScalar": [], "fallback": ["1"], "imprecise": []}
+    },
+    {
+      "name": "a host name is sanitised the way the agent does it",
+      "document": {"nodes": [{"host": " web 01.example ", "up": 1}, {"host": 7, "up": 1}, {"host": true, "up": 1}, {"host": {"a": 1}, "up": 1}, {"host": "._x_.", "up": 1}]},
+      "path": "nodes[*].up",
+      "label_path": "",
+      "piggyback_host": "host",
+      "labels": ["0", "1", "2", "3", "4"],
+      "hosts": ["web_01.example", "7", "true", null, "x"],
+      "issues": {"duplicates": [], "missing": [], "empty": [], "nonScalar": [], "fallback": ["3"], "imprecise": []}
+    },
+    {
+      "name": "the host is read from the innermost element of a nested expansion",
+      "document": {"pods": [{"name": "p1", "containers": [{"name": "app", "node": "n1", "up": 1}, {"name": "side", "up": 1}]}]},
+      "path": "pods[*].containers[*].up",
+      "label_path": "name",
+      "piggyback_host": "node",
+      "labels": ["p1 / app", "p1 / side"],
+      "hosts": ["n1", null],
+      "issues": {"duplicates": [], "missing": [], "empty": [], "nonScalar": [], "fallback": ["0 / 1"], "imprecise": []}
     }
   ]
 }

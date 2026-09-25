@@ -311,7 +311,7 @@ src += `
     pageNoItems: paginationObj({ page_mode: "body", page_next: "links.next", page_items: "" }),
     pageNoPath: paginationObj({ page_mode: "body", page_next: "", page_items: "items" }),
     pageOff: paginationObj({ page_mode: "", page_next: "links.next", page_items: "items" }),
-    labelCases: ${JSON.stringify(LABEL_CASES)}.map(c => elementLabels(c.document, c.path, c.label_path)),
+    labelCases: ${JSON.stringify(LABEL_CASES)}.map(c => elementLabels(c.document, c.path, c.label_path, c.piggyback_host || "")),
     // The warnings under 'Name suffix': a repeat, and the settings under which
     // there is nothing to warn about (no element names reach a service).
     labelWarnings: (() => {
@@ -321,7 +321,15 @@ src += `
         plain: labelPathWarnings(field, doc),
         aggregated: labelPathWarnings({ ...field, aggregate: "sum" }, doc),
         perHost: labelPathWarnings({ ...field, pbHost: "id" }, doc),
+        // Every element with a host of its own: nothing reaches a service name.
+        allHosted: labelPathWarnings({ ...field, pbHost: "id" }, { n: doc.n.slice(0, 3) }),
         noSample: labelPathWarnings(field, null),
+        // Two distinct 64-bit IDs, which JSON.parse rounds to one number - the
+        // way the page itself reads a pasted sample.
+        bigIds: labelPathWarnings(
+          { ...field, path: "n[*].v" },
+          JSON.parse('{"n": [{"id": 1234567890123456789, "v": 1}, {"id": 1234567890123456788, "v": 2}]}'),
+        ),
       };
     })(),
     // The counted modes, as a rule value (Python source of one endpoint) and as

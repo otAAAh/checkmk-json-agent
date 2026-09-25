@@ -965,17 +965,44 @@ function resolveFound(node, p) {
   return v === undefined ? undefined : { value: v };
 }
 
+/** The agent's _piggyback_host: the host an element becomes, or null when its
+ *  field is missing, not a scalar, or sanitises to nothing (the element then
+ *  stays on the polling host). */
+function piggybackHost(el, hostPath) {
+  if (!hostPath.trim()) return null;
+  const f = resolveFound(el, hostPath.trim());
+  if (!f) return null;
+  const v = f.value;
+  const text = typeof v === "boolean" ? String(v)
+    : (typeof v === "number" || typeof v === "string") ? String(v) : null;
+  if (text === null) return null;
+  const cleaned = text.trim().replace(/[^-0-9A-Za-z_.]/g, "_").replace(/^[_.]+|[_.]+$/g, "");
+  return cleaned || null;
+}
+
+/** A whole number JavaScript cannot hold exactly: JSON.parse has rounded it. */
+const isImprecise = v => typeof v === "number" && Number.isInteger(v) && !Number.isSafeInteger(v);
+
 /** Every found leaf of a '[*]' path, named as the site names it, plus what is
  *  wrong with those names. Elements in `issues` are named by position (index
- *  or key, ' / '-joined when nested). */
-function elementLabels(root, path, labelPath) {
-  const issues = { duplicates: [], missing: [], empty: [], nonScalar: [] };
+ *  or key, ' / '-joined when nested). With a host field, `hosts` holds the host
+ *  each leaf becomes (null = it stays on the polling host), and the issues only
+ *  concern the elements that stay behind: the others keep the plain name. */
+function elementLabels(root, path, labelPath, hostPath = "") {
+  const issues = { duplicates: [], missing: [], empty: [], nonScalar: [], fallback: [], imprecise: [] };
   const parts = path.split("[*]");
   const segs = [parts[0], ...parts.slice(1).map(s => s.startsWith(".") ? s.slice(1) : s)];
   const labels = [];
+  const hosts = [];
+  const onPollingHost = [];
   const expand = (node, level, names, positions) => {
     if (level === segs.length - 1) {
-      if (resolveFound(node, segs[level])) labels.push(names.join(" / "));
+      if (!resolveFound(node, segs[level])) return;
+      labels.push(names.join(" / "));
+      // Resolved against the LEAF element, as the agent does.
+      const host = hostPath ? piggybackHost(node, hostPath) : null;
+      hosts.push(host);
+      if (hostPath && host === null) onPollingHost.push(positions.join(" / "));
       return;
     }
     const found = resolveFound(node, segs[level]);
@@ -984,11 +1011,13 @@ function elementLabels(root, path, labelPath) {
       : (c && typeof c === "object") ? Object.keys(c).map(k => [k, c[k]]) : null;
     if (!pairs) return;
     const at = pos => [...positions, pos].join(" / ");
+    const rounded = new Set();
     const own = pairs.map(([pos, el]) => {
       if (!labelPath) return pos;
       const f = resolveFound(el, labelPath);
       if (!f) { issues.missing.push(at(pos)); return pos; }
       if (f.value !== null && typeof f.value === "object") issues.nonScalar.push(at(pos));
+      if (isImprecise(f.value)) { issues.imprecise.push(at(pos)); rounded.add(pyStrOf(f.value)); }
       const text = pyStrOf(f.value);
       if (text === "") issues.empty.push(at(pos));
       return text;
@@ -996,7 +1025,8 @@ function elementLabels(root, path, labelPath) {
     const byLabel = new Map();
     own.forEach((l, i) => byLabel.set(l, [...(byLabel.get(l) || []), i]));
     for (const [label, idx] of byLabel) {
-      if (idx.length > 1) issues.duplicates.push({
+      // A repeat of a rounded number may be two IDs the site tells apart.
+      if (idx.length > 1 && !rounded.has(label)) issues.duplicates.push({
         label, elements: idx.map(i => at(pairs[i][0])), names: idx.map(i => `${label} [${i}]`),
       });
     }
@@ -1010,17 +1040,31 @@ function elementLabels(root, path, labelPath) {
   // Two elements named '' are a repeat: reported once, under duplicates.
   const repeated = new Set(issues.duplicates.filter(d => d.label === "").flatMap(d => d.elements));
   issues.empty = issues.empty.filter(e => !repeated.has(e));
-  return { labels, issues };
+  if (hostPath) {
+    // Only the elements left on the polling host have their suffix in a service
+    // name; a repeat needs two of them there to swap anything.
+    const concerns = el => onPollingHost.some(leaf => leaf === el || leaf.startsWith(el + " / "));
+    issues.duplicates = issues.duplicates.flatMap(d => {
+      const kept = d.elements.flatMap((el, i) => concerns(el) ? [i] : []);
+      return kept.length > 1
+        ? [{ label: d.label, elements: kept.map(i => d.elements[i]), names: kept.map(i => d.names[i]) }]
+        : [];
+    });
+    for (const k of ["missing", "empty", "nonScalar", "imprecise"]) issues[k] = issues[k].filter(concerns);
+    issues.fallback = onPollingHost;
+  }
+  return { labels, hosts, issues };
 }
 
 /** The sample's warnings about a field's element names, one sentence each -
  *  non-blocking: the agent copes with all of these, but only here can you see
- *  HOW. Nothing when there is no sample, no wildcard, an aggregation (one
- *  service, no element names) or a host per element (the host carries the
- *  identity and the service keeps its plain name). */
+ *  HOW. Nothing when there is no sample, no wildcard or an aggregation (one
+ *  service, no element names). With a host per element, only the elements
+ *  whose host does not resolve concern it: they stay on the polling host,
+ *  under the labelled name. */
 function labelPathWarnings(e, root) {
-  if (root == null || !e.path.includes("[*]") || e.aggregate || (e.pbHost || "").trim()) return [];
-  const { issues } = elementLabels(root, e.path, e.label_path || "");
+  if (root == null || !e.path.includes("[*]") || e.aggregate) return [];
+  const { issues } = elementLabels(root, e.path, e.label_path || "", (e.pbHost || "").trim());
   const list = (xs, quote) => {
     const shown = xs.slice(0, 5).map(x => quote ? `'${x}'` : x);
     return xs.length > 5 ? shown.join(", ") + ", …" : shown.join(", ");
@@ -1031,7 +1075,9 @@ function labelPathWarnings(e, root) {
     `A field that is unique per element avoids that.`);
   if (issues.missing.length) out.push(`The name field is missing in ${issues.missing.length} element(s) (${list(issues.missing)}): the site names those by their position instead.`);
   if (issues.empty.length) out.push(`The name field is empty in ${issues.empty.length} element(s) (${list(issues.empty)}): those get no suffix at all.`);
+  if (issues.imprecise.length) out.push(`The name field is a whole number too large for the browser to read exactly in ${issues.imprecise.length} element(s) (${list(issues.imprecise)}): the names shown here are rounded, and whether two of them repeat cannot be told here. The site reads them exactly.`);
   if (issues.nonScalar.length) out.push(`The name field is an object or a list in ${issues.nonScalar.length} element(s) (${list(issues.nonScalar)}): its whole content becomes part of the name.`);
+  if (issues.fallback.length) out.push(`The host field does not resolve in ${issues.fallback.length} element(s) (${list(issues.fallback)}): those get no host of their own - their services stay on the polling host, named by the element.`);
   return out;
 }
 
