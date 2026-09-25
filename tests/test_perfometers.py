@@ -94,8 +94,12 @@ def _first_match(perfometers_module, service_metrics: dict[str, set[str]]) -> st
         # A percentage without levels has a real upper bound of its own.
         ({"json_api_percent": set()}, "json_api_percent"),
         ({"json_api_percent": {"crit"}}, "json_api_percent_to_crit"),
-        # A measurement gets the same three variants as every other unit.
+        # A measurement gets the same three variants as every other unit ...
         ({"json_api_celsius": {"min", "max"}}, "json_api_celsius_in_range"),
+        # ... except the CRIT scale for one that can be negative: a bar from
+        # zero to a CRIT of -10 °C has its top below its bottom.
+        ({"json_api_celsius": {"crit"}}, "json_api_celsius"),
+        ({"json_api_amperes": {"crit"}}, "json_api_amperes"),
         ({"json_api_watts": {"crit"}}, "json_api_watts_to_crit"),
         ({"json_api_hertz": set()}, "json_api_hertz"),
         # A throughput the API reports as a gauge records into the rate metric,
@@ -182,3 +186,44 @@ def test_the_perfometer_names_are_unique(perfometers):
 
     assert len(names) == len(set(names))
     assert all(isinstance(p, perfometers_api.Perfometer) for p in _definitions(perfometers))
+
+
+# The quantities that can go below zero: a freezer, a DC rail, a discharging
+# battery.
+_SIGNED_METRICS = ("json_api_celsius", "json_api_volts", "json_api_amperes")
+
+
+def _bars_of(perfometers_module, metric: str) -> list:
+    return [p for p in _definitions(perfometers_module) if _required_metrics(p) == {metric}]
+
+
+@pytest.mark.parametrize("metric", _SIGNED_METRICS)
+def test_a_negative_reading_still_draws_a_bar(perfometers, metric):
+    """A hard zero at the bottom would draw -18 °C and -40 °C as the same empty
+    bar. Every bar a signed quantity can get either admits values below its
+    lower end (Open) or takes both ends from the operator's stated range."""
+    for perfometer in _bars_of(perfometers, metric):
+        lower = perfometer.focus_range.lower
+        assert isinstance(lower, perfometers_api.Open) or isinstance(
+            lower.value, metrics.MinimumOf
+        ), f"{perfometer.name} empties the bar below {lower.value}"
+
+
+@pytest.mark.parametrize("metric", _SIGNED_METRICS)
+def test_a_negative_crit_cannot_invert_the_range(perfometers, metric):
+    """A bar from zero to CRIT meets a CRIT of -10 °C with a range whose top is
+    under its bottom, which Checkmk cannot project and draws as nothing. No bar
+    for a signed quantity may pair a fixed end with the CRIT level."""
+    for perfometer in _bars_of(perfometers, metric):
+        ends = (perfometer.focus_range.lower.value, perfometer.focus_range.upper.value)
+        assert not any(isinstance(end, metrics.CriticalOf) for end in ends), perfometer.name
+
+
+def test_every_fixed_range_runs_upwards(perfometers):
+    """Where both ends are numbers the range can be checked here, before a site
+    draws it as an empty bar."""
+    for perfometer in _definitions(perfometers):
+        lower = perfometer.focus_range.lower.value
+        upper = perfometer.focus_range.upper.value
+        if isinstance(lower, (int, float)) and isinstance(upper, (int, float)):
+            assert lower < upper, perfometer.name
