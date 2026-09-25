@@ -195,12 +195,22 @@ def _render_si(symbol: str) -> Callable[[float], str]:
     """
 
     def _render(number: float) -> str:
+        # NaN matches no prefix and infinity every one: neither has a scale, so
+        # print what it is rather than 'nan µW'.
+        if not math.isfinite(number):
+            return f"{number} {symbol}"
         magnitude = abs(number)
-        factor, prefix = (1.0, "") if magnitude == 0 else _SI_PREFIXES[-1]
-        for candidate, candidate_prefix in _SI_PREFIXES:
-            if magnitude >= candidate:
-                factor, prefix = candidate, candidate_prefix
-                break
+        if magnitude == 0:
+            return f"{number:.2f} {symbol}"
+        index = next(
+            (i for i, (candidate, _) in enumerate(_SI_PREFIXES) if magnitude >= candidate),
+            len(_SI_PREFIXES) - 1,
+        )
+        # The prefix is chosen before rounding, so 999.996 W would print as
+        # '1000.00 W' where the graph says 1 kW: step up when the rounding does.
+        if index > 0 and round(magnitude / _SI_PREFIXES[index][0], 2) >= 1000:
+            index -= 1
+        factor, prefix = _SI_PREFIXES[index]
         return f"{number / factor:.2f} {prefix}{symbol}"
 
     return _render

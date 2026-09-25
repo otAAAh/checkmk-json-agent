@@ -26,6 +26,10 @@ are defined in this module. Two consequences shape everything below:
 
   A range needs BOTH ends in the perfdata to be used as one; with only an upper
   end configured the bar falls through to the CRIT level or the fallback.
+
+  A quantity that can be negative (a temperature, a voltage, a current) gets
+  only 1 and 3: a bar from zero to CRIT means nothing below zero, and a CRIT
+  below zero would make a range Checkmk cannot draw.
 * Every perfometer here must belong to exactly one kind of service, or which bar
   appears would depend on definition order across unrelated metrics. A field
   service carries exactly one value metric, so those are naturally disjoint. The
@@ -92,6 +96,20 @@ def _open_to(metric: str, upper: float) -> perfometers.Perfometer:
     )
 
 
+def _signed(metric: str, lower: float, upper: float) -> perfometers.Perfometer:
+    """The fallback bar for a quantity that can go below zero.
+
+    Both ends are open: a reading below ``lower`` still draws a sliver of bar
+    that shrinks the colder (or the more negative) it gets, instead of the empty
+    bar a hard zero would give -18 °C and -40 °C alike.
+    """
+    return perfometers.Perfometer(
+        name=metric,
+        focus_range=perfometers.FocusRange(perfometers.Open(lower), perfometers.Open(upper)),
+        segments=[metric],
+    )
+
+
 # --- a field's own value ----------------------------------------------------
 # The fallback bounds are a typical magnitude per unit, not a limit: a share is
 # a share (0-100), a duration of a minute is already remarkable, a size in the
@@ -133,17 +151,20 @@ perfometer_json_api_bits_per_second_in_range = _to_range("json_api_bits_per_seco
 perfometer_json_api_bits_per_second_to_crit = _to_crit("json_api_bits_per_second")
 perfometer_json_api_bits_per_second = _open_to("json_api_bits_per_second", 1e9)
 
+# A temperature, a voltage and a current can all be negative - a freezer, a DC
+# rail, a battery discharging - so zero is not where their bar may start. That
+# rules out the CRIT variant too: it runs from zero to CRIT, and a CRIT below
+# zero would give Checkmk a range whose top is under its bottom, which it cannot
+# draw at all. These get the stated range, else an open bar that admits
+# negatives; a freezer's bar starts twenty degrees below zero.
 perfometer_json_api_celsius_in_range = _to_range("json_api_celsius")
-perfometer_json_api_celsius_to_crit = _to_crit("json_api_celsius")
-perfometer_json_api_celsius = _open_to("json_api_celsius", 100.0)
+perfometer_json_api_celsius = _signed("json_api_celsius", -20.0, 100.0)
 
 perfometer_json_api_volts_in_range = _to_range("json_api_volts")
-perfometer_json_api_volts_to_crit = _to_crit("json_api_volts")
-perfometer_json_api_volts = _open_to("json_api_volts", 230.0)
+perfometer_json_api_volts = _signed("json_api_volts", 0.0, 230.0)
 
 perfometer_json_api_amperes_in_range = _to_range("json_api_amperes")
-perfometer_json_api_amperes_to_crit = _to_crit("json_api_amperes")
-perfometer_json_api_amperes = _open_to("json_api_amperes", 16.0)
+perfometer_json_api_amperes = _signed("json_api_amperes", 0.0, 16.0)
 
 perfometer_json_api_watts_in_range = _to_range("json_api_watts")
 perfometer_json_api_watts_to_crit = _to_crit("json_api_watts")

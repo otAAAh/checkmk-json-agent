@@ -244,6 +244,32 @@ def test_an_si_unit_renders_zero_and_negatives(check):
     assert render(0.0000001) == "0.10 µW"
 
 
+@pytest.mark.parametrize(
+    "value, rendered",
+    [
+        # Rounding that reaches the next prefix takes it, as the graph does.
+        (999.996, "1.00 kW"),
+        (-999.996, "-1.00 kW"),
+        (999_999_999.9, "1.00 GW"),
+        (0.0009999996, "1.00 mW"),
+        # ... and rounding that stays below it keeps the smaller one.
+        (999.994, "999.99 W"),
+        # The largest prefix has nowhere to step up to.
+        (1e15, "1000.00 TW"),
+    ],
+)
+def test_an_si_unit_picks_the_prefix_after_rounding(check, value, rendered):
+    assert check._render_si("W")(value) == rendered
+
+
+@pytest.mark.parametrize(
+    "value, rendered",
+    [(float("nan"), "nan W"), (float("inf"), "inf W"), (float("-inf"), "-inf W")],
+)
+def test_an_si_unit_prints_a_value_without_a_scale_as_it_is(check, value, rendered):
+    assert check._render_si("W")(value) == rendered
+
+
 def test_a_counter_in_a_unit_that_is_not_counted_gets_the_plain_rate(check, monkeypatch):
     # Setup refuses the combination; a hand-written rule still gets a readable
     # rate rather than '1.00 KiB/s/s' in a bandwidth metric.
