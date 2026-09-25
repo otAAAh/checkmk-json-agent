@@ -399,6 +399,51 @@ def test_explorer_emits_the_link_header_pagination_branch(rule_value: dict, expl
     assert explorer_output["cli"][1]["pagination"]["max_elements"] is None
 
 
+def test_explorer_emits_the_counted_pagination_branches(explorer_output: dict):
+    page, offset = (ast.literal_eval(py)["pagination"] for py in explorer_output["countedPy"])
+    # A Dictionary branch: only what is set, plus the required first page.
+    assert page["next"] == (
+        "page_number",
+        {
+            "parameter": "p",
+            "start": 0,
+            "page_size": 50,
+            "size_parameter": "per_page",
+            "total": "meta.total",
+        },
+    )
+    # Nothing but the mode: the ruleset's prefill for the parameter, no 'start'
+    # (the offset branch has none), and a size parameter without a size is
+    # dropped rather than emitted into a rule the ruleset would refuse.
+    assert offset["next"] == ("offset", {"parameter": "offset"})
+    assert offset["max_pages"] == 20
+
+
+def test_explorer_counted_cli_mirrors_the_server_side_call(explorer_output: dict):
+    page, offset = (cli["pagination"]["next"] for cli in explorer_output["countedCli"])
+    # CountedPages.model_dump(): every key, null where unset, 'start' always.
+    assert page == [
+        "page_number",
+        {
+            "parameter": "p",
+            "start": 0,
+            "page_size": 50,
+            "size_parameter": "per_page",
+            "total": "meta.total",
+        },
+    ]
+    assert offset == [
+        "offset",
+        {
+            "parameter": "offset",
+            "start": 1,
+            "page_size": None,
+            "size_parameter": None,
+            "total": None,
+        },
+    ]
+
+
 def test_explorer_omits_pagination_unless_it_can_be_followed(
     rule_value: dict, explorer_output: dict
 ):

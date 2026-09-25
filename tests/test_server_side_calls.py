@@ -1136,6 +1136,59 @@ def test_pagination_link_header_and_defaults(ssc):
     }
 
 
+def test_counted_pagination_passed_through(ssc):
+    """The page-number and offset modes carry their settings, defaults filled."""
+    args = _command_args(
+        ssc,
+        {
+            "endpoints": [
+                {
+                    "url": "http://x",
+                    "verify_cert": True,
+                    "extractions": [{"path": "items", "service": "Queue"}],
+                    "pagination": {
+                        "next": (
+                            "offset",
+                            {"parameter": "offset", "page_size": 50, "size_parameter": "limit"},
+                        ),
+                        "items": "items",
+                    },
+                },
+                {
+                    "url": "http://y",
+                    "verify_cert": True,
+                    "extractions": [{"path": "items", "service": "Queue"}],
+                    "pagination": {
+                        "next": ("page_number", {"parameter": "page", "total": "meta.total"}),
+                        "items": "items",
+                    },
+                },
+            ]
+        },
+    )
+    offset, page = _endpoints(ssc, args)
+    assert offset["pagination"]["next"] == [
+        "offset",
+        {
+            "parameter": "offset",
+            "start": 1,
+            "page_size": 50,
+            "size_parameter": "limit",
+            "total": None,
+        },
+    ]
+    assert page["pagination"]["next"] == [
+        "page_number",
+        {
+            "parameter": "page",
+            "start": 1,
+            "page_size": None,
+            "size_parameter": None,
+            "total": "meta.total",
+        },
+    ]
+
+
 def test_pagination_absent_by_default(ssc):
     args = _command_args(
         ssc,

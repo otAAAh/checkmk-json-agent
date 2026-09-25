@@ -221,6 +221,34 @@ const FIXTURE_OAUTH2 = {
   },
 };
 
+// The two modes in which the agent counts the pages: one filled in completely
+// (a size parameter without a size would be dropped, as the ruleset refuses it),
+// one with nothing but the mode, which must take the ruleset's prefills.
+const FIXTURE_PAGE_NUMBER = {
+  ...FIXTURE,
+  page_mode: "page_number",
+  page_items: "items",
+  page_max: "20",
+  page_param: "p",
+  page_start: "0",
+  page_size: "50",
+  page_size_param: "per_page",
+  page_total: "meta.total",
+};
+
+const FIXTURE_OFFSET = {
+  ...FIXTURE,
+  page_mode: "offset",
+  page_items: "items",
+  page_max: "20",
+  page_max_elements: "",
+  page_param: "",
+  page_start: "7",
+  page_size: "",
+  page_size_param: "limit",
+  page_total: "",
+};
+
 // Run the generator code with a known fixture and print the result. This block
 // shares the script's top-level scope, so it can see `state`, `valuePy`, etc.
 src += `
@@ -258,6 +286,14 @@ src += `
     pageNoItems: paginationObj({ page_mode: "body", page_next: "links.next", page_items: "" }),
     pageNoPath: paginationObj({ page_mode: "body", page_next: "", page_items: "items" }),
     pageOff: paginationObj({ page_mode: "", page_next: "links.next", page_items: "items" }),
+    // The counted modes, as a rule value (Python source of one endpoint) and as
+    // the CLI blob.
+    countedPy: [${JSON.stringify(FIXTURE_PAGE_NUMBER)}, ${JSON.stringify(FIXTURE_OFFSET)}].map(
+      e => "{\\n" + pyEndpoint(e, 4) + "\\n}"
+    ),
+    countedCli: [${JSON.stringify(FIXTURE_PAGE_NUMBER)}, ${JSON.stringify(FIXTURE_OFFSET)}].map(
+      endpointCliObj
+    ),
   };
   console.log(JSON.stringify(out));
 })();
