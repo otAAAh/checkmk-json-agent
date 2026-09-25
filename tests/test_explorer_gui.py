@@ -289,6 +289,65 @@ def test_a_failing_token_request_never_reports_the_client_secret(explorer_fetch,
     assert "401" in str(caught.value)
 
 
+# --- the first page of a counted pagination ---------------------------------
+
+# The wizard fetches one page, but it must be the agent's FIRST page: where the
+# agent counts the pages, it sets the position (and the page size) on the first
+# request too, and a preview without them shows the API's default page size.
+_COUNTED = [
+    None,
+    {"next": ("body", "links.next"), "items": "data"},
+    {"next": ("link_header", None), "items": "data"},
+    {"next": ("page_number", {"parameter": "page"}), "items": "data"},
+    {"next": ("page_number", {"parameter": "p", "start": 0}), "items": "data"},
+    {
+        "next": (
+            "page_number",
+            {"parameter": "page", "start": 1, "page_size": 50, "size_parameter": "per_page"},
+        ),
+        "items": "data",
+    },
+    {"next": ("offset", {"parameter": "offset"}), "items": "data"},
+    {"next": ("offset", {"parameter": "startIndex", "start": 1}), "items": "Resources"},
+    {
+        "next": ("offset", {"parameter": "offset", "page_size": 25, "size_parameter": "limit"}),
+        "items": "data",
+    },
+    # A page size without a size parameter is only the short-page test.
+    {"next": ("offset", {"parameter": "offset", "page_size": 25}), "items": "data"},
+]
+
+
+@pytest.mark.parametrize("pagination", _COUNTED)
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://api.example.com/v1/items",
+        # The rule's own parameters go out as written, one being replaced.
+        "https://api.example.com/v1/items?state=open&page=7&q=a%20b",
+    ],
+)
+def test_the_preview_asks_for_the_agents_first_page(explorer_fetch, agent, url, pagination):
+    endpoint = {"url": url, "pagination": pagination}
+    assert explorer_fetch._first_page_url(endpoint) == agent._first_page_url(endpoint)
+
+
+def test_the_counted_first_page_reaches_the_api(explorer_fetch, serve):
+    base, received = serve(lambda request, handler: _reply(handler, 200, {"data": []}))
+    connection = {
+        "url": f"{base}/items?state=open",
+        "pagination": {
+            "next": (
+                "offset",
+                {"parameter": "offset", "page_size": 25, "size_parameter": "limit"},
+            ),
+            "items": "data",
+        },
+    }
+    explorer_fetch._perform_request(connection)
+    assert received[0].path == "/items?state=open&offset=0&limit=25"
+
+
 # --- the drift guard -------------------------------------------------------
 
 # Every endpoint field of the ruleset, and what the preview does with it. A
@@ -308,6 +367,8 @@ _APPLIED_TO_THE_REQUEST = {
     "follow_redirects",
     "timeout",
     "proxy",
+    # Only as far as the first page: its counting parameters (see below).
+    "pagination",
 }
 _NOT_PART_OF_THE_REQUEST = {
     "name": "names the endpoint's services, not its request",
@@ -322,8 +383,6 @@ _NOT_PART_OF_THE_REQUEST = {
     "cache_ttl": "the agent's cache belongs to the check; an operator pressing "
     "'Refresh data' is asking for a fresh response",
     "retry": "a person is waiting: report 'connection refused' now rather than half a minute later",
-    "pagination": "the wizard fetches one page; the review step already says so, "
-    "reading the setting off the rule it is building",
 }
 
 
