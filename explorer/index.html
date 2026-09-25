@@ -78,7 +78,7 @@
   .outblock .hdr { display:flex; justify-content:space-between; align-items:center; margin-bottom:4px; }
   .err { color:var(--crit); }
   .subnote.warn { color:var(--warn); }
-  .subnote.warn:empty { display:none; }
+  .subnote.warn:empty, .subnote.err:empty { display:none; }
   hr { border:0; border-top:1px solid var(--line); margin:12px 0; }
 </style>
 </head>
@@ -224,11 +224,13 @@ function makeEndpoint(withSample) {
     // Follow the API's pagination and merge the pages: where the next page's URL
     // is ("" = off | body | link_header | page_number | offset), the path to it
     // for the body mode, the collection each page carries, and the two caps. The
-    // two counted modes (no link: the agent counts) add the query parameter, the
-    // first page's number (page_number only), an optional page size and the
-    // parameter it is sent as, and an optional path to the total.
+    // two counted modes (no link: the agent counts) add the query parameter, where
+    // counting starts (the first page's number, required; or the first element's
+    // offset, optional - kept apart, as their defaults differ), an optional page
+    // size and the parameter it is sent as, and an optional path to the total.
     page_mode: "", page_next: "", page_items: "", page_max: "10", page_max_elements: "",
-    page_param: "", page_start: "1", page_size: "", page_size_param: "", page_total: "",
+    page_param: "", page_start: "1", page_offset_start: "", page_size: "", page_size_param: "",
+    page_total: "",
     proxy_mode: "default", proxy_url: "",   // default (env) | url | no_proxy
     ca_bundle: "", client_cert: "", client_key: "",
     json: withSample ? JSON.stringify(SAMPLE, null, 2) : "",
@@ -445,9 +447,11 @@ function renderConn() {
        ${isCountedPaging(e) ? `
        <label>Query parameter</label><input type="text" id="c-pageparam" value="${escAttr(e.page_param)}" placeholder="${e.page_mode === "offset" ? "offset" : "page"}">
        ${e.page_mode === "page_number" ? `<label>Number of the first page</label><input type="text" id="c-pagestart" value="${escAttr(e.page_start)}" placeholder="1">` : ""}
+       ${e.page_mode === "offset" ? `<label>Offset of the first element</label><input type="text" id="c-pageoffsetstart" value="${escAttr(e.page_offset_start)}" placeholder="(optional) 0; 1 where the API counts from one, e.g. SCIM">` : ""}
        <label>Page size</label><input type="text" id="c-pagesize" value="${escAttr(e.page_size)}" placeholder="(optional) a shorter page is the last one">
        <label>Send the page size as</label><input type="text" id="c-pagesizeparam" value="${escAttr(e.page_size_param)}" placeholder="(optional) e.g. limit, per_page">
-       <label>Total path</label><input type="text" id="c-pagetotal" value="${escAttr(e.page_total)}" placeholder="(optional) e.g. meta.total">` : ""}
+       <label>Total path</label><input type="text" id="c-pagetotal" value="${escAttr(e.page_total)}" placeholder="(optional) e.g. meta.total">
+       <div class="subnote err" id="c-pageerr" style="grid-column:1 / -1">${escAttr(countedPagingError(e))}</div>` : ""}
        <label>Collection to merge</label><input type="text" id="c-pageitems" value="${escAttr(e.page_items)}" placeholder="e.g. data.items ('$' = the response IS the array)">
        <label>Max pages</label><input type="text" id="c-pagemax" value="${escAttr(e.page_max)}" placeholder="10">
        <label>Max elements</label><input type="text" id="c-pagemaxel" value="${escAttr(e.page_max_elements)}" placeholder="(optional) stop after N elements">` : ""}
@@ -490,6 +494,7 @@ function renderConn() {
   bind("c-pagemaxel", () => { e.page_max_elements = $("c-pagemaxel").value; renderOutputs(); });
   bind("c-pageparam", () => { e.page_param = $("c-pageparam").value; renderOutputs(); });
   bind("c-pagestart", () => { e.page_start = $("c-pagestart").value; renderOutputs(); });
+  bind("c-pageoffsetstart", () => { e.page_offset_start = $("c-pageoffsetstart").value; renderOutputs(); });
   bind("c-pagesize", () => { e.page_size = $("c-pagesize").value; renderOutputs(); });
   bind("c-pagesizeparam", () => { e.page_size_param = $("c-pagesizeparam").value; renderOutputs(); });
   bind("c-pagetotal", () => { e.page_total = $("c-pagetotal").value; renderOutputs(); });
@@ -1267,25 +1272,51 @@ function isCountedPaging(e) {
 }
 
 // The settings of the two counted modes, shaped like the server-side call's
-// CountedPages dump: every key present, null where unset, and 'start' always
-// there (1 when not asked for - the offset mode has no first page to number).
-// An empty parameter takes the ruleset's prefill ('page' / 'offset'). A size
-// parameter without a size is dropped, as the ruleset would refuse it.
+// CountedPages dump: every key present, null where unset. 'start' is the first
+// page's number (1 when unparseable - the ruleset requires one) or the first
+// element's offset (null when unset: the agent starts an offset at 0).
+// An empty parameter takes the ruleset's prefill ('page' / 'offset').
 function countedPagingObj(e) {
-  const param = String(e.page_param || "").trim()
-    || (e.page_mode === "offset" ? "offset" : "page");
-  const start = parseInt(e.page_start, 10);
+  const param = countedParam(e);
+  const start = parseInt(e.page_mode === "offset" ? e.page_offset_start : e.page_start, 10);
+  const validStart = !Number.isNaN(start) && start >= 0;
   const size = parseInt(e.page_size, 10);
   const pageSize = !Number.isNaN(size) && size >= 1 ? size : null;
   const sizeParam = String(e.page_size_param || "").trim();
   const total = String(e.page_total || "").trim();
   return {
     parameter: param,
-    start: e.page_mode === "page_number" && !Number.isNaN(start) && start >= 0 ? start : 1,
+    start: e.page_mode === "offset" ? (validStart ? start : null) : (validStart ? start : 1),
     page_size: pageSize,
     size_parameter: pageSize != null && sizeParam ? sizeParam : null,
     total: total || null,
   };
+}
+
+function countedParam(e) {
+  return String(e.page_param || "").trim() || (e.page_mode === "offset" ? "offset" : "page");
+}
+
+// The query-string name check, as the ruleset's _validate_query_parameter: the
+// characters that structure a query string (or end it) cannot be in a name.
+const QUERY_PARAM_BAD_RE = /[\s&=?#]/;
+
+/** Why Setup would refuse these counted-pagination settings, or "" if it would not.
+ *  Mirrors _validate_query_parameter and _validate_counted_pages in the ruleset. */
+function countedPagingError(e) {
+  if (!isCountedPaging(e)) return "";
+  const param = countedParam(e);
+  const sizeParam = String(e.page_size_param || "").trim();
+  const size = parseInt(e.page_size, 10);
+  if (QUERY_PARAM_BAD_RE.test(param) || QUERY_PARAM_BAD_RE.test(sizeParam))
+    return "Enter a valid query parameter name, e.g. 'api_key'.";
+  if (sizeParam && !(size >= 1))
+    return "A page size parameter needs a page size to send. Set 'Page size', or remove the parameter.";
+  if (sizeParam && sizeParam === param)
+    return "The position and the page size need two different parameters.";
+  if (String(e.page_total || "").includes("[*]"))
+    return "The path to the total must not contain a '[*]' wildcard.";
+  return "";
 }
 
 function paginationObj(e) {
@@ -1293,6 +1324,8 @@ function paginationObj(e) {
   const next = String(e.page_next || "").trim();
   if (!e.page_mode || !items) return null;
   if (e.page_mode === "body" && !next) return null;
+  // Settings Setup would refuse emit nothing, the error under the form says why.
+  if (countedPagingError(e)) return null;
   const pages = parseInt(e.page_max, 10);
   const o = {
     next: e.page_mode === "link_header" ? ["link_header", null]
@@ -1391,7 +1424,7 @@ function pyEndpoint(e, indent) {
     // 'next' is a CascadingSingleChoice, i.e. a TUPLE in the rule value; the
     // 'Link' header branch is a FixedValue, whose value is None.
     // The counted branches are a Dictionary: only what is set goes in, plus
-    // 'start', which the page-number branch requires.
+    // 'start', which the page-number branch requires (the offset's is optional).
     let nx;
     if (pg.next[0] === "link_header") {
       nx = "('link_header', None)";
@@ -1400,7 +1433,7 @@ function pyEndpoint(e, indent) {
     } else {
       const c = pg.next[1];
       const cp = [`'parameter': ${pyStr(c.parameter)}`];
-      if (pg.next[0] === "page_number") cp.push(`'start': ${c.start}`);
+      if (c.start != null) cp.push(`'start': ${c.start}`);
       if (c.page_size != null) cp.push(`'page_size': ${c.page_size}`);
       if (c.size_parameter != null) cp.push(`'size_parameter': ${pyStr(c.size_parameter)}`);
       if (c.total != null) cp.push(`'total': ${pyStr(c.total)}`);
@@ -1473,6 +1506,10 @@ function renderOutputs() {
     .map(e => `  --endpoint '${JSON.stringify(endpointCliObj(e))}'`)
     .join(" \\\n");
   $("out-extr").textContent = `agent_json_api \\\n${cli}`;
+  // The pagination error sits under the connection form, which is not re-rendered
+  // while typing (it would steal the focus), so it is refreshed from here.
+  const pageErr = document.getElementById("c-pageerr");
+  if (pageErr) pageErr.textContent = countedPagingError(ep());
   $("cli-note").innerHTML = anyAuth()
     ? "Endpoints with auth also need <code>--secret_&lt;i&gt;-id \"&lt;id&gt;:&lt;store_file&gt;\"</code> (index-matched)."
     : "";

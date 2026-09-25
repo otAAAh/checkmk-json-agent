@@ -37,12 +37,15 @@ description:
  pages were read and how many elements the merged collection ended up with. If a
  further page existed but was not read - a page or element limit was reached, or
  the API offered a next link the agent refuses to follow, such as one on another
- host, or an API paged by a counted page number or offset sent the same page
- again - the service says the collection is {incomplete} and goes {WARN} (also
- configurable). That matters because every service built from that collection, a
- count or an aggregation or a wildcard, is then describing only part of it. A
- page that cannot be read at all fails the endpoint instead, so half a collection
- is never reported as if it were whole.
+ host, or an API paged by a counted page number or offset answered page 2 with
+ page 1 again - the service says the collection is {incomplete} and goes {WARN}
+ (also configurable). That matters because every service built from that
+ collection, a count or an aggregation or a wildcard, is then describing only
+ part of it. A page that cannot be read at all fails the endpoint instead, so
+ half a collection is never reported as if it were whole. Where the agent counts
+ the pages, the request after the last one may be answered with HTTP 404 or 416,
+ with no collection, or with the last page once more; that ends the collection
+ as complete, and the service's details say how the end was recognised.
 
  The endpoint can also be configured to report the {raw response} in this
  service's details: the body as it came off the wire, cut off at a configurable

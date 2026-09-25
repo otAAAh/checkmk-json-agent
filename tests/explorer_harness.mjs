@@ -228,9 +228,10 @@ const LABEL_CASES = JSON.parse(
   readFileSync(new URL("./fixtures/label_path_cases.json", import.meta.url), "utf8"),
 ).cases;
 
-// The two modes in which the agent counts the pages: one filled in completely
-// (a size parameter without a size would be dropped, as the ruleset refuses it),
-// one with nothing but the mode, which must take the ruleset's prefills.
+// The two modes in which the agent counts the pages: one filled in completely,
+// one with nothing but the mode, which must take the ruleset's prefills (and
+// must not take the page number's first page: 'page_start' is set to prove it).
+// FIXTURE_OFFSET_START is the one-based offset (SCIM's 'startIndex').
 const FIXTURE_PAGE_NUMBER = {
   ...FIXTURE,
   page_mode: "page_number",
@@ -251,9 +252,26 @@ const FIXTURE_OFFSET = {
   page_max_elements: "",
   page_param: "",
   page_start: "7",
+  page_offset_start: "",
   page_size: "",
-  page_size_param: "limit",
+  page_size_param: "",
   page_total: "",
+};
+
+const FIXTURE_OFFSET_START = {
+  ...FIXTURE_OFFSET,
+  page_param: "startIndex",
+  page_offset_start: "1",
+};
+
+// Settings Setup would refuse, one per check in _validate_counted_pages and
+// _validate_query_parameter - each must be named, and emit no pagination.
+const FIXTURE_REFUSED = {
+  sizeWithoutSize: { ...FIXTURE_OFFSET, page_size_param: "limit" },
+  sameName: { ...FIXTURE_OFFSET, page_param: "p", page_size: "10", page_size_param: "p" },
+  badParam: { ...FIXTURE_OFFSET, page_param: "page=1" },
+  badSizeParam: { ...FIXTURE_OFFSET, page_size: "10", page_size_param: "per page" },
+  wildTotal: { ...FIXTURE_OFFSET, page_total: "meta[*].total" },
 };
 
 // Run the generator code with a known fixture and print the result. This block
@@ -314,6 +332,15 @@ src += `
     countedCli: [${JSON.stringify(FIXTURE_PAGE_NUMBER)}, ${JSON.stringify(FIXTURE_OFFSET)}].map(
       endpointCliObj
     ),
+    offsetStartPy: "{\\n" + pyEndpoint(${JSON.stringify(FIXTURE_OFFSET_START)}, 4) + "\\n}",
+    offsetStartCli: endpointCliObj(${JSON.stringify(FIXTURE_OFFSET_START)}),
+    refused: Object.fromEntries(
+      Object.entries(${JSON.stringify(FIXTURE_REFUSED)}).map(([k, e]) => [
+        k,
+        { error: countedPagingError(e), py: "{\\n" + pyEndpoint(e, 4) + "\\n}", cli: endpointCliObj(e) },
+      ])
+    ),
+    refusedNone: countedPagingError(${JSON.stringify(FIXTURE_PAGE_NUMBER)}),
   };
   console.log(JSON.stringify(out));
 })();

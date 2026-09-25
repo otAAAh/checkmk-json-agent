@@ -95,7 +95,8 @@ the 3.0 line.
   where the next page's URL is (a field in the body, or the RFC 8288 `Link`
   header) — or, for an API with no link, let the agent count a **page number**
   (`?page=2`) or an **offset** (`?offset=50&limit=25`) itself, stopping at an
-  empty page, a short one or a stated total — and which collection to merge,
+  empty page, a short one, a stated total or a 404 past the last page — and
+  which collection to merge,
   and the pages are appended into one
   document that the wildcards, aggregations, filters and host labels all see
   whole. A link to another host is refused, the pages read are reported, and
@@ -540,7 +541,7 @@ counting:
 | Choice | The pages it asks for |
 |---|---|
 | **No link: count the pages** | `?page=1`, `?page=2`, … — from *Number of the first page* (1, or 0 for an API that counts from zero), one up per page |
-| **No link: count the elements** | `?offset=0`, `?offset=25`, … — each offset is the number of elements received so far, *not* the page size asked for, so an API that sends fewer than requested loses nothing |
+| **No link: count the elements** | `?offset=0`, `?offset=25`, … — each offset is the number of elements received so far, *not* the page size asked for, so an API that sends fewer than requested loses nothing. Counting starts at 0; set *Offset of the first element* to 1 for an API that numbers its elements from one (SCIM's `startIndex`), or every page would repeat one element |
 
 The parameter's name is configurable (`page`, `p`, `offset`, `skip`, …), and it
 is set on the **first** request too, replacing one of that name in the URL —
@@ -551,17 +552,33 @@ every page, the first included.
 With no link to fall silent, three things say a page was the last one:
 
 - a page whose collection is **empty**;
-- a page with **fewer elements than the page size**, when one is set — which
-  saves the request for the empty page after it;
+- a page with **fewer elements than the page size** *and* than a page before
+  it, when a page size is set — which saves the request for the empty page
+  after it. Short of the page size alone is not enough: an API may cap the size
+  it is asked for (`limit=500` answered with 100), and taking its first capped
+  page as the last would report 100 of 2000 elements as the whole collection.
+  So a first page never ends it by being short;
 - the elements read reaching the number at an optional **total** path
   (`total`, `meta.total_count`), where the API states one. A total that is
   absent or not a number decides nothing.
 
-Without a page size or a total, the last page is recognised by the empty one
-after it: one request more, never a wrong answer. And an API that **ignores the
-parameter** — the usual sign of a misspelt name — answers the same page again;
-the agent notices, does not merge the copy, and reports the collection as
-incomplete rather than counting page one ten times.
+Otherwise the last page is recognised by the answer to the request after it:
+one request more, never a wrong answer. That answer may be an empty page, but
+APIs say "there is none" in other ways too, and these end the collection as
+**complete** as well:
+
+- **HTTP 404** (Django REST Framework's `Invalid page.`) or **416**. Any other
+  error still fails the endpoint — a 400 in particular, which is as likely an
+  API refusing to page past a window with the rest still there;
+- a page with **no collection** at the path, a `null` one, or an empty one of
+  the other kind (`{}` where the pages carry a list);
+- the **last page once more** (an API that clamps the page number).
+
+The endpoint's service names which one it was (`End of the collection: page 4
+answered HTTP 404 Not Found`), in its details and OK. The exception is **page 2
+repeating page 1**: that is an API that **ignores the parameter** — the usual
+sign of a misspelt name. The agent does not merge the copy and reports the
+collection as incomplete, rather than counting page one ten times.
 
 #### The caps, and why they are not optional
 

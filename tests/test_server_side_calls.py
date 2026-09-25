@@ -1171,7 +1171,9 @@ def test_counted_pagination_passed_through(ssc):
         "offset",
         {
             "parameter": "offset",
-            "start": 1,
+            # Unset: the agent's default for the mode (0 for an offset), not the
+            # page number's 1 - which would skip the first element.
+            "start": None,
             "page_size": 50,
             "size_parameter": "limit",
             "total": None,
@@ -1181,12 +1183,33 @@ def test_counted_pagination_passed_through(ssc):
         "page_number",
         {
             "parameter": "page",
-            "start": 1,
+            "start": None,
             "page_size": None,
             "size_parameter": None,
             "total": "meta.total",
         },
     ]
+
+
+def test_an_offsets_start_is_passed_through(ssc):
+    args = _command_args(
+        ssc,
+        {
+            "endpoints": [
+                {
+                    "url": "http://x",
+                    "verify_cert": True,
+                    "extractions": [{"path": "Resources", "service": "Users"}],
+                    "pagination": {
+                        "next": ("offset", {"parameter": "startIndex", "start": 1}),
+                        "items": "Resources",
+                    },
+                }
+            ]
+        },
+    )
+    (endpoint,) = _endpoints(ssc, args)
+    assert endpoint["pagination"]["next"][1]["start"] == 1
 
 
 def test_pagination_absent_by_default(ssc):

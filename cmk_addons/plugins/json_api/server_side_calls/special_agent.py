@@ -220,8 +220,10 @@ class CountedPages(BaseModel, frozen=True):
     # parameter instead: the agent counts the pages (or the elements, for an
     # offset) and asks for the next one itself.
     parameter: str
-    # The first page's number; unused for an offset, which starts at 0.
-    start: int = 1
+    # Where counting starts: the first page's number, or the first element's
+    # offset. None (an offset rule from before it could be set) leaves it to the
+    # agent: 1 for a page number, 0 for an offset.
+    start: int | None = None
     # The page size: a shorter page is the last one. Sent as 'size_parameter'
     # when that is set, otherwise only used to recognise the last page.
     page_size: int | None = None

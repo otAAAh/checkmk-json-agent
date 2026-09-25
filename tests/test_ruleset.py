@@ -775,15 +775,18 @@ def test_the_counted_pagination_modes_have_the_expected_keys(ruleset):
         .parameter_form.elements
     }
     page, offset = choices["page_number"], choices["offset"]
-    # A page count starts where the API's does; an offset always starts at 0, so
-    # only the page-number mode asks for a first page.
-    assert list(page.elements) == ["parameter", "start", "page_size", "size_parameter", "total"]
-    assert list(offset.elements) == ["parameter", "page_size", "size_parameter", "total"]
+    # Both count from where the API does. The page number is required (there is
+    # no safe guess between 0 and 1); the offset's is optional, because 0 is right
+    # almost everywhere and offset rules from before it existed have none.
+    keys = ["parameter", "start", "page_size", "size_parameter", "total"]
+    assert list(page.elements) == keys and list(offset.elements) == keys
     assert [k for k, el in page.elements.items() if el.required] == ["parameter", "start"]
     assert [k for k, el in offset.elements.items() if el.required] == ["parameter"]
     assert page.elements["parameter"].parameter_form.prefill.value == "page"
     assert offset.elements["parameter"].parameter_form.prefill.value == "offset"
     assert page.elements["start"].parameter_form.prefill.value == 1
+    # Ticking the offset's start is asking for the one-based case.
+    assert offset.elements["start"].parameter_form.prefill.value == 1
 
 
 def test_counted_pagination_settings_the_agent_could_only_half_honour(ruleset):

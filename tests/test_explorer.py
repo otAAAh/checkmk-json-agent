@@ -412,16 +412,17 @@ def test_explorer_emits_the_counted_pagination_branches(explorer_output: dict):
             "total": "meta.total",
         },
     )
-    # Nothing but the mode: the ruleset's prefill for the parameter, no 'start'
-    # (the offset branch has none), and a size parameter without a size is
-    # dropped rather than emitted into a rule the ruleset would refuse.
+    # Nothing but the mode: the ruleset's prefill for the parameter, and no
+    # 'start' - the offset's is optional, and the page number's first page (set in
+    # the fixture) is not the offset's.
     assert offset["next"] == ("offset", {"parameter": "offset"})
     assert offset["max_pages"] == 20
 
 
 def test_explorer_counted_cli_mirrors_the_server_side_call(explorer_output: dict):
     page, offset = (cli["pagination"]["next"] for cli in explorer_output["countedCli"])
-    # CountedPages.model_dump(): every key, null where unset, 'start' always.
+    # CountedPages.model_dump(): every key, null where unset - the offset's start
+    # too, which the agent reads as 0.
     assert page == [
         "page_number",
         {
@@ -436,12 +437,33 @@ def test_explorer_counted_cli_mirrors_the_server_side_call(explorer_output: dict
         "offset",
         {
             "parameter": "offset",
-            "start": 1,
+            "start": None,
             "page_size": None,
             "size_parameter": None,
             "total": None,
         },
     ]
+
+
+def test_explorer_emits_the_offsets_start(explorer_output: dict):
+    pagination = ast.literal_eval(explorer_output["offsetStartPy"])["pagination"]
+    assert pagination["next"] == ("offset", {"parameter": "startIndex", "start": 1})
+    assert explorer_output["offsetStartCli"]["pagination"]["next"][1]["start"] == 1
+
+
+def test_explorer_refuses_counted_settings_setup_would_refuse(explorer_output: dict):
+    # Each of the ruleset's checks, answered with the ruleset's own message, and
+    # no pagination emitted: a rule that fails on import helps nobody, and in the
+    # CLI blob the size would overwrite the position.
+    source = _RULESET.read_text()
+    # The ruleset's messages with the implicit string concatenation undone.
+    flat = re.sub(r'"\s*\n\s*"', "", source)
+    for name, refused in explorer_output["refused"].items():
+        assert refused["error"] and refused["error"] in flat, name
+        assert "pagination" not in ast.literal_eval(refused["py"]), name
+        assert refused["cli"].get("pagination") is None, name
+    # And a valid setting is not refused.
+    assert explorer_output["refusedNone"] == ""
 
 
 def test_explorer_omits_pagination_unless_it_can_be_followed(

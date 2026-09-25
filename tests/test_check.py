@@ -2443,6 +2443,31 @@ def test_endpoint_warns_when_the_collection_was_read_incompletely(check):
     assert incomplete.summary == "Collection incomplete: the page limit (10) was reached"
 
 
+def test_endpoint_says_how_a_counted_collections_end_was_recognised(check):
+    section = _section(
+        check,
+        [],
+        endpoints=[
+            {
+                "name": "frontend",
+                "url": "https://x/h",
+                "ok": True,
+                "pages": 3,
+                "elements": 250,
+                "pagination_end": "page 4 answered HTTP 404 Not Found",
+            }
+        ],
+    )
+    results = list(check.check_json_api_endpoint("frontend", {}, section))
+    # The collection is whole, so OK and nothing in the summary - but the end
+    # was an inference, so it is in the details for whoever doubts the count.
+    assert "End of the collection: page 4 answered HTTP 404 Not Found" in _details(results)
+    assert all(r.state == State.OK for r in results if isinstance(r, Result))
+    assert not any(
+        "Collection incomplete" in (r.summary or "") for r in results if isinstance(r, Result)
+    )
+
+
 def test_the_incomplete_collection_state_is_configurable(check):
     section = _section(
         check,
