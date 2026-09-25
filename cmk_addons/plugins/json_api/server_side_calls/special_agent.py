@@ -215,6 +215,21 @@ class FieldContext(BaseModel, frozen=True):
     max_bytes: int = 1024
 
 
+class CountedPages(BaseModel, frozen=True):
+    # For an API with no next-page link, which takes the position as a query
+    # parameter instead: the agent counts the pages (or the elements, for an
+    # offset) and asks for the next one itself.
+    parameter: str
+    # The first page's number; unused for an offset, which starts at 0.
+    start: int = 1
+    # The page size: a shorter page is the last one. Sent as 'size_parameter'
+    # when that is set, otherwise only used to recognise the last page.
+    page_size: int | None = None
+    size_parameter: str | None = None
+    # A path to the number of elements the whole collection holds.
+    total: str | None = None
+
+
 class Pagination(BaseModel, frozen=True):
     # Follow an API that answers one page at a time and merge the pages, so a
     # '[*]' expansion or an aggregation describes the whole collection instead of
@@ -223,8 +238,14 @@ class Pagination(BaseModel, frozen=True):
     #
     # The next-page link: ("body", "<path>") reads it from the response, e.g.
     # 'links.next'; ("link_header", None) takes it from the RFC 8288 'Link'
-    # header's rel="next". Straight from the CascadingSingleChoice form spec.
-    next: tuple[Literal["body"], str] | tuple[Literal["link_header"], None]
+    # header's rel="next"; ("page_number", {...}) and ("offset", {...}) build the
+    # next URL from a counted query parameter. Straight from the
+    # CascadingSingleChoice form spec.
+    next: (
+        tuple[Literal["body"], str]
+        | tuple[Literal["link_header"], None]
+        | tuple[Literal["page_number", "offset"], CountedPages]
+    )
     # The collection each page carries ('data.items', or '$' for a response that
     # IS the array); it is what the pages are appended to.
     items: str

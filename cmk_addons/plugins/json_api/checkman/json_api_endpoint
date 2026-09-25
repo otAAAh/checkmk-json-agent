@@ -37,7 +37,8 @@ description:
  pages were read and how many elements the merged collection ended up with. If a
  further page existed but was not read - a page or element limit was reached, or
  the API offered a next link the agent refuses to follow, such as one on another
- host - the service says the collection is {incomplete} and goes {WARN} (also
+ host, or an API paged by a counted page number or offset sent the same page
+ again - the service says the collection is {incomplete} and goes {WARN} (also
  configurable). That matters because every service built from that collection, a
  count or an aggregation or a wildcard, is then describing only part of it. A
  page that cannot be read at all fails the endpoint instead, so half a collection

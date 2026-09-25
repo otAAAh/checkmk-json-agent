@@ -757,9 +757,47 @@ def test_pagination_form_has_the_expected_keys(ruleset):
     assert [e.name for e in form.elements["next"].parameter_form.elements] == [
         "body",
         "link_header",
+        "page_number",
+        "offset",
     ]
     assert form.elements["next"].parameter_form.prefill.value == "body"
     assert form.elements["max_pages"].parameter_form.prefill.value == 10
+
+
+def test_the_counted_pagination_modes_have_the_expected_keys(ruleset):
+    choices = {
+        e.name: e.parameter_form
+        for e in ruleset._endpoint()
+        .elements["pagination"]
+        .parameter_form.elements["next"]
+        .parameter_form.elements
+    }
+    page, offset = choices["page_number"], choices["offset"]
+    # A page count starts where the API's does; an offset always starts at 0, so
+    # only the page-number mode asks for a first page.
+    assert list(page.elements) == ["parameter", "start", "page_size", "size_parameter", "total"]
+    assert list(offset.elements) == ["parameter", "page_size", "size_parameter", "total"]
+    assert [k for k, el in page.elements.items() if el.required] == ["parameter", "start"]
+    assert [k for k, el in offset.elements.items() if el.required] == ["parameter"]
+    assert page.elements["parameter"].parameter_form.prefill.value == "page"
+    assert offset.elements["parameter"].parameter_form.prefill.value == "offset"
+    assert page.elements["start"].parameter_form.prefill.value == 1
+
+
+def test_counted_pagination_settings_the_agent_could_only_half_honour(ruleset):
+    def check(settings, mode="offset"):
+        ruleset._validate_pagination({"next": (mode, settings), "items": "items"})
+
+    check({"parameter": "offset", "page_size": 50, "size_parameter": "limit"})
+    check({"parameter": "page", "start": 0, "total": "meta.total"}, mode="page_number")
+    # A size parameter with no size would be sent empty.
+    with pytest.raises(ValidationError, match="needs a page size"):
+        check({"parameter": "offset", "size_parameter": "limit"})
+    # One name for both would have one overwrite the other.
+    with pytest.raises(ValidationError, match="two different parameters"):
+        check({"parameter": "page", "page_size": 5, "size_parameter": "page"})
+    with pytest.raises(ValidationError, match="total must not contain"):
+        check({"parameter": "page", "total": "pages[*].total"}, mode="page_number")
 
 
 def test_following_pagination_is_optional(ruleset):

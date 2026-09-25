@@ -93,7 +93,10 @@ the 3.0 line.
   *first page* — `count` over a queue that pages at 25 reports 25 however long
   the queue is, and nothing in any service says so. Opt in per endpoint, say
   where the next page's URL is (a field in the body, or the RFC 8288 `Link`
-  header) and which collection to merge, and the pages are appended into one
+  header) — or, for an API with no link, let the agent count a **page number**
+  (`?page=2`) or an **offset** (`?offset=50&limit=25`) itself, stopping at an
+  empty page, a short one or a stated total — and which collection to merge,
+  and the pages are appended into one
   document that the wildcards, aggregations, filters and host labels all see
   whole. A link to another host is refused, the pages read are reported, and
   where a cap left a page behind the endpoint's own service says the collection
@@ -505,7 +508,7 @@ only about where they put them:
 
 | Setting | What it is |
 |---|---|
-| **Where the next page's URL comes from** | Either a **field in the body** — `links.next`, `next`, `meta.next_page_url` — or the **`Link` response header**'s `rel="next"`, the RFC 8288 convention the GitHub / GitLab / Jenkins style APIs use. A page carrying no next link (absent field, JSON `null`, empty string, no header) is the last one: that is how pagination ends |
+| **Where the next page's URL comes from** | A **field in the body** — `links.next`, `next`, `meta.next_page_url` — or the **`Link` response header**'s `rel="next"`, the RFC 8288 convention the GitHub / GitLab / Jenkins style APIs use. A page carrying no next link (absent field, JSON `null`, empty string, no header) is the last one: that is how pagination ends. For an API with **no link at all**, the agent counts instead — see [below](#an-api-without-a-next-page-link) |
 | **The collection to merge** | The array (or object) each page carries a slice of — `items`, `data.jobs`, or `$` where the response *is* the array |
 
 Each page's collection is appended to the first page's, and **the rest of the
@@ -521,6 +524,39 @@ resolved against the page it came from, which is the URL the first page was
 **served** from: where an endpoint redirects, the pages follow it to the host
 and path actually answering, not to the one the rule names. A link anywhere
 else is still refused.
+
+#### An API without a next-page link
+
+Plenty of APIs never say where the next page is: they take the position as a
+query parameter and leave the counting to the client. Two more choices under
+*Where the next page's URL comes from* cover them, and the agent does the
+counting:
+
+| Choice | The pages it asks for |
+|---|---|
+| **No link: count the pages** | `?page=1`, `?page=2`, … — from *Number of the first page* (1, or 0 for an API that counts from zero), one up per page |
+| **No link: count the elements** | `?offset=0`, `?offset=25`, … — each offset is the number of elements received so far, *not* the page size asked for, so an API that sends fewer than requested loses nothing |
+
+The parameter's name is configurable (`page`, `p`, `offset`, `skip`, …), and it
+is set on the **first** request too, replacing one of that name in the URL —
+every other query parameter goes out exactly as written. Optionally, a **page
+size** and the parameter to send it as (`limit`, `per_page`, `size`) are added to
+every page, the first included.
+
+With no link to fall silent, three things say a page was the last one:
+
+- a page whose collection is **empty**;
+- a page with **fewer elements than the page size**, when one is set — which
+  saves the request for the empty page after it;
+- the elements read reaching the number at an optional **total** path
+  (`total`, `meta.total_count`), where the API states one. A total that is
+  absent or not a number decides nothing.
+
+Without a page size or a total, the last page is recognised by the empty one
+after it: one request more, never a wrong answer. And an API that **ignores the
+parameter** — the usual sign of a misspelt name — answers the same page again;
+the agent notices, does not merge the copy, and reports the collection as
+incomplete rather than counting page one ten times.
 
 #### The caps, and why they are not optional
 
@@ -550,9 +586,12 @@ deliberate:
 Collection incomplete: the page limit (10) was reached
 ```
 
-Three things stop pagination that way rather than failing the endpoint, so what
+Four things stop pagination that way rather than failing the endpoint, so what
 *was* read still monitors the API: a cap, a next link pointing at **another
-host**, and a link **already fetched**. The host restriction is deliberate — the
+host**, a link **already fetched**, and — where the agent counts — a page that
+**repeats the one before it**. A cap reached where the agent counts means the
+last page was full and nothing said it was the last; set a page size or a total
+path and an API with exactly as many pages as the cap reads as complete. The host restriction is deliberate — the
 response body must not decide where the Checkmk server sends an authenticated
 request, which is the same SSRF shape the *Follow HTTP redirects* switch closes
 — and a repeated link means the API is pointing at itself, which would
@@ -920,6 +959,18 @@ computed*: where an API offers one, a plain field on `total` is cheaper than
 walking the pages — pagination is for the cases where the number you need is
 not in the document (a condition, a sum, one service per element).
 
+An API that offers no link, only `?offset=` and `?limit=`:
+
+```json
+{"results": [{"name": "web-1", "healthy": true}, "..."], "count": 312}
+```
+
+Choose **No link: count the elements** — parameter `offset`, page size `100`
+sent as `limit`, total at `count`, collection `results` — and the agent asks for
+`?offset=0&limit=100`, `?offset=100&limit=100`, … and stops after the fourth
+page, when 312 elements have been read. A `results[*].healthy` field then
+creates a service for all 312 nodes.
+
 ### Monitoring a counter's rate
 
 Many APIs only expose ever-growing totals, where the interesting number is the
@@ -1207,9 +1258,10 @@ cmk_addons/plugins/json_api/
   object-valued name field - from the sample, before the rule is saved
 - A per-second rate needs two checks before it can be computed, so a counter
   field is uninformative on its first check (and after the counter resets)
-- Pagination needs a next-page **link** (in the body or the `Link` header): an
-  API that only accepts `?page=N` until a page comes back empty, or one that
-  pages by an `offset` the client has to compute, is not followed
+- Pagination follows a next-page **link** or counts a **page number** / an
+  **offset**: an API that hands back a bare cursor token (`"next_cursor":
+  "abc"`) the client must put into a query parameter itself, or one that pages
+  by a request *body* field, is not followed
 - The in-site wizard's review step does not preview an aggregated value, a rate
   or an age: which aggregation was picked is a hashed ident on the form's wire
   and a rate needs two checks, so it says what the site will compute instead of
