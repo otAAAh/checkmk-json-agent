@@ -1595,6 +1595,7 @@ def test_process_endpoint_returns_a_record(agent, monkeypatch):
         "pages": 1,
         "elements": None,
         "pagination_stopped": None,
+        "pagination_end": None,
         "body": None,
         "body_truncated": False,
         "body_size": None,
@@ -3874,6 +3875,189 @@ def test_an_api_that_ignores_the_parameter_is_not_read_twice(agent, monkeypatch)
     assert meta["pages"] == 1
     assert "repeated page 1" in meta["pagination_stopped"]
     assert "'pg'" in meta["pagination_stopped"]
+
+
+def test_a_capped_page_size_is_not_mistaken_for_the_last_page(agent, monkeypatch):
+    # The rule asks for 5 per page, the API caps it at 2 and says nothing: page 1
+    # is short of what was asked, but not of anything the API has sent - taking
+    # it as the last page would report 2 of 5 elements as the whole collection.
+    seen = _paged(
+        agent,
+        monkeypatch,
+        {
+            "http://api/jobs?offset=0&limit=5": _items(1, 2),
+            "http://api/jobs?offset=2&limit=5": _items(3, 4),
+            "http://api/jobs?offset=4&limit=5": _items(5),
+        },
+    )
+    doc, error, meta = agent._fetch(
+        _counted("offset", parameter="offset", page_size=5, size_parameter="limit"), None
+    )
+    assert error is None
+    assert [job["id"] for job in doc["items"]] == [1, 2, 3, 4, 5]
+    # Page 3 is short of page 2 as well: THAT is the last page, with no request
+    # for a fourth.
+    assert len(seen) == 3
+    assert (meta["pages"], meta["pagination_stopped"], meta["pagination_end"]) == (3, None, None)
+
+
+def test_a_first_page_short_of_the_page_size_asks_once_more(agent, monkeypatch):
+    # The price of never undercounting: a collection that fits one page costs
+    # the request for the (empty) second one.
+    seen = _paged(
+        agent,
+        monkeypatch,
+        {"http://api/jobs?page=1": _items(1), "http://api/jobs?page=2": _items()},
+    )
+    doc, error, meta = agent._fetch(_counted("page_number", parameter="page", page_size=5), None)
+    assert error is None and len(doc["items"]) == 1
+    assert len(seen) == 2 and meta["pagination_stopped"] is None
+
+
+@pytest.mark.parametrize("status", [404, 416])
+def test_a_counted_page_past_the_end_may_answer_no_such_page(agent, monkeypatch, status):
+    # Django REST Framework and friends: the page after the last one is a 404
+    # 'Invalid page.', not an empty page. Where the agent counts, it asks for
+    # that page whenever nothing said the previous one was the last.
+    _paged(
+        agent,
+        monkeypatch,
+        {"http://api/jobs?page=1": _items(1, 2), "http://api/jobs?page=2": _items(3, 4)},
+        status={"http://api/jobs?page=3": status},
+    )
+    doc, error, meta = agent._fetch(_counted("page_number", parameter="page"), None)
+    # The endpoint works, and the collection is whole - not UNKNOWN.
+    assert error is None
+    assert [job["id"] for job in doc["items"]] == [1, 2, 3, 4]
+    assert meta["pages"] == 2 and meta["pagination_stopped"] is None
+    # ... but how the end was recognised is said, for whoever doubts the count.
+    assert meta["pagination_end"] == f"page 3 answered HTTP {status}"
+
+
+@pytest.mark.parametrize("status", [400, 401, 403, 500])
+def test_other_failures_of_a_counted_page_still_fail_the_endpoint(agent, monkeypatch, status):
+    # A 401/403/5xx is a real failure, and a 400 is as likely an API refusing to
+    # page past a window with the rest still there: half a collection must not
+    # pass for all of it.
+    _paged(
+        agent,
+        monkeypatch,
+        {"http://api/jobs?page=1": _items(1), "http://api/jobs?page=2": _items(2)},
+        status={"http://api/jobs?page=2": status},
+    )
+    doc, error, _meta = agent._fetch(_counted("page_number", parameter="page"), None)
+    assert doc is None and error == f"Page 2 failed: HTTP {status}"
+
+
+def test_a_404_past_a_link_still_fails_the_endpoint(agent, monkeypatch):
+    # A next link is the API's own promise of a page, so a 404 behind one is
+    # broken, not the end.
+    _paged(agent, monkeypatch, {"http://api/jobs": _page([{"id": 1}], "http://api/jobs?page=2")})
+    doc, error, _meta = agent._fetch(PAGINATED, None)
+    assert doc is None and error == "Page 2 failed: HTTP 404"
+
+
+@pytest.mark.parametrize(
+    ("body", "end"),
+    [
+        ({"items": None}, "page 2 has no collection at 'items'"),
+        ({"error": "out of range"}, "page 2 has no collection at 'items'"),
+        ({"items": {}}, "page 2 carried an empty dict"),
+    ],
+    ids=["null", "missing", "empty-other-kind"],
+)
+def test_a_counted_page_past_the_end_may_carry_no_collection(agent, monkeypatch, body, end):
+    _paged(
+        agent,
+        monkeypatch,
+        {
+            "http://api/jobs?page=1": _items(1, 2),
+            "http://api/jobs?page=2": json.dumps(body).encode(),
+        },
+    )
+    doc, error, meta = agent._fetch(_counted("page_number", parameter="page"), None)
+    assert error is None and [job["id"] for job in doc["items"]] == [1, 2]
+    assert meta["pages"] == 1 and meta["pagination_stopped"] is None
+    assert meta["pagination_end"] == end
+
+
+def test_a_counted_page_with_the_wrong_kind_of_content_still_fails(agent, monkeypatch):
+    # Not empty: a page that carries something, only not a collection that can be
+    # merged, is a broken page, whatever the mode.
+    _paged(
+        agent,
+        monkeypatch,
+        {
+            "http://api/jobs?page=1": _items(1),
+            "http://api/jobs?page=2": json.dumps({"items": {"a": 1}}).encode(),
+        },
+    )
+    doc, error, _meta = agent._fetch(_counted("page_number", parameter="page"), None)
+    assert doc is None and error.startswith("Page 2 cannot be merged")
+
+
+def test_a_repeat_after_a_working_page_is_the_end(agent, monkeypatch):
+    seen = []
+
+    def fake_request(_self, _method, url, **_kwargs):
+        seen.append(url)
+        # An API that clamps the page number: page 3 of 2 is page 2 again.
+        n = min(int(url.rsplit("=", 1)[1]), 2)
+        return _FakeResponse(body=_items(2 * n - 1, 2 * n), url=url)
+
+    monkeypatch.setattr(agent.requests.Session, "request", fake_request)
+    doc, error, meta = agent._fetch(_counted("page_number", parameter="page"), None)
+    # Page 2 differed from page 1, so the parameter is read: the repeat is the
+    # end, not merged twice and not WARN on every check.
+    assert error is None and [job["id"] for job in doc["items"]] == [1, 2, 3, 4]
+    assert len(seen) == 3
+    assert meta["pages"] == 2 and meta["pagination_stopped"] is None
+    assert meta["pagination_end"] == "page 3 repeated page 2"
+
+
+def test_offsets_start_where_the_api_does(agent, monkeypatch):
+    # SCIM numbers its elements from 1 ('startIndex=1'): starting at 0 would read
+    # one element twice on every page.
+    seen = _paged(
+        agent,
+        monkeypatch,
+        {
+            "http://api/Users?startIndex=1": _items(1, 2),
+            "http://api/Users?startIndex=3": _items(3),
+            "http://api/Users?startIndex=4": _items(),
+        },
+    )
+    doc, error, _meta = agent._fetch(
+        {
+            "url": "http://api/Users",
+            "pagination": {
+                "next": ["offset", {"parameter": "startIndex", "start": 1}],
+                "items": "items",
+            },
+        },
+        None,
+    )
+    assert error is None and [job["id"] for job in doc["items"]] == [1, 2, 3]
+    assert seen[:2] == ["http://api/Users?startIndex=1", "http://api/Users?startIndex=3"]
+
+
+def test_an_offset_without_a_start_starts_at_zero(agent):
+    # Offset rules from before the start could be set, and the server-side
+    # call's null for an unset one.
+    for settings in ({"parameter": "offset"}, {"parameter": "offset", "start": None}):
+        endpoint = {
+            "url": "http://api/jobs",
+            "pagination": {"next": ["offset", settings], "items": "items"},
+        }
+        assert agent._first_page_url(endpoint) == "http://api/jobs?offset=0"
+    page = {
+        "url": "http://api/jobs",
+        "pagination": {
+            "next": ["page_number", {"parameter": "page", "start": None}],
+            "items": "items",
+        },
+    }
+    assert agent._first_page_url(page) == "http://api/jobs?page=1"
 
 
 def test_counted_pages_follow_the_redirected_url(agent, monkeypatch):

@@ -386,23 +386,14 @@ def _validate_counted_pages(value: Mapping[str, object]) -> None:
         )
 
 
-def _counted_pages(parameter_prefill: str, start: bool) -> Dictionary:
+def _counted_pages(parameter_prefill: str, start: DictElement) -> Dictionary:
     """The settings of the two modes in which the agent counts the pages itself.
 
-    ``start`` adds the first page's number: a page count starts where the API's
-    does (1, or 0 for a zero-based one), while an offset always starts at 0.
+    ``start`` is where counting starts, which differs by mode: a page number is
+    required (1, or 0 for a zero-based API), an offset is optional - 0 unless the
+    API numbers its elements from 1, and offset rules from before it existed
+    have none.
     """
-    first_page = {
-        "start": DictElement(
-            required=True,
-            parameter_form=Integer(
-                title=Title("Number of the first page"),
-                help_text=Help("1 for most APIs; 0 where the API counts from zero."),
-                prefill=DefaultValue(1),
-                custom_validate=(validators.NumberInRange(min_value=0),),
-            ),
-        )
-    }
     elements = {
         "parameter": DictElement(
             required=True,
@@ -418,16 +409,18 @@ def _counted_pages(parameter_prefill: str, start: bool) -> Dictionary:
                 custom_validate=(_validate_query_parameter,),
             ),
         ),
-        **(first_page if start else {}),
+        "start": start,
         "page_size": DictElement(
             required=False,
             parameter_form=Integer(
                 title=Title("Page size"),
                 help_text=Help(
-                    "How many elements a full page carries. A page with fewer is "
-                    "the last one, which saves the request for the empty page "
-                    "after it. Leave it unset where the API decides and does not "
-                    "say: then an empty page is what ends pagination."
+                    "How many elements a full page carries. A page with fewer - "
+                    "and fewer than a page before it, since an API may cap the "
+                    "size it is asked for - is the last one, which saves the "
+                    "request for the empty page after it. Leave it unset where "
+                    "the API decides and does not say: then an empty page is "
+                    "what ends pagination."
                 ),
                 prefill=InputHint(100),
                 custom_validate=(validators.NumberInRange(min_value=1),),
@@ -2127,7 +2120,20 @@ def _endpoint() -> Dictionary:
                                         title=Title("No link: count the pages ('?page=2')"),
                                         parameter_form=_counted_pages(
                                             parameter_prefill="page",
-                                            start=True,
+                                            start=DictElement(
+                                                required=True,
+                                                parameter_form=Integer(
+                                                    title=Title("Number of the first page"),
+                                                    help_text=Help(
+                                                        "1 for most APIs; 0 where the API "
+                                                        "counts from zero."
+                                                    ),
+                                                    prefill=DefaultValue(1),
+                                                    custom_validate=(
+                                                        validators.NumberInRange(min_value=0),
+                                                    ),
+                                                ),
+                                            ),
                                         ),
                                     ),
                                     CascadingSingleChoiceElement(
@@ -2135,7 +2141,23 @@ def _endpoint() -> Dictionary:
                                         title=Title("No link: count the elements ('?offset=50')"),
                                         parameter_form=_counted_pages(
                                             parameter_prefill="offset",
-                                            start=False,
+                                            start=DictElement(
+                                                required=False,
+                                                parameter_form=Integer(
+                                                    title=Title("Offset of the first element"),
+                                                    help_text=Help(
+                                                        "Unset, counting starts at 0. Set 1 "
+                                                        "where the API numbers the elements "
+                                                        "from one, such as SCIM's "
+                                                        "'startIndex' - otherwise every page "
+                                                        "after the first repeats one element."
+                                                    ),
+                                                    prefill=DefaultValue(1),
+                                                    custom_validate=(
+                                                        validators.NumberInRange(min_value=0),
+                                                    ),
+                                                ),
+                                            ),
                                         ),
                                     ),
                                 ],

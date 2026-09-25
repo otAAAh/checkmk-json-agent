@@ -373,6 +373,11 @@ class EndpointStatus:
     pages: int = 1
     elements: int | None = None
     pagination_stopped: str | None = None
+    # Where the agent counted the pages, how it recognised the end when that
+    # took an inference - a 404, or the last page once more, in answer to the
+    # request after it. The collection is complete; this says why it is taken
+    # to be.
+    pagination_end: str | None = None
     # The raw response, for an endpoint configured to report it: the body as it
     # came off the wire (already capped and secret-stripped by the agent), how
     # long it really was, and whether what is here is only its beginning. None
@@ -618,6 +623,7 @@ def _endpoint_statuses(raw: object) -> dict[str, EndpointStatus]:
             pages=_optional_int(record.get("pages")) or 1,
             elements=_optional_int(record.get("elements")),
             pagination_stopped=_optional_str(record.get("pagination_stopped")),
+            pagination_end=_optional_str(record.get("pagination_end")),
             body=_optional_str(record.get("body")),
             body_truncated=bool(record.get("body_truncated")),
             body_size=_optional_int(record.get("body_size")),
@@ -1551,6 +1557,13 @@ def check_json_api_endpoint(
         yield Result(
             state=State.OK,
             notice=f"Pages read: {endpoint.pages}{elements}",
+        )
+    if endpoint.pagination_end:
+        # OK: the collection is whole. In the details, so that an end taken from
+        # a 404 can be checked by someone who doubts the count.
+        yield Result(
+            state=State.OK,
+            notice=f"End of the collection: {endpoint.pagination_end}",
         )
     if endpoint.pagination_stopped:
         # A further page existed and was not read, so every service built from

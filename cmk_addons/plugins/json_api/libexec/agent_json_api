@@ -1064,11 +1064,12 @@ def _counted_source(spec: dict) -> dict | None:
     an API is free to lower).
 
     What ends it, since there is no absent link to say so: a page whose
-    collection is empty, a page shorter than ``page_size`` (when the rule states
-    one), or the elements read reaching the number at ``total`` (when the rule
-    names a path to one). Without a page size or a total, the last page is only
-    known by the empty one after it - one extra request, but never a wrong
-    answer.
+    collection is empty, a page shorter than ``page_size`` AND than a page before
+    it (see ``_counted_done``), or the elements read reaching the number at
+    ``total`` (when the rule names a path to one). Without those, the last page
+    is only known by the request after it - which an API may also answer with a
+    404, or with the last page once more (see ``_follow_pagination``). One extra
+    request, but never a wrong answer.
     """
     raw = spec.get("next")
     if not isinstance(raw, (list, tuple)) or len(raw) != 2:
@@ -1085,14 +1086,13 @@ def _counted_source(spec: dict) -> dict | None:
     return {
         "mode": mode,
         "parameter": parameter.strip(),
-        # A page count starts where the API's does: 1 almost everywhere, 0 for
-        # the zero-based ones. An offset always starts at the first element.
+        # Both count from where the API does. A page number from 1 almost
+        # everywhere (0 for the zero-based ones); an offset from 0, except for the
+        # APIs that number the elements from 1 (SCIM's 'startIndex') - where
+        # starting at 0 reads one element twice on every page.
         "start": (
             int(start)
-            if mode == "page_number"
-            and isinstance(start, (int, float))
-            and not isinstance(start, bool)
-            and start >= 0
+            if isinstance(start, (int, float)) and not isinstance(start, bool) and start >= 0
             else (1 if mode == "page_number" else 0)
         ),
         "page_size": _positive_int(value.get("page_size")),
@@ -1125,6 +1125,30 @@ def _with_query(url: str, values: dict[str, str], drop: Iterable[str] = ()) -> s
     return urlunsplit(split._replace(query="&".join(kept)))
 
 
+# The answers to a request past a counted collection's last page that mean 'no
+# such page' rather than a failure: 404 Not Found (Django REST Framework's
+# 'Invalid page.', and most hand-written APIs) and 416 Range Not Satisfiable (an
+# offset beyond the end). Deliberately no 400: an API refusing to page past a
+# window (Elasticsearch's 10000) answers 400 with the rest still there.
+_PAST_THE_END_STATUSES = frozenset({404, 416})
+
+
+def _no_further_page(found: bool, addition: object, container: object) -> bool:
+    """Whether a counted page's collection says 'there is none' in another way.
+
+    No collection at all, a null one, or an empty container of the other kind
+    (``{}`` where the pages carry a list). An empty collection of the SAME kind
+    is merged like any page and ends it through ``_counted_done``.
+    """
+    if not found or addition is None:
+        return True
+    return (
+        isinstance(addition, (list, dict))
+        and not addition
+        and isinstance(addition, list) != isinstance(container, list)
+    )
+
+
 def _counted_params(counted: dict, position: int) -> dict[str, str]:
     """The query parameters that request the page at ``position``."""
     params = {counted["parameter"]: str(position)}
@@ -1151,16 +1175,30 @@ def _first_page_url(endpoint: dict) -> str:
     return _with_query(url, _counted_params(counted, counted["start"]))
 
 
-def _counted_done(counted: dict, document: object, received: int, read: int) -> bool:
+def _counted_done(
+    counted: dict, document: object, received: int, read: int, largest_before: int
+) -> bool:
     """Whether the page just read was the last one.
 
     ``received`` is how many elements that page carried, ``read`` how many all
-    pages have carried so far. A 'total' that is absent or not a number decides
-    nothing: the other two signals still end it.
+    pages have carried so far, ``largest_before`` the most any EARLIER page
+    carried (0 for the first page). A 'total' that is absent or not a number
+    decides nothing: the other signals still end it.
+
+    A short page is only the last one if it is short of what the API actually
+    sent before, not just of the page size the rule asked for: an API is free to
+    cap it ('limit=500' answered with 100), and treating its first capped page
+    as the last would report 100 of 2000 elements as the whole collection. So
+    the first page never ends it by being short - at most one extra request,
+    never an undercount.
     """
     if received == 0:
         return True
-    if counted["page_size"] is not None and received < counted["page_size"]:
+    if (
+        counted["page_size"] is not None
+        and received < counted["page_size"]
+        and received < largest_before
+    ):
         return True
     if counted["total"] is not None:
         found, total = _resolve_path(document, counted["total"])
@@ -1359,12 +1397,18 @@ def _follow_pagination(
     # again to every page.
     previous: object = copy.copy(container)
     received = read = _container_len(container)
+    largest_before = 0
     position = counted["start"] if counted is not None else 0
+    # How the end was recognised, where that is worth saying: an API answering
+    # the request after its last page with a 404, no collection, or the last page
+    # once more. The collection is complete - this is not 'pagination_stopped' -
+    # but it is an inference the operator should be able to see.
+    ended: str | None = None
     auth_names = tuple(request_kwargs.get("params") or ())
 
     while True:
         if counted is not None:
-            if _counted_done(counted, page_document, received, read):
+            if _counted_done(counted, page_document, received, read, largest_before):
                 break
             position += 1 if counted["mode"] == "page_number" else received
             candidate = _with_query(served, _counted_params(counted, position), auth_names)
@@ -1403,6 +1447,21 @@ def _follow_pagination(
                 status = response.status_code
                 if not (200 <= status < 300 or status in accepted):
                     reason_phrase = getattr(response, "reason", "") or ""
+                    if counted is not None and status in _PAST_THE_END_STATUSES:
+                        # Where the agent counts, it asks for the page after the
+                        # last one unless something told it not to, and many APIs
+                        # answer that with 'no such page' (Django REST
+                        # Framework's 404 'Invalid page.'). Page 1 succeeded with
+                        # the same parameters, so this is the end of the
+                        # collection, not a broken endpoint. Only these codes: a
+                        # 400 is as likely a window the API will not page past
+                        # (with the rest still there), a 401/403/5xx a real
+                        # failure.
+                        ended = (
+                            f"page {page} answered HTTP {status}"
+                            f"{f' {reason_phrase}' if reason_phrase else ''}"
+                        )
+                        break
                     return (
                         f"Page {page} failed: HTTP {status}"
                         f"{f' {reason_phrase}' if reason_phrase else ''}",
@@ -1425,18 +1484,37 @@ def _follow_pagination(
         except ValueError as exc:
             return f"Page {page} is not valid JSON: {exc}", False
         found, addition = _resolve_path(page_document, items)
+        if counted is not None and _no_further_page(found, addition, container):
+            # Past the end, some APIs drop the collection or null it instead of
+            # sending an empty one. Where the agent counts, that request was a
+            # guess at a further page, so this is the answer 'there is none' -
+            # not a malformed page. (A link is the API's own promise of a page,
+            # so there it still fails.)
+            ended = (
+                f"page {page} carried an empty {type(addition).__name__}"
+                if found and addition is not None
+                else f"page {page} has no collection at '{items or '$'}'"
+            )
+            break
         if not found:
             return f"Page {page} has no collection at '{items or '$'}'", False
         if counted is not None and addition and addition == previous:
-            # The same elements again: the API does not read the parameter (a
-            # misspelt name is the usual reason) and would answer the first page
-            # until the page limit, every copy merged in. Not merged, so what is
-            # reported is the page that is real - and said to be incomplete,
-            # since whether there is more is exactly what cannot be told.
-            stopped = (
-                f"page {page} repeated page {pages} - the API does not seem to "
-                f"read the '{counted['parameter']}' parameter"
-            )
+            if pages == 1:
+                # Page 2 is page 1 again: the API does not read the parameter (a
+                # misspelt name is the usual reason) and would answer the first
+                # page until the page limit, every copy merged in. Not merged, so
+                # what is reported is the page that is real - and said to be
+                # incomplete, since whether there is more is exactly what cannot
+                # be told.
+                stopped = (
+                    f"page {page} repeated page {pages} - the API does not seem to "
+                    f"read the '{counted['parameter']}' parameter"
+                )
+            else:
+                # Page 2 differed from page 1, so the parameter IS read. A repeat
+                # later is an API answering past its end with the last page once
+                # more (a clamped page number): the end, not merged a second time.
+                ended = f"page {page} repeated page {pages}"
             break
         if (mismatch := _merge_page(container, addition)) is not None:
             return f"Page {page} cannot be merged: {mismatch}", False
@@ -1445,14 +1523,18 @@ def _follow_pagination(
         seen.add(next_url)
         current_url = next_url
         previous = addition
+        largest_before = max(largest_before, received)
         received = _container_len(addition)
         read += received
 
     if stopped is not None:
         _debug(debug, f"  pagination stopped after {pages} pages: {stopped}")
+    if ended is not None:
+        _debug(debug, f"  end of the collection after {pages} pages: {ended}")
     meta["pages"] = pages
     meta["elements"] = _container_len(container)
     meta["pagination_stopped"] = stopped
+    meta["pagination_end"] = ended
     # What the endpoint really read, across every page: the response size is a
     # cost the operator is watching, and one page of it is not the cost.
     meta["size"] = total_bytes
@@ -2612,6 +2694,9 @@ def _endpoint_record(
         "pages": meta.get("pages", 1),
         "elements": meta.get("elements"),
         "pagination_stopped": meta.get("pagination_stopped"),
+        # How a counted collection's end was recognised, where that took an
+        # inference (a 404 past the last page, ...). None when it did not.
+        "pagination_end": meta.get("pagination_end"),
         # The raw response, for the endpoints that opted in: the body as it came
         # off the wire (capped, secret-stripped) and the response headers
         # (credential-bearing ones masked). None/absent means "not requested",
