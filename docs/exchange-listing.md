@@ -32,10 +32,13 @@ included. One rule. Any API. Done.
   reports 25 however long the queue is. Say where the next page's URL is (a
   field in the body, or the RFC 8288 `Link` header) and which collection to
   merge, and the pages become one document that the wildcards, aggregations and
-  labels see whole. Capped in pages and elements, a link to another host is
-  refused, and where a cap left a page behind the endpoint's own service says
-  the collection is **incomplete** instead of reporting part of it as if it were
-  all of it.
+  labels see whole. An API with **no next-page link** works too: the agent
+  counts the pages itself, by **page number** (`?page=2`) or by **offset**
+  (`?offset=50&limit=25`), and recognises the end the way real APIs signal it —
+  an empty or short page, a total in the body, a 404 past the last page.
+  Capped in pages and elements, a link to another host is refused, and where a
+  cap left a page behind the endpoint's own service says the collection is
+  **incomplete** instead of reporting part of it as if it were all of it.
 - 🔍 **Filter elements by a condition** — restrict a `[*]` wildcard or an
   aggregation to the elements that match: one service per node whose `status` is
   *not* `ok`, or a count of only the pods that aren't `Running`
@@ -109,6 +112,13 @@ included. One rule. Any API. Done.
   scaled to the field's own **critical level**, so it reads as "how close to
   critical" rather than against a maximum nobody can know for a JSON value.
   Where a field has no levels it falls back to an open range for its unit.
+- 📏 **Units that match the reading** — besides counts, bytes, durations and
+  percentages, a field can be a **rate** (requests/s, bytes/s, bits/s), a
+  **temperature** (°C), a **voltage**, a **current**, a **power** or a
+  **frequency**. The summary, the levels line and the graph all speak that unit
+  with the right prefix (`1.50 kW`, `250.00 Mbit/s`), and dashboard widgets get
+  a real unit to draw. The value is never converted behind your back: a latency
+  in milliseconds is *Seconds* with the transform `value / 1000`.
 - 📐 **State the value range** — a battery is 0–100, a queue with a cap is 0 to
   that cap. Say so and Checkmk stops guessing: the graph keeps a **steady
   scale** instead of rescaling to whatever the last hour contained, a **gauge
