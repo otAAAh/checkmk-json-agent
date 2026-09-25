@@ -143,9 +143,12 @@ the 3.0 line.
 - **A Perf-O-Meter on every service**: the bar in the service list is scaled to
   the field's own CRIT level where one is configured — so it reads as "how close
   to critical", the only scale a JSON value really has — and falls back to an
-  open range for the unit otherwise. A service built from several fields has
-  none: its metrics are named after the fields at runtime — and neither has a
-  field whose **Metric name** is set in the rule, for the same reason
+  open range for the unit otherwise. A temperature, a voltage or a current can
+  be negative, so their bar never starts at zero and skips the CRIT scale: it
+  uses the stated value range, else an open range that still shows a reading
+  below zero. A service built from several fields has none: its metrics are
+  named after the fields at runtime — and neither has a field whose **Metric
+  name** is set in the rule, for the same reason
 - **String matching**: two modes — either a regex the value must fully match
   (with a configurable state when it does not, default CRIT), or map the value
   to a state by matching it against separate OK / WARN / CRIT regexes (tried in
