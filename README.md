@@ -239,7 +239,7 @@ Each **field to monitor** has:
 | **Service name** | Becomes the service (shown as `JSON <name>`) — or, with a shared service set below, the name of this field's *line* inside it |
 | **Report in a shared service named** | Optional: report this field into one shared service alongside the other fields naming it, instead of creating one of its own. The service's state is the **worst** of its lines. See [One service for several fields](#one-service-for-several-fields) |
 | **JSON path** | Dotted path; use `[*]` for array discovery |
-| **Per-element name suffix** | For `[*]`: field within each element, appended to the service name to tell the per-element services apart (defaults to the array index); it does not replace the service name |
+| **Per-element name suffix** | For `[*]`: field within each element, appended to the service name to tell the per-element services apart (defaults to the array index); it does not replace the service name. A value two elements share is told apart by position (`web [0]`, `web [3]`), which the Explorer and the wizard warn about from the sample |
 | **Create one host per element, named by this field** | Optional, for `[*]`: field within each element holding a **Checkmk host name**. Each element then becomes a piggyback host carrying this service under its plain name (the host says which element it is, so no name suffix is added). Set the same field on several fields of the endpoint to collect them on the same hosts. Only host-name-safe characters are kept (letters, digits, `-`, `_`, `.`); anything else becomes `_`. An element whose field is missing keeps its service on the polling host. **The hosts must exist in Checkmk** or the data is held and never monitored — see [One host per element](#one-host-per-element) |
 | **Service labels** | Optional: attach Checkmk service labels to *this* service from response fields, each key prefixed with `json_api/`. For a `[*]` path the value is resolved within each element (e.g. `name`), so each per-element service gets its own label; otherwise from the response root. Host-wide facts go in the endpoint's **Host labels** instead. Set at discovery, so pick stable, low-cardinality fields |
 | **Aggregate a collection into one value** | Optional: `count` (number of elements) / `sum` / `avg` / `min` / `max` over the array or object at the path — or over the values a `[*]` wildcard expands to, which then yields *one* service instead of one per element. The result is a number, so unit, levels, transform and metric all apply. Where the `[*]` path names a field, every function — `count` included — only sees the elements that have it (so `nodes[*].load` counts the nodes reporting a load, and a path no element has becomes UNKNOWN). A path that is neither an array nor an object becomes UNKNOWN, as does `avg`/`min`/`max` over no elements (`sum` over none is `0`) |
@@ -1201,7 +1201,10 @@ cmk_addons/plugins/json_api/
 - A fixed set of units (`count` / `bytes` / `seconds` / `percent`); other units
   fall back to the unit-less `json_api_value` metric
 - `label_path` uniqueness is enforced by index-suffixing at runtime, not
-  validated at config time (the JSON isn't known then)
+  validated by Setup (the JSON isn't known then): a repeated name becomes
+  `web [0]`, `web [3]`, which moves with the API's element order. The JSON API
+  Explorer and the in-site wizard warn about a repeat - and a missing, empty or
+  object-valued name field - from the sample, before the rule is saved
 - A per-second rate needs two checks before it can be computed, so a counter
   field is uninformative on its first check (and after the counter resets)
 - Pagination needs a next-page **link** (in the body or the `Link` header): an

@@ -221,6 +221,13 @@ const FIXTURE_OAUTH2 = {
   },
 };
 
+// The element-naming cases the agent and the wizard answer too (see
+// tests/test_label_path_parity.py): the Explorer's mirror must name every
+// '[*]' element as the site will, and flag the same problems with those names.
+const LABEL_CASES = JSON.parse(
+  readFileSync(new URL("./fixtures/label_path_cases.json", import.meta.url), "utf8"),
+).cases;
+
 // Run the generator code with a known fixture and print the result. This block
 // shares the script's top-level scope, so it can see `state`, `valuePy`, etc.
 src += `
@@ -258,6 +265,19 @@ src += `
     pageNoItems: paginationObj({ page_mode: "body", page_next: "links.next", page_items: "" }),
     pageNoPath: paginationObj({ page_mode: "body", page_next: "", page_items: "items" }),
     pageOff: paginationObj({ page_mode: "", page_next: "links.next", page_items: "items" }),
+    labelCases: ${JSON.stringify(LABEL_CASES)}.map(c => elementLabels(c.document, c.path, c.label_path)),
+    // The warnings under 'Name suffix': a repeat, and the settings under which
+    // there is nothing to warn about (no element names reach a service).
+    labelWarnings: (() => {
+      const doc = { n: [{ id: "web", v: 1 }, { id: "db", v: 2 }, { id: "web", v: 3 }, { v: 4 }] };
+      const field = { path: "n[*].v", label_path: "id", aggregate: "", pbHost: "" };
+      return {
+        plain: labelPathWarnings(field, doc),
+        aggregated: labelPathWarnings({ ...field, aggregate: "sum" }, doc),
+        perHost: labelPathWarnings({ ...field, pbHost: "id" }, doc),
+        noSample: labelPathWarnings(field, null),
+      };
+    })(),
   };
   console.log(JSON.stringify(out));
 })();
