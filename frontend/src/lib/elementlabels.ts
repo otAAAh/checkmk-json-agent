@@ -89,13 +89,44 @@ function walk(node: Json, steps: Step[]): { value: Json } | undefined {
   let current = node
   for (const step of steps) {
     if (step.kind === 'key') {
-      if (!isRecord(current) || !(step.key in current)) return undefined
+      // Own keys only: `in` would also find 'constructor', 'toString', ...
+      if (!isRecord(current) || !Object.hasOwn(current, step.key)) return undefined
       current = current[step.key]!
     } else if (step.kind === 'index') {
       if (!Array.isArray(current) || step.index >= current.length) return undefined
       current = current[step.index]!
     } else {
       return undefined
+    }
+  }
+  return { value: current }
+}
+
+// The agent's _PATH_TOKEN, SCANNED the way its _resolve_path does it: the
+// tokens it finds are read and whatever lies between them is skipped, so
+// 'meta..name' is 'meta.name' and 'a[*]' looks for a key called '*'. The value
+// path goes through the strict tokenizePath on purpose (the picker must not
+// preview a path it did not understand), but a label path is typed by hand and
+// only the agent's reading of it decides the names - a stricter one here would
+// warn about names the site gets right.
+const AGENT_TOKEN = /\['([^']*)'\]|\["([^"]*)"\]|\[(\d+)\]|([^.[\]]+)/g
+
+/** The agent's _resolve_path, token for token: {value} when found. */
+function resolveAsAgent(node: Json, path: string): { value: Json } | undefined {
+  let cleaned = path.trim()
+  if (cleaned.startsWith('$.')) cleaned = cleaned.slice(2)
+  else if (cleaned.startsWith('$')) cleaned = cleaned.slice(1)
+  let current = node
+  for (const m of cleaned.matchAll(AGENT_TOKEN)) {
+    if (m[3] !== undefined) {
+      const index = Number(m[3])
+      if (!Array.isArray(current) || index >= current.length) return undefined
+      current = current[index]!
+    } else {
+      // Tested against undefined, not for truthiness: [''] is a key too.
+      const key = m[1] ?? m[2] ?? m[4]!
+      if (!isRecord(current) || !Object.hasOwn(current, key)) return undefined
+      current = current[key]!
     }
   }
   return { value: current }
@@ -128,10 +159,6 @@ export function resolveLabelled(root: Json, path: string, labelPath: string): La
     else groups[groups.length - 1]!.push(step)
   }
   // An empty label path is no label path (the agent tests it for truthiness).
-  // One the port cannot parse, or one with a wildcard of its own, can never
-  // name an element: every element falls back to its position.
-  const labelSteps = labelPath ? tokenizePath(labelPath) : null
-  const labelUsable = labelSteps !== null && !labelSteps.some((s) => s.kind === 'wildcard')
 
   const values: LabelledValue[] = []
   const expand = (node: Json, level: number, parts: string[], positions: string[]): void => {
@@ -146,7 +173,7 @@ export function resolveLabelled(root: Json, path: string, labelPath: string): La
     const at = (position: string): string => [...positions, position].join(' / ')
     const labels = pairs.map(([position, element]) => {
       if (!labelPath) return position
-      const found = labelUsable ? walk(element, labelSteps) : undefined
+      const found = resolveAsAgent(element, labelPath)
       if (!found) {
         issues.missing.push(at(position))
         return position
