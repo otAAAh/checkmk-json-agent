@@ -36,6 +36,11 @@ a person waiting is not the same job as an unattended check:
   wizard fetches one page. It does not hide that: the review step reads the
   endpoint's pagination setting straight off the rule being built and says the
   counts describe the first page, so no flag has to travel back from here.
+  That one page is still the agent's first page, though: where the agent counts
+  the pages itself (a page number or an offset), it asks for the first one with
+  the counting parameters set, and so does ``_first_page_url`` here - otherwise
+  the preview would show the API's default page size, not the one the rule
+  asks for.
 
 SECURITY: this performs an HTTP request from the Checkmk server to an
 operator-supplied URL — an SSRF vector, exactly like the agent itself. It is
@@ -48,7 +53,7 @@ from __future__ import annotations
 
 import json
 from typing import Any
-from urllib.parse import quote, quote_plus
+from urllib.parse import quote, quote_plus, unquote_plus, urlsplit, urlunsplit
 
 import requests
 from cmk.gui.http import request
@@ -277,6 +282,58 @@ def _access_token(params: dict[str, Any], conn: dict[str, Any]) -> str:
     return token
 
 
+def _with_query(url: str, values: dict[str, str]) -> str:
+    """``url`` with each of ``values`` set as a query parameter, replacing any.
+
+    The agent's ``_with_query``: built on the raw query string, so every
+    parameter the rule wrote that is not being set goes out byte for byte.
+    """
+    split = urlsplit(url)
+    kept = [
+        part
+        for part in split.query.split("&")
+        if part and unquote_plus(part.split("=", 1)[0]) not in values
+    ]
+    kept += [f"{quote_plus(name)}={quote_plus(value)}" for name, value in values.items()]
+    return urlunsplit(split._replace(query="&".join(kept)))
+
+
+def _first_page_url(conn: dict[str, Any]) -> str:
+    """The URL the agent's first request goes to (its ``_first_page_url``).
+
+    The rule's own URL, except where the agent counts the pages: then the first
+    page is asked for with the position and, when both are set, the page size.
+    Mirrors the agent's ``_counted_source`` defaults - a page number starts at
+    1, an offset at 0.
+    """
+    url = str(conn["url"])
+    pagination = conn.get("pagination")
+    source = pagination.get("next") if isinstance(pagination, dict) else None
+    if not (isinstance(source, (list, tuple)) and len(source) == 2):
+        return url
+    mode, value = source
+    if mode not in ("page_number", "offset") or not isinstance(value, dict):
+        return url
+    parameter = value.get("parameter")
+    if not (isinstance(parameter, str) and parameter.strip()):
+        return url
+    start = value.get("start")
+    if not (isinstance(start, int) and not isinstance(start, bool) and start >= 0):
+        start = 1 if mode == "page_number" else 0
+    params = {parameter.strip(): str(start)}
+    size = value.get("page_size")
+    size_parameter = value.get("size_parameter")
+    if (
+        isinstance(size, int)
+        and not isinstance(size, bool)
+        and size > 0
+        and isinstance(size_parameter, str)
+        and size_parameter.strip()
+    ):
+        params[size_parameter.strip()] = str(size)
+    return _with_query(url, params)
+
+
 def _perform_request(conn: dict[str, Any]) -> requests.Response:
     session = _session(conn)
     headers = {h["name"]: h["value"] for h in conn.get("headers", []) if isinstance(h, dict)}
@@ -304,7 +361,7 @@ def _perform_request(conn: dict[str, Any]) -> requests.Response:
 
     return session.request(
         method,
-        conn["url"],
+        _first_page_url(conn),
         params=query,
         data=body,
         headers=headers,

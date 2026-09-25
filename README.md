@@ -630,6 +630,10 @@ the endpoint from page one.
 > **The in-site wizard's preview shows one page.** It resolves against the
 > single response it fetched, so with pagination on, its element counts describe
 > the first page — the review step says so. The site itself merges the pages.
+> Where the agent counts the pages, that one page is requested the way the
+> agent requests its first: with the page number or offset, and the page size
+> when a size parameter is set — so the preview shows the page size the rule
+> asks for, not the API's default.
 
 ### One service for several fields
 
