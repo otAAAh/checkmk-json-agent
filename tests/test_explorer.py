@@ -513,6 +513,28 @@ def test_explorers_reserved_inventory_column_matches_the_rulesets():
     assert f'const INVENTORY_ROW_KEY = "{constant.value}"' in source
 
 
+def _ruleset_dict_keys(name: str) -> set[str]:
+    literal = _ruleset_assignment(name)
+    assert isinstance(literal, ast.Dict)
+    return {k.value for k in literal.keys if isinstance(k, ast.Constant) and k.value is not None}
+
+
+def test_explorers_units_match_the_rulesets():
+    """The unit dropdown offers exactly what Setup does, and flags a counter in
+    a unit Setup refuses for one."""
+    source = (_ROOT / "explorer" / "index.html").read_text()
+    block = re.search(r"const UNITS = \[(.*?)\];", source, re.S)
+    assert block, "the Explorer no longer declares UNITS"
+    units = set(re.findall(r'\["([a-z_]+)",', block.group(1)))
+    assert units == _ruleset_dict_keys("_UNIT_METRIC")
+
+    countable = re.search(r"const COUNTABLE_UNITS = new Set\(\[(.*?)\]\)", source, re.S)
+    assert countable, "the Explorer no longer declares COUNTABLE_UNITS"
+    assert set(re.findall(r'"([^"]+)"', countable.group(1))) == _ruleset_dict_keys(
+        "_UNIT_RATE_METRIC"
+    )
+
+
 def test_explorers_reserved_metrics_match_the_rulesets():
     call = _ruleset_assignment("_DECLARED_METRICS")  # frozenset({...})
     assert isinstance(call, ast.Call)

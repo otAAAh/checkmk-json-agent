@@ -94,6 +94,13 @@ def _first_match(perfometers_module, service_metrics: dict[str, set[str]]) -> st
         # A percentage without levels has a real upper bound of its own.
         ({"json_api_percent": set()}, "json_api_percent"),
         ({"json_api_percent": {"crit"}}, "json_api_percent_to_crit"),
+        # A measurement gets the same three variants as every other unit.
+        ({"json_api_celsius": {"min", "max"}}, "json_api_celsius_in_range"),
+        ({"json_api_watts": {"crit"}}, "json_api_watts_to_crit"),
+        ({"json_api_hertz": set()}, "json_api_hertz"),
+        # A throughput the API reports as a gauge records into the rate metric,
+        # so it gets the rate's bar.
+        ({"json_api_bytes_rate": set()}, "json_api_bytes_rate"),
         # A counter field reports a rate, and nothing else.
         ({"json_api_bytes_rate": {"crit"}}, "json_api_bytes_rate_to_crit"),
         # A timestamp field reports an age.

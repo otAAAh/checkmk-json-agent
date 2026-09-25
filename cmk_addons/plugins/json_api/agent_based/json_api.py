@@ -74,17 +74,37 @@ _ValueAs = tuple[str, object] | None
 # Maps the unit chosen in the rule to the metric defined in graphing/json_api.py.
 # ``None`` (no unit chosen, incl. rules from before units existed) keeps the
 # original unit-less "json_api_value" so existing metric history is preserved.
+#
+# A value the API already reports per second (a throughput, a request rate) is
+# the same quantity as the rate the check computes from a counter, so it shares
+# that metric: 'bytes_per_second' graphs exactly like a counter of bytes does.
+#
+# The value is never scaled: levels, the value range and the summary all speak
+# the unit the API reports in. That is why there is no 'milliseconds' here - a
+# latency in ms is the 'seconds' unit behind the transform 'value / 1000'.
 _UNIT_METRIC = {
     None: "json_api_value",
     "count": "json_api_count",
     "bytes": "json_api_bytes",
     "seconds": "json_api_seconds",
     "percent": "json_api_percent",
+    "per_second": "json_api_count_rate",
+    "bytes_per_second": "json_api_bytes_rate",
+    "bits_per_second": "json_api_bits_per_second",
+    "celsius": "json_api_celsius",
+    "volts": "json_api_volts",
+    "amperes": "json_api_amperes",
+    "watts": "json_api_watts",
+    "hertz": "json_api_hertz",
 }
 
 # A per-second rate is a different quantity from the counter it came from, so it
 # gets its own metric per unit (bytes -> B/s, ...) rather than polluting the
 # absolute value's history with a rate.
+#
+# Only the units something can be COUNTED in are here. A counter of a rate or of
+# a temperature is not a thing, and the ruleset refuses the combination; a rule
+# written by hand that asks for it gets the plain, unit-less rate.
 _UNIT_RATE_METRIC = {
     None: "json_api_rate",
     "count": "json_api_count_rate",
@@ -156,10 +176,52 @@ def _render_seconds(seconds: float) -> str:
 # summary/details (and the levels line), so "1572864" with unit=bytes reads as
 # "1.50 MiB" like the graph does - not just as a bare number. Units without a
 # dedicated renderer ("count", or none) fall back to the plain number.
+_SI_PREFIXES = (
+    (1e12, "T"),
+    (1e9, "G"),
+    (1e6, "M"),
+    (1e3, "k"),
+    (1.0, ""),
+    (1e-3, "m"),
+    (1e-6, "µ"),
+)
+
+
+def _render_si(symbol: str) -> Callable[[float], str]:
+    """Render with an SI prefix, the way the graph's SINotation does: '1.50 kW'.
+
+    Small values too - a current of 0.02 A reads as '20.00 mA' rather than
+    rounding to nothing.
+    """
+
+    def _render(number: float) -> str:
+        magnitude = abs(number)
+        factor, prefix = (1.0, "") if magnitude == 0 else _SI_PREFIXES[-1]
+        for candidate, candidate_prefix in _SI_PREFIXES:
+            if magnitude >= candidate:
+                factor, prefix = candidate, candidate_prefix
+                break
+        return f"{number / factor:.2f} {prefix}{symbol}"
+
+    return _render
+
+
+def _render_celsius(number: float) -> str:
+    return f"{number:.1f} °C"
+
+
 _UNIT_RENDER: dict[str, Callable[[float], str]] = {
     "bytes": render.bytes,
     "seconds": _render_seconds,
     "percent": render.percent,
+    "per_second": lambda number: f"{_fmt_rate(number)}/s",
+    "bytes_per_second": lambda number: f"{render.bytes(number)}/s",
+    "bits_per_second": _render_si("bit/s"),
+    "celsius": _render_celsius,
+    "volts": _render_si("V"),
+    "amperes": _render_si("A"),
+    "watts": _render_si("W"),
+    "hertz": _render_si("Hz"),
 }
 
 
@@ -175,7 +237,10 @@ def _rate_render_func(unit: object) -> Callable[[float], str]:
     instead of printing the full float repr - '20/s' rather than
     '19.999451493365736/s' - while staying accurate for tiny rates.
     """
-    base = _render_func(unit) or _fmt_rate
+    # Only a unit with a rate of its own lends it its rendering: a counter 'in
+    # bytes per second' would otherwise read '1.00 KiB/s/s'.
+    countable = isinstance(unit, str) and unit in _UNIT_RATE_METRIC
+    base = (_render_func(unit) if countable else None) or _fmt_rate
     return lambda number: f"{base(number)}/s"
 
 

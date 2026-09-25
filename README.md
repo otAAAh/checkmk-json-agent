@@ -135,6 +135,11 @@ the 3.0 line.
   table row per element. No service is created unless you ask for one
 - **Thresholds**: WARN/CRIT upper and lower levels for numeric values, exposed
   as a metric/graph
+- **A unit for the value**: count, bytes, seconds, percent, a rate per second,
+  bytes or bits per second, °C, volts, amperes, watts or hertz — the summary,
+  the levels line and the graph then read `1.50 MiB/s`, `41.2 °C` or `2.40 GHz`
+  instead of a bare number. The value itself is never converted: levels and the
+  value range are entered in the unit the API reports
 - **A Perf-O-Meter on every service**: the bar in the service list is scaled to
   the field's own CRIT level where one is configured — so it reads as "how close
   to critical", the only scale a JSON value really has — and falls back to an
@@ -248,7 +253,7 @@ Each **field to monitor** has:
 | **Aggregate a collection into one value** | Optional: `count` (number of elements) / `sum` / `avg` / `min` / `max` over the array or object at the path — or over the values a `[*]` wildcard expands to, which then yields *one* service instead of one per element. The result is a number, so unit, levels, transform and metric all apply. Where the `[*]` path names a field, every function — `count` included — only sees the elements that have it (so `nodes[*].load` counts the nodes reporting a load, and a path no element has becomes UNKNOWN). A path that is neither an array nor an object becomes UNKNOWN, as does `avg`/`min`/`max` over no elements (`sum` over none is `0`) |
 | **Only elements matching a condition** | Optional: for a `[*]` wildcard or an aggregation, keep only elements whose sub-field matches (path + operator equals/not-equals/regex/not-regex + value). Resolved within each element; an element missing the field is dropped. No effect without a wildcard or an aggregation |
 | **Interpret the value as** | Optional: *a counter* — monitor the change **per second** rather than the total (the first check, and any check after the counter went backwards, keeps the previous state because no rate can be computed yet); or *a timestamp* — monitor its **age in seconds** (format `auto` / epoch seconds / epoch milliseconds / ISO 8601; no time zone means UTC). The derived number is what the transform, levels and metric use; string matching does not apply to it |
-| **Unit** | Optional: `count` / `bytes` / `seconds` / `percent` — renders the value in the summary/details *and* the metric and graph with that unit (numeric values only) |
+| **Unit** | Optional: `count` / `bytes` / `seconds` / `percent` / `per second` / `bytes per second` / `bits per second` / `°C` / `volts` / `amperes` / `watts` / `hertz` — renders the value in the summary/details *and* the metric and graph with that unit (numeric values only). The value is not converted, so levels and the value range are in the API's own unit; a unit the API does not report as it stands goes through the transform first (a latency in milliseconds is `seconds` with `value / 1000`). A value the API already reports per second (`per second`, `bytes per second`) records into the same metric as a counter's rate. A **counter** takes only `count` / `bytes` / `seconds` / `percent` or no unit — its rate is that unit per second, so a rate or a measurement such as a temperature is refused for one |
 | **Value range** | Optional lowest/highest value this field can take (a battery is 0–100, a queue with a cap is 0–that cap). It never changes the state: it tells Checkmk what "full" means, so the graph keeps a steady scale instead of rescaling to whatever the last hour contained, a **gauge dashboard widget** has a dial to draw, and the service list's bar is filled against the real maximum. Either end may be given alone; with both ends the Perf-O-Meter uses the range, otherwise it falls back to the critical level |
 | **Metric name** | Optional: the name Checkmk stores this field's metric under. Unset, the plugin picks one — the unit's metric for a field with a service of its own (`json_api_bytes`), or that plus the line's name for a field in a shared service (`json_api_bytes_root_used`). Set it where the name has to be known in advance: the **Gauge**, **Single metric** and **Bar chart** dashboard widgets are bound to one metric *by name*. Letters, digits and underscores only, starting with a letter or a digit (Checkmk's own rule), and not one of this plugin's own metric names — a percentage named `json_api_bytes` would inherit that metric's unit and render as bytes, so Setup rejects it. **Two costs:** the service loses its Perf-O-Meter (every bar is declared against one of this plugin's metrics, so a name of your own matches none), and changing the name later starts a new history under it |
 | **Transform the numeric value** | Optional arithmetic expression on the variable `value` (e.g. `value / 1024 / 1024`), applied to a numeric value before levels and the metric; only numbers, parentheses and `+ - * /` are allowed |
@@ -1249,8 +1254,9 @@ cmk_addons/plugins/json_api/
 
 - Composite service names from nested `[*]` wildcards can grow long; Checkmk
   truncates very long service descriptions
-- A fixed set of units (`count` / `bytes` / `seconds` / `percent`); other units
-  fall back to the unit-less `json_api_value` metric
+- A fixed set of units (see **Unit** above); anything else is either converted
+  into one of them with the transform, or left unit-less on the `json_api_value`
+  metric
 - `label_path` uniqueness is enforced by index-suffixing at runtime, not
   validated at config time (the JSON isn't known then)
 - A per-second rate needs two checks before it can be computed, so a counter
