@@ -3,6 +3,26 @@
 All notable changes to this project, one section per released version.
 Generated from the git history by `scripts/gen_changelog.py`.
 
+## [0.22.0] - 2026-09-25
+
+### Features
+
+- More units for a field's metric ([#223](https://github.com/otAAAh/checkmk-json-agent/pull/223)) ([`4232b29`](https://github.com/otAAAh/checkmk-json-agent/commit/4232b29))
+- Follow page-number and offset pagination ([#222](https://github.com/otAAAh/checkmk-json-agent/pull/222)) ([`344cab9`](https://github.com/otAAAh/checkmk-json-agent/commit/344cab9))
+
+### Fixes
+
+- The label warnings cover the elements left on the polling host, and do not guess at rounded IDs ([#230](https://github.com/otAAAh/checkmk-json-agent/pull/230)) ([`f15dea0`](https://github.com/otAAAh/checkmk-json-agent/commit/f15dea0))
+- The wizard previews the agent's first page of a counted pagination ([#228](https://github.com/otAAAh/checkmk-json-agent/pull/228)) ([`e10d11b`](https://github.com/otAAAh/checkmk-json-agent/commit/e10d11b))
+- Counted pagination ends where the API ends, not where it seems to ([#227](https://github.com/otAAAh/checkmk-json-agent/pull/227)) ([`8c5f7f4`](https://github.com/otAAAh/checkmk-json-agent/commit/8c5f7f4))
+- The label warnings read a label path as the agent does ([#226](https://github.com/otAAAh/checkmk-json-agent/pull/226)) ([`7db12d3`](https://github.com/otAAAh/checkmk-json-agent/commit/7db12d3))
+- A negative reading keeps its bar, and the SI prefix follows the rounding ([#225](https://github.com/otAAAh/checkmk-json-agent/pull/225)) ([`bc0dae7`](https://github.com/otAAAh/checkmk-json-agent/commit/bc0dae7))
+- The Explorer and the wizard warn when a label_path names two elements alike ([#224](https://github.com/otAAAh/checkmk-json-agent/pull/224)) ([`70c0606`](https://github.com/otAAAh/checkmk-json-agent/commit/70c0606))
+
+### Other
+
+- Prepare 0.22.0 - announcement and refreshed listings ([#229](https://github.com/otAAAh/checkmk-json-agent/pull/229)) ([`934c8ac`](https://github.com/otAAAh/checkmk-json-agent/commit/934c8ac))
+
 ## [0.21.0] - 2026-09-23
 
 ### Fixes
