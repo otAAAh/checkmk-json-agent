@@ -211,6 +211,55 @@ def test_check_percent_unit_renders_with_symbol(check):
     assert "%" in _value_summary(check, "Load", section)
 
 
+@pytest.mark.parametrize(
+    "unit, value, metric_name, rendered",
+    [
+        # A value the API reports per second already is the same quantity as a
+        # counter's rate, and shares that metric and its rendering.
+        ("per_second", 12.5, "json_api_count_rate", "Value: 12.5/s"),
+        ("bytes_per_second", 1572864, "json_api_bytes_rate", "Value: 1.50 MiB/s"),
+        ("bits_per_second", 250_000_000, "json_api_bits_per_second", "Value: 250.00 Mbit/s"),
+        ("celsius", 41.25, "json_api_celsius", "Value: 41.2 °C"),
+        ("volts", 230.4, "json_api_volts", "Value: 230.40 V"),
+        ("amperes", 0.02, "json_api_amperes", "Value: 20.00 mA"),
+        ("watts", 1500, "json_api_watts", "Value: 1.50 kW"),
+        ("hertz", 2_400_000_000, "json_api_hertz", "Value: 2.40 GHz"),
+    ],
+)
+def test_the_further_units_name_and_render_the_value(check, unit, value, metric_name, rendered):
+    section = _section(check, [_entry("F", value=value, unit=unit)])
+    results = list(check.check_json_api("F", {}, section))
+    (metric,) = [r for r in results if isinstance(r, Metric)]
+    assert metric.name == metric_name
+    # The value is recorded as the API reported it: the unit is presentation.
+    assert metric.value == float(value)
+    assert _value_summary(check, "F", section) == rendered
+
+
+def test_an_si_unit_renders_zero_and_negatives(check):
+    render = check._render_si("W")
+    assert render(0) == "0.00 W"
+    assert render(-1500) == "-1.50 kW"
+    # Below the smallest prefix the value is still shown, not rounded away.
+    assert render(0.0000001) == "0.10 µW"
+
+
+def test_a_counter_in_a_unit_that_is_not_counted_gets_the_plain_rate(check, monkeypatch):
+    # Setup refuses the combination; a hand-written rule still gets a readable
+    # rate rather than '1.00 KiB/s/s' in a bandwidth metric.
+    store = {}
+    _counter_store(check, monkeypatch, store)
+    _fixed_clock(check, monkeypatch, 1000.0)
+    entry = _entry("T", value=0, unit="bytes_per_second", value_as=["counter", None])
+    list(check.check_json_api("T", {}, _section(check, [entry])))
+    _fixed_clock(check, monkeypatch, 1001.0)
+    entry = _entry("T", value=1024, unit="bytes_per_second", value_as=["counter", None])
+    results = list(check.check_json_api("T", {}, _section(check, [entry])))
+    (metric,) = [r for r in results if isinstance(r, Metric)]
+    assert metric.name == "json_api_rate"
+    assert any(isinstance(r, Result) and r.summary == "Rate: 1024/s" for r in results)
+
+
 def test_check_without_unit_shows_raw_number(check):
     # No unit: the summary keeps the plain number (no renderer applied).
     section = _section(check, [_entry("Raw", value=1572864)])

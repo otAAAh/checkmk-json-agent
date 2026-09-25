@@ -101,6 +101,8 @@ def test_the_rulesets_slug_matches_the_checks(ruleset, check):
         {"service": "Root used"},
         {"service": "Root used", "unit": "bytes"},
         {"service": "Root used", "unit": "percent"},
+        {"service": "Root used", "unit": "bytes_per_second"},
+        {"service": "Root used", "unit": "celsius"},
         {"service": "Root used", "unit": "count", "value_as": ["counter", None]},
         {"service": "Root used", "value_as": ["counter", None]},
         {"service": "Root used", "value_as": ["timestamp", {"format": "auto"}]},

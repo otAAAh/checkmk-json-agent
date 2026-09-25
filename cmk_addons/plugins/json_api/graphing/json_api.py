@@ -88,6 +88,52 @@ metric_json_api_percent_rate = metrics.Metric(
     color=metrics.Color.PURPLE,
 )
 
+# Measurements with a unit of their own. A value the API reports per second
+# already (requests/s, B/s) has no metric here: it is the same quantity as a
+# counter's rate and records into json_api_count_rate / json_api_bytes_rate.
+
+metric_json_api_bits_per_second = metrics.Metric(
+    name="json_api_bits_per_second",
+    title=Title("Bandwidth"),
+    unit=metrics.Unit(metrics.SINotation("bit/s")),
+    color=metrics.Color.DARK_GREEN,
+)
+
+metric_json_api_celsius = metrics.Metric(
+    name="json_api_celsius",
+    title=Title("Temperature"),
+    unit=metrics.Unit(metrics.DecimalNotation("°C")),
+    color=metrics.Color.RED,
+)
+
+metric_json_api_volts = metrics.Metric(
+    name="json_api_volts",
+    title=Title("Voltage"),
+    unit=metrics.Unit(metrics.SINotation("V")),
+    color=metrics.Color.DARK_YELLOW,
+)
+
+metric_json_api_amperes = metrics.Metric(
+    name="json_api_amperes",
+    title=Title("Electric current"),
+    unit=metrics.Unit(metrics.SINotation("A")),
+    color=metrics.Color.DARK_CYAN,
+)
+
+metric_json_api_watts = metrics.Metric(
+    name="json_api_watts",
+    title=Title("Power"),
+    unit=metrics.Unit(metrics.SINotation("W")),
+    color=metrics.Color.DARK_ORANGE,
+)
+
+metric_json_api_hertz = metrics.Metric(
+    name="json_api_hertz",
+    title=Title("Frequency"),
+    unit=metrics.Unit(metrics.SINotation("Hz")),
+    color=metrics.Color.DARK_PURPLE,
+)
+
 metric_json_api_age = metrics.Metric(
     name="json_api_age",
     title=Title("Age"),

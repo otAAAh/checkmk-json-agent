@@ -122,6 +122,12 @@ _DECLARED_METRICS = frozenset(
         "json_api_bytes_rate",
         "json_api_seconds_rate",
         "json_api_percent_rate",
+        "json_api_bits_per_second",
+        "json_api_celsius",
+        "json_api_volts",
+        "json_api_amperes",
+        "json_api_watts",
+        "json_api_hertz",
         "json_api_age",
         "json_api_response_time",
         "json_api_response_size",
@@ -169,6 +175,14 @@ _UNIT_METRIC = {
     "bytes": "json_api_bytes",
     "seconds": "json_api_seconds",
     "percent": "json_api_percent",
+    "per_second": "json_api_count_rate",
+    "bytes_per_second": "json_api_bytes_rate",
+    "bits_per_second": "json_api_bits_per_second",
+    "celsius": "json_api_celsius",
+    "volts": "json_api_volts",
+    "amperes": "json_api_amperes",
+    "watts": "json_api_watts",
+    "hertz": "json_api_hertz",
 }
 _UNIT_RATE_METRIC = {
     None: "json_api_rate",
@@ -569,6 +583,26 @@ def _validate_extraction(value: object) -> None:
                 "'Labels for the created host' needs 'Create one host per element, "
                 "named by this field' - without it the element stays a service on "
                 "this host and there is no host to label."
+            )
+        )
+    # A counter's rate is the unit per second, so the unit has to be one things
+    # are counted in. A counter 'in watts' or 'in bytes per second' has no rate
+    # that means anything, and the check would graph it as a bare number.
+    value_as = value.get("value_as")
+    unit = value.get("unit")
+    if (
+        isinstance(value_as, (list, tuple))
+        and value_as
+        and value_as[0] == "counter"
+        and isinstance(unit, str)
+        and unit not in _UNIT_RATE_METRIC
+    ):
+        raise validators.ValidationError(
+            Message(
+                "A counter is read as a rate per second, and this unit is not "
+                "one that is counted - it is already a rate, or a measurement "
+                "such as a temperature. Choose 'Count', 'Bytes', 'Seconds', "
+                "'Percent' or no unit, or read the value as it stands."
             )
         )
     calc = value.get("calc")
@@ -1433,12 +1467,31 @@ def _extraction() -> Dictionary:
                     help_text=Help(
                         "Renders the metric and graph with this unit. Leave unset "
                         "for a plain, unit-less value. Only affects numeric values."
+                        "<br><br>The value is not converted: levels and the value "
+                        "range are entered in the unit the API reports. For a "
+                        "unit the API does not use as it stands, convert it with "
+                        "the transform - a latency in milliseconds is 'Seconds' "
+                        "with the transform 'value / 1000'."
                     ),
                     elements=[
                         SingleChoiceElement("count", Title("Count (integer)")),
                         SingleChoiceElement("bytes", Title("Bytes (IEC: KiB, MiB, ...)")),
                         SingleChoiceElement("seconds", Title("Seconds (duration)")),
                         SingleChoiceElement("percent", Title("Percent")),
+                        SingleChoiceElement(
+                            "per_second", Title("Per second (requests, events, ...)")
+                        ),
+                        SingleChoiceElement(
+                            "bytes_per_second", Title("Bytes per second (IEC: KiB/s, MiB/s, ...)")
+                        ),
+                        SingleChoiceElement(
+                            "bits_per_second", Title("Bits per second (SI: kbit/s, Mbit/s, ...)")
+                        ),
+                        SingleChoiceElement("celsius", Title("Degrees Celsius")),
+                        SingleChoiceElement("volts", Title("Volts")),
+                        SingleChoiceElement("amperes", Title("Amperes")),
+                        SingleChoiceElement("watts", Title("Watts")),
+                        SingleChoiceElement("hertz", Title("Hertz")),
                     ],
                     prefill=InputHint(Title("No unit")),
                 ),

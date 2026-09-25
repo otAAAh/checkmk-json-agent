@@ -124,6 +124,35 @@ perfometer_json_api_percent = perfometers.Perfometer(
     segments=["json_api_percent"],
 )
 
+# Measurements. A temperature of a hundred degrees is hot for anything an API
+# reports on; the electrical bounds are a mains socket (230 V, 16 A, a few kW)
+# and the frequency one a CPU clock; a gigabit link fills the bandwidth bar.
+# A value the API reports per second already shares the rate metrics below.
+
+perfometer_json_api_bits_per_second_in_range = _to_range("json_api_bits_per_second")
+perfometer_json_api_bits_per_second_to_crit = _to_crit("json_api_bits_per_second")
+perfometer_json_api_bits_per_second = _open_to("json_api_bits_per_second", 1e9)
+
+perfometer_json_api_celsius_in_range = _to_range("json_api_celsius")
+perfometer_json_api_celsius_to_crit = _to_crit("json_api_celsius")
+perfometer_json_api_celsius = _open_to("json_api_celsius", 100.0)
+
+perfometer_json_api_volts_in_range = _to_range("json_api_volts")
+perfometer_json_api_volts_to_crit = _to_crit("json_api_volts")
+perfometer_json_api_volts = _open_to("json_api_volts", 230.0)
+
+perfometer_json_api_amperes_in_range = _to_range("json_api_amperes")
+perfometer_json_api_amperes_to_crit = _to_crit("json_api_amperes")
+perfometer_json_api_amperes = _open_to("json_api_amperes", 16.0)
+
+perfometer_json_api_watts_in_range = _to_range("json_api_watts")
+perfometer_json_api_watts_to_crit = _to_crit("json_api_watts")
+perfometer_json_api_watts = _open_to("json_api_watts", 3000.0)
+
+perfometer_json_api_hertz_in_range = _to_range("json_api_hertz")
+perfometer_json_api_hertz_to_crit = _to_crit("json_api_hertz")
+perfometer_json_api_hertz = _open_to("json_api_hertz", 1e9)
+
 # --- the per-second rate of a counter field ---------------------------------
 
 perfometer_json_api_rate_in_range = _to_range("json_api_rate")

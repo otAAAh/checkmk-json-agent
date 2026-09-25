@@ -787,10 +787,11 @@ function renderFields() {
               `<option value="${v}"${e.tsFormat === v ? " selected" : ""}>${lbl}</option>`).join("") +
           `</select></div>`
         : "") +
-      `<div class="row"><label>Unit</label><select data-f="unit" data-i="${i}">` +
-        ["", "count", "bytes", "seconds", "percent"].map(u =>
-          `<option value="${u}"${e.unit === u ? " selected" : ""}>${u || "no unit"}</option>`).join("") +
+      `<div class="row"><label>Unit</label><select data-f="unit" data-rerender="1" data-i="${i}">` +
+        [["", "no unit"], ...UNITS].map(([u, lbl]) =>
+          `<option value="${u}"${e.unit === u ? " selected" : ""}>${lbl}</option>`).join("") +
       `</select></div>` +
+      (unitError(e) ? `<div class="subnote err">${escAttr(unitError(e))}</div>` : "") +
       `<div class="row"><label>Value range</label><span class="lvls"><input type="text" data-f="vr_min" data-i="${i}" value="${escAttr(e.vr_min)}" placeholder="lowest (e.g. 0)"><input type="text" data-f="vr_max" data-i="${i}" value="${escAttr(e.vr_max)}" placeholder="highest (e.g. 100)"></span></div>` +
       `<div class="row"><label>Metric name</label><input type="text" data-f="metricName" data-i="${i}" value="${escAttr(e.metricName)}" placeholder="(optional) name a Gauge / Single metric widget can be pointed at"></div>` +
       (metricNameError(e.metricName)
@@ -857,9 +858,29 @@ const DECLARED_METRICS = new Set([
   "json_api_value", "json_api_count", "json_api_bytes", "json_api_seconds",
   "json_api_percent", "json_api_rate", "json_api_count_rate",
   "json_api_bytes_rate", "json_api_seconds_rate", "json_api_percent_rate",
+  "json_api_bits_per_second", "json_api_celsius", "json_api_volts",
+  "json_api_amperes", "json_api_watts", "json_api_hertz",
   "json_api_age", "json_api_response_time", "json_api_response_size",
   "json_api_cert_expiry",
 ]);
+
+// The units the ruleset offers ([value, label]), and the ones a counter may be
+// read in - its rate is that unit per second, so a unit that is already a rate
+// or a measurement (a temperature) is refused by Setup for a counter.
+const UNITS = [
+  ["count", "count"], ["bytes", "bytes"], ["seconds", "seconds"], ["percent", "percent"],
+  ["per_second", "per second"], ["bytes_per_second", "bytes per second"],
+  ["bits_per_second", "bits per second"], ["celsius", "°C"], ["volts", "volts"],
+  ["amperes", "amperes"], ["watts", "watts"], ["hertz", "hertz"],
+];
+const COUNTABLE_UNITS = new Set(["count", "bytes", "seconds", "percent"]);
+
+/** Why Setup would refuse this unit for this field, or "" if it is fine. */
+function unitError(e) {
+  if (e.valueAs === "counter" && e.unit && !COUNTABLE_UNITS.has(e.unit))
+    return "A counter is read as a rate per second, so its unit has to be one things are counted in: count, bytes, seconds, percent or none.";
+  return "";
+}
 
 /** Why this metric name would be rejected by Setup, or "" if it is fine. */
 function metricNameError(name) {
