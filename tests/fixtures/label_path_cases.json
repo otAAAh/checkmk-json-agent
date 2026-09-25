@@ -143,6 +143,22 @@
       "label_path": "meta.name",
       "labels": ["x", "y"],
       "issues": {"duplicates": [], "missing": [], "empty": [], "nonScalar": []}
+    },
+    {
+      "name": "a label path is read as the agent scans it, junk between tokens skipped",
+      "document": {"items": [{"meta": {"name": "x"}, "v": 1}, {"meta": {"name": "y"}, "v": 2}]},
+      "path": "items[*].v",
+      "label_path": "meta..name",
+      "labels": ["x", "y"],
+      "issues": {"duplicates": [], "missing": [], "empty": [], "nonScalar": []}
+    },
+    {
+      "name": "a built-in object property is not a field of the element",
+      "document": {"items": [{"v": 1}, {"v": 2}]},
+      "path": "items[*].v",
+      "label_path": "constructor",
+      "labels": ["0", "1"],
+      "issues": {"duplicates": [], "missing": ["0", "1"], "empty": [], "nonScalar": []}
     }
   ]
 }

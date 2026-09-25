@@ -256,6 +256,8 @@ function escAttr(s) { return String(s).replace(/"/g, "&quot;"); }
 // Mirror the agent's _PATH_TOKEN grammar: ['key'] | ["key"] | [idx] | plain.
 const PATH_TOKEN = /\['([^']*)'\]|\["([^"]*)"\]|\[(\d+)\]|([^.\[\]]+)/g;
 
+const hasOwn = (obj, key) => Object.prototype.hasOwnProperty.call(obj, key);
+
 function resolvePath(root, p) {
   if (!p) return root;
   let cur = root;
@@ -271,7 +273,9 @@ function resolvePath(root, p) {
       else return undefined;
     } else {
       const key = m[1] !== undefined ? m[1] : (m[2] !== undefined ? m[2] : m[4]);
-      if (cur && typeof cur === "object" && !Array.isArray(cur) && key in cur) cur = cur[key];
+      // Own keys only, like the agent's `key in dict`: `in` would also find
+      // 'constructor', 'toString', ... on every object.
+      if (cur && typeof cur === "object" && !Array.isArray(cur) && hasOwn(cur, key)) cur = cur[key];
       else return undefined;
     }
   }
@@ -297,7 +301,7 @@ function guessLabel(path) {
   const arr = resolvePath(ep().parsedRoot, before);
   if (Array.isArray(arr) && arr.length && arr[0] && typeof arr[0] === "object") {
     for (const cand of ["name", "id", "title", "key", "host", "hostname"]) {
-      if (cand in arr[0]) return cand;
+      if (hasOwn(arr[0], cand)) return cand;
     }
   }
   return "";
