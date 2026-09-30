@@ -25,6 +25,7 @@ import dataclasses
 import json
 from functools import lru_cache
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import cmk.utils.paths
@@ -74,6 +75,24 @@ def _vue_theme_stylesheets() -> list[str]:
     return [f"cmk-frontend-vue/{sheet}" for sheet in main.get("css", [])]
 
 
+def _ruleset() -> Any:
+    """The agent package's special-agent ruleset, which the wizard's forms reuse.
+
+    It ships in the OTHER package, and the two can be updated independently: an
+    older agent package only has the builders under their former private names,
+    so fall back to those. Imported on use - the agent package
+    may be missing entirely, which only this page has to care about.
+    """
+    from cmk_addons.plugins.json_api.rulesets import special_agent as ruleset
+
+    if not hasattr(ruleset, "endpoint_form"):  # an older agent package
+        return SimpleNamespace(
+            endpoint_form=ruleset._endpoint,
+            validate_unique_endpoints=ruleset._validate_unique_endpoints,
+        )
+    return ruleset
+
+
 def connection_form_spec() -> object:
     """The ruleset's endpoint Dictionary WITHOUT the extractions / host_labels.
 
@@ -84,9 +103,7 @@ def connection_form_spec() -> object:
     """
     from cmk.rulesets.v1.form_specs import Dictionary
 
-    from cmk_addons.plugins.json_api.rulesets.special_agent import _endpoint
-
-    endpoint = _endpoint()
+    endpoint = _ruleset().endpoint_form()
     step2 = {"extractions", "host_labels"}
     elements = {key: element for key, element in endpoint.elements.items() if key not in step2}
     # Rebuilding the Dictionary drops the ruleset's own endpoint validation, so
@@ -107,14 +124,12 @@ def connection_list_form_spec() -> object:
     from cmk.rulesets.v1 import Title
     from cmk.rulesets.v1.form_specs import List
 
-    from cmk_addons.plugins.json_api.rulesets.special_agent import _validate_unique_endpoints
-
     return List(
         title=Title("Endpoints"),
         element_template=connection_form_spec(),
         # Same uniqueness rule as the ruleset's endpoints List, so the wizard's
         # validate/create path rejects duplicate URLs too (not only the REST API).
-        custom_validate=(_validate_unique_endpoints,),
+        custom_validate=(_ruleset().validate_unique_endpoints,),
     )
 
 
@@ -124,9 +139,7 @@ def extractions_form_spec() -> object:
     thresholds, expected-string and label-path are all native FormSpec fields —
     and the JSON field picker just appends default-seeded entries into its value.
     """
-    from cmk_addons.plugins.json_api.rulesets.special_agent import _endpoint
-
-    return _endpoint().elements["extractions"].parameter_form
+    return _ruleset().endpoint_form().elements["extractions"].parameter_form
 
 
 def host_labels_form_spec() -> object:
@@ -136,9 +149,7 @@ def host_labels_form_spec() -> object:
     create page validates + converts it like the extractions and merges it back
     into the endpoint. Host labels are endpoint-level, so they need no service.
     """
-    from cmk_addons.plugins.json_api.rulesets.special_agent import _endpoint
-
-    return _endpoint().elements["host_labels"].parameter_form
+    return _ruleset().endpoint_form().elements["host_labels"].parameter_form
 
 
 def placement_form_spec() -> object:

@@ -272,7 +272,7 @@ def _unique_or_duplicates(value: object, key: str) -> list[str]:
     return sorted(item for item, count in counts.items() if count > 1)
 
 
-def _validate_unique_endpoints(value: object) -> None:
+def validate_unique_endpoints(value: object) -> None:
     # No two endpoints may target the same URL — duplicates would create
     # colliding services from the same source.
     if duplicates := _unique_or_duplicates(value, "url"):
@@ -1632,7 +1632,7 @@ def _extraction() -> Dictionary:
     )
 
 
-def _endpoint() -> Dictionary:
+def endpoint_form() -> Dictionary:
     return Dictionary(
         title=Title("Endpoint"),
         custom_validate=(_validate_endpoint,),
@@ -2390,13 +2390,19 @@ def _parameter_form() -> Dictionary:
                         "are merged into one section. An endpoint that cannot be "
                         "reached only affects its own services."
                     ),
-                    element_template=_endpoint(),
-                    custom_validate=(_validate_unique_endpoints,),
+                    element_template=endpoint_form(),
+                    custom_validate=(validate_unique_endpoints,),
                 ),
             ),
         },
     )
 
+
+# The former names of the two builders above. The json_api_explorer package
+# imports them, and it is released separately, so an older Explorer next to this
+# agent package must still find them.
+_endpoint = endpoint_form
+_validate_unique_endpoints = validate_unique_endpoints
 
 rule_spec_special_agent_json_api = SpecialAgent(
     name="json_api",

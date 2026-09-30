@@ -389,7 +389,7 @@ _NOT_PART_OF_THE_REQUEST = {
 def test_every_endpoint_field_is_applied_by_the_preview_or_knowingly_skipped():
     """The guard that would have caught this whole PR a year earlier."""
     classified = _APPLIED_TO_THE_REQUEST | set(_NOT_PART_OF_THE_REQUEST)
-    fields = dictionary_keys("_endpoint")
+    fields = dictionary_keys("endpoint_form")
 
     assert not fields - classified, (
         "new endpoint field(s) in the ruleset that the preview has not been told "

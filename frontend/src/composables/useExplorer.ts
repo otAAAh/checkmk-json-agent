@@ -388,7 +388,7 @@ function removeEndpointLabel(endpointIndex: number, entry: LabelSummary): void {
 }
 
 // URLs that appear on more than one endpoint (mirrors the ruleset's
-// _validate_unique_endpoints; enforced server-side too at rule creation).
+// validate_unique_endpoints; enforced server-side too at rule creation).
 const duplicateUrls = computed(() => {
   const urls = state.connections.map((c) => endpointUrl(c).trim()).filter(Boolean)
   return [...new Set(urls.filter((url, i) => urls.indexOf(url) !== i))]

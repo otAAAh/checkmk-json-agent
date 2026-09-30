@@ -106,7 +106,7 @@ def test_the_rule_the_page_writes_fits_the_ruleset():
     )
     assert "endpoints" in dictionary_keys("_parameter_form")
 
-    endpoint_fields = dictionary_keys("_endpoint")
+    endpoint_fields = dictionary_keys("endpoint_form")
     for folded_in in ("extractions", "host_labels"):
         assert f'"{folded_in}": {folded_in}' in source
         assert folded_in in endpoint_fields
