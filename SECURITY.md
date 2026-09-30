@@ -31,7 +31,7 @@ you prefer to remain anonymous.
 This plugin fetches JSON over HTTP(S) from user-configured endpoints and turns
 fields into Checkmk services. Especially relevant areas:
 
-- the special agent's request handling (`cmk_addons/plugins/json_api/special_agent/agent_json_api.py`)
+- the special agent's request handling (`cmk_addons/plugins/json_api/special_agent/`, chiefly `transport.py`, `fetch.py` and `oauth2.py`)
   — TLS verification, redirect following (SSRF hardening), response-size limits,
   and secret handling via the Checkmk password store;
 - the Explorer wizard's server-side preview fetch

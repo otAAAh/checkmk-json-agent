@@ -103,7 +103,8 @@ time.
 cmk_addons/plugins/json_api/
   server_side_calls/   rule -> agent command line
   rulesets/            the Setup form
-  special_agent/       the special agent
+  special_agent/       the special agent: agent_json_api.py (entry point) on top of
+                       paths, transport, cache, oauth2, pagination, fetch, extract
   libexec/             its entry point, which Checkmk executes
   agent_based/         section parsing + check
   graphing/            metric definition

@@ -29,6 +29,8 @@ from pathlib import Path
 import pytest
 from ruleset_ast import dictionary_keys
 
+from cmk_addons.plugins.json_api.special_agent import pagination as agent_pagination
+
 _FETCH = Path(__file__).resolve().parent.parent / "gui" / "wato" / "json_explorer" / "fetch.py"
 
 # An explicit password as the Password FormSpec stores it on disk.
@@ -327,9 +329,9 @@ _COUNTED = [
         "https://api.example.com/v1/items?state=open&page=7&q=a%20b",
     ],
 )
-def test_the_preview_asks_for_the_agents_first_page(explorer_fetch, agent, url, pagination):
+def test_the_preview_asks_for_the_agents_first_page(explorer_fetch, url, pagination):
     endpoint = {"url": url, "pagination": pagination}
-    assert explorer_fetch._first_page_url(endpoint) == agent._first_page_url(endpoint)
+    assert explorer_fetch._first_page_url(endpoint) == agent_pagination._first_page_url(endpoint)
 
 
 def test_the_counted_first_page_reaches_the_api(explorer_fetch, serve):

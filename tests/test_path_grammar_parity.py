@@ -26,6 +26,8 @@ from pathlib import Path
 
 import pytest
 
+from cmk_addons.plugins.json_api.special_agent import paths as agent_paths
+
 _CASES = json.loads((Path(__file__).parent / "fixtures" / "json_path_cases.json").read_text())
 
 
@@ -36,10 +38,10 @@ def _agent_values(agent, document, path):
     '[*]', ``_expand_wildcards`` walks the product — and the check reports one
     service per found leaf, which is what the picker previews.
     """
-    segments = agent._split_wildcards(path)
+    segments = agent_paths._split_wildcards(path)
     return [
         value
-        for _labels, found, value, _error, _element in agent._expand_wildcards(
+        for _labels, found, value, _error, _element in agent_paths._expand_wildcards(
             document, segments, None
         )
         if found
@@ -53,12 +55,12 @@ def test_the_agent_resolves_the_shared_path_cases(agent, case):
     assert _agent_values(agent, document, case["path"]) == case["values"]
 
 
-def test_a_malformed_path_resolves_the_tokens_it_can(agent):
+def test_a_malformed_path_resolves_the_tokens_it_can():
     """Recorded, not endorsed: the agent's tokenizer scans for the segments it
     knows and skips anything between them, so a typo silently resolves to the
     path the operator probably meant. The wizard's port refuses such a path
     instead, which is why these cases stay out of the shared fixture."""
     document = {"a": {"b": 1}}
 
-    assert agent._resolve_path(document, "a..b") == (True, 1)
-    assert agent._resolve_path(document, "a.b[") == (True, 1)
+    assert agent_paths._resolve_path(document, "a..b") == (True, 1)
+    assert agent_paths._resolve_path(document, "a.b[") == (True, 1)
