@@ -22,6 +22,7 @@ from cmk.rulesets.v1.form_specs import (
     DefaultValue,
     DictElement,
     Dictionary,
+    FieldSize,
     FixedValue,
     Float,
     InputHint,
@@ -443,6 +444,7 @@ def _counted_pages(parameter_prefill: str, start: DictElement) -> Dictionary:
             required=False,
             parameter_form=String(
                 title=Title("JSON path to the total number of elements"),
+                field_size=FieldSize.LARGE,
                 help_text=Help(
                     "Where the API states how many elements the whole collection "
                     "holds, e.g. 'total' or 'meta.total_count'. Once that many "
@@ -843,6 +845,7 @@ def _authentication() -> CascadingSingleChoice:
                             required=True,
                             parameter_form=String(
                                 title=Title("Token URL"),
+                                field_size=FieldSize.LARGE,
                                 help_text=Help(
                                     "The identity provider's token endpoint, e.g. "
                                     "'https://login.example.com/oauth2/v2.0/token'. "
@@ -1042,6 +1045,7 @@ def _element_filter(title: Title, help_text: Help) -> Dictionary:
                 required=True,
                 parameter_form=String(
                     title=Title("Field path (within each element)"),
+                    field_size=FieldSize.LARGE,
                     help_text=Help(
                         "Resolved within each element, e.g. 'status' or 'metadata.phase'."
                     ),
@@ -1133,6 +1137,7 @@ def _extraction() -> Dictionary:
                 required=True,
                 parameter_form=String(
                     title=Title("JSON path"),
+                    field_size=FieldSize.LARGE,
                     help_text=Help(
                         "Dotted path into the JSON response, e.g. "
                         "'status', 'components.db.status' or 'items[0].count'. "
@@ -1161,6 +1166,7 @@ def _extraction() -> Dictionary:
                 required=False,
                 parameter_form=String(
                     title=Title("Per-element name suffix (for '[*]' wildcards)"),
+                    field_size=FieldSize.LARGE,
                     help_text=Help(
                         "When the JSON path contains a '[*]' wildcard, one service "
                         "is created per element. This optional path - relative to "
@@ -1178,6 +1184,7 @@ def _extraction() -> Dictionary:
                 required=False,
                 parameter_form=String(
                     title=Title("Create one host per element, named by this field"),
+                    field_size=FieldSize.LARGE,
                     help_text=Help(
                         "When the JSON path contains a '[*]' wildcard, this turns "
                         "every element into a Checkmk host of its own instead of "
@@ -1221,6 +1228,7 @@ def _extraction() -> Dictionary:
                                 required=False,
                                 parameter_form=String(
                                     title=Title("JSON path"),
+                                    field_size=FieldSize.LARGE,
                                     help_text=Help(
                                         "Relative to each '[*]' element, e.g. "
                                         "'region'. Can be left empty only where a "
@@ -1299,6 +1307,7 @@ def _extraction() -> Dictionary:
                                 required=True,
                                 parameter_form=String(
                                     title=Title("JSON path"),
+                                    field_size=FieldSize.LARGE,
                                     help_text=Help(
                                         "Relative to each '[*]' element (like the name "
                                         "suffix), or the response root for a "
@@ -1565,6 +1574,7 @@ def _extraction() -> Dictionary:
                 required=False,
                 parameter_form=String(
                     title=Title("Transform the numeric value"),
+                    field_size=FieldSize.LARGE,
                     help_text=Help(
                         "An arithmetic expression applied to a numeric value "
                         "before the levels and the metric, using the variable "
@@ -1584,6 +1594,7 @@ def _extraction() -> Dictionary:
                 required=False,
                 parameter_form=String(
                     title=Title("Second path for the transform ('other')"),
+                    field_size=FieldSize.LARGE,
                     help_text=Help(
                         "A second field, made available to the transform above as "
                         "the variable 'other'. Most APIs report a used/total or "
@@ -1608,6 +1619,7 @@ def _extraction() -> Dictionary:
                 required=False,
                 parameter_form=String(
                     title=Title("Extra text in the service summary"),
+                    field_size=FieldSize.LARGE,
                     help_text=Help(
                         "Appended to the summary, after the value. Write '{path}' "
                         "to insert another field of the same response - resolved "
@@ -1680,6 +1692,7 @@ def endpoint_form() -> Dictionary:
                 required=True,
                 parameter_form=String(
                     title=Title("URL"),
+                    field_size=FieldSize.LARGE,
                     help_text=Help(
                         "Full URL of the JSON endpoint, including scheme, "
                         "e.g. 'https://app.example.com/actuator/health'."
@@ -1702,6 +1715,7 @@ def endpoint_form() -> Dictionary:
                 required=False,
                 parameter_form=String(
                     title=Title("Request body (for POST)"),
+                    field_size=FieldSize.LARGE,
                 ),
             ),
             "headers": DictElement(
@@ -1721,7 +1735,10 @@ def endpoint_form() -> Dictionary:
                             ),
                             "value": DictElement(
                                 required=True,
-                                parameter_form=String(title=Title("Header value")),
+                                parameter_form=String(
+                                    title=Title("Header value"),
+                                    field_size=FieldSize.LARGE,
+                                ),
                             ),
                         }
                     ),
@@ -1743,6 +1760,7 @@ def endpoint_form() -> Dictionary:
                 required=False,
                 parameter_form=String(
                     title=Title("Custom CA bundle file"),
+                    field_size=FieldSize.LARGE,
                     help_text=Help(
                         "Path on the Checkmk server to a PEM file holding the CA "
                         "certificate(s) to verify the server's certificate against. "
@@ -1766,6 +1784,7 @@ def endpoint_form() -> Dictionary:
                             required=True,
                             parameter_form=String(
                                 title=Title("Client certificate file"),
+                                field_size=FieldSize.LARGE,
                                 help_text=Help(
                                     "Path to the client certificate (PEM). If the "
                                     "file also contains the private key, leave the "
@@ -1778,6 +1797,7 @@ def endpoint_form() -> Dictionary:
                             required=False,
                             parameter_form=String(
                                 title=Title("Private key file"),
+                                field_size=FieldSize.LARGE,
                                 help_text=Help(
                                     "Path to the client private key (PEM), if it is "
                                     "not bundled with the certificate."
@@ -2082,6 +2102,7 @@ def endpoint_form() -> Dictionary:
                                         title=Title("A field in the response body"),
                                         parameter_form=String(
                                             title=Title("JSON path to the next page's URL"),
+                                            field_size=FieldSize.LARGE,
                                             help_text=Help(
                                                 "From the response root, e.g. "
                                                 "'links.next', 'next' or "
@@ -2168,6 +2189,7 @@ def endpoint_form() -> Dictionary:
                             required=True,
                             parameter_form=String(
                                 title=Title("JSON path to the collection to merge"),
+                                field_size=FieldSize.LARGE,
                                 help_text=Help(
                                     "The array (or object) each page carries a "
                                     "slice of - e.g. 'items', 'data.jobs' or "
@@ -2283,6 +2305,7 @@ def endpoint_form() -> Dictionary:
                                 required=False,
                                 parameter_form=String(
                                     title=Title("JSON path"),
+                                    field_size=FieldSize.LARGE,
                                     help_text=Help(
                                         "From the response root, e.g. 'version', "
                                         "'cluster.region', or a '[*]' wildcard like "
@@ -2309,6 +2332,7 @@ def endpoint_form() -> Dictionary:
                                 required=False,
                                 parameter_form=String(
                                     title=Title("Value field (for '[*]' wildcards)"),
+                                    field_size=FieldSize.LARGE,
                                     help_text=Help(
                                         "For a '[*]' path: a path within each "
                                         "element for the label value (e.g. "
