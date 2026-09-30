@@ -10,7 +10,7 @@
 // down to its line.
 //
 // Ported from the agent's _service_prefix / _shared_service / _prefixed and the
-// naming in _extract (cmk_addons/plugins/json_api/special_agent/agent_json_api.py), which
+// naming in _extract (cmk_addons/plugins/json_api/special_agent/extract.py), which
 // is the only place these names are really decided. Kept in lib/ rather than in
 // the component so it can be unit-tested and type-checked on a bare clone.
 

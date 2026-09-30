@@ -5,6 +5,8 @@
 import pytest
 from cmk.rulesets.v1.form_specs.validators import ValidationError
 
+from cmk_addons.plugins.json_api.special_agent import extract as agent_extract
+
 
 def test_valid_regex_passes(ruleset):
     ruleset._validate_regex("UP|ok")  # must not raise
@@ -389,7 +391,7 @@ def test_extraction_form_has_the_expected_keys(ruleset):
     assert "count" not in ruleset._extraction().elements
 
 
-def test_aggregate_offers_every_function_the_agent_implements(ruleset, agent):
+def test_aggregate_offers_every_function_the_agent_implements(ruleset):
     choices = {
         element.name
         for element in ruleset._extraction().elements["aggregate"].parameter_form.elements
@@ -397,7 +399,7 @@ def test_aggregate_offers_every_function_the_agent_implements(ruleset, agent):
     assert choices == {"count", "sum", "avg", "min", "max"}
     # Every offered function must actually reduce something in the agent.
     for mode in choices - {"count"}:
-        found, value, error = agent._aggregate_numbers(mode, [1, 2])
+        found, value, error = agent_extract._aggregate_numbers(mode, [1, 2])
         assert found, f"{mode}: {error}"
         assert value is not None
 
