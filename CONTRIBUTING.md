@@ -111,7 +111,8 @@ cmk_addons/plugins/json_api/
 explorer/              standalone, dependency-free config Explorer
 locales/               translation catalogs (one .po per language)
 scripts/               build_mkp.py, gen_changelog.py, ...
-tests/                 pytest suite
+tests/                 pytest suite; the plugin tests mirror the family
+                       (agent_based/, rulesets/, special_agent/, ...)
 ```
 
 ## Compatibility
