@@ -221,11 +221,27 @@ function hostLabel(): void {
   color: var(--success);
 }
 
-/* The "+ Add" dropdown, revealed only on row hover / keyboard focus. */
+/* The "+ Add" dropdown, revealed only on row hover / keyboard focus.
+   Every row is as wide as the widest one (the tree list is max-content), so on
+   a long value 'margin-left: auto' alone puts the button past the right edge,
+   inside the horizontal scroll. Sticky keeps it at the visible right border
+   instead; it is also the positioned parent the menu drops down from. It sticks
+   flush to the scroll area's edge, over the picker's padding, and is opaque in
+   the tree's own background, so the value text it scrolled across shows neither
+   through it nor beside it. */
 .je-json-tree-node__actions {
-  position: relative;
+  position: sticky;
+  right: calc(-1 * var(--dimension-4, 8px));
+  z-index: 1;
+  padding: 0 var(--dimension-4, 8px) 0 var(--dimension-3, 6px);
   margin-left: auto;
   visibility: hidden;
+  background: var(--toggle-button-group-inactive-bg-color);
+}
+
+/* Above the next row's button while its menu is open over that row. */
+.je-json-tree-node__actions[open] {
+  z-index: 3;
 }
 
 .je-json-tree-node__leaf:hover .je-json-tree-node__actions,
