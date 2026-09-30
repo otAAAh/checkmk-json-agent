@@ -4,7 +4,8 @@
 """Server-side call: translate the Setup rule into the agent command line.
 
 The ``name="json_api"`` below makes Checkmk look for and execute
-``cmk_addons/plugins/json_api/libexec/agent_json_api``.
+``cmk_addons/plugins/json_api/libexec/agent_json_api``, which runs the agent in
+``special_agent/agent_json_api.py``.
 """
 
 import json

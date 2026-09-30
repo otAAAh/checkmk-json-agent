@@ -5,27 +5,23 @@
 The plugin modules are imported under their real package names
 (``cmk_addons.plugins.json_api.*``, a namespace package resolved from the repo
 root), exactly as a site imports them - so the rulesets' relative ``..lib``
-import works as it does at runtime. The special agent has no ``.py`` extension,
-so it alone is loaded from its source file. The ``cmk.*`` plugin APIs must be
+import works as it does at runtime. The ``cmk.*`` plugin APIs must be
 importable - run the suite with a Checkmk dev venv or inside a site, e.g.::
 
     PYTHON=~/git/checkmk/.venv/bin/python make test
 """
 
 import importlib
-import importlib.util
 import sys
 import types
-from importlib.machinery import SourceFileLoader
 from pathlib import Path
 
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-FAMILY = REPO_ROOT / "cmk_addons" / "plugins" / "json_api"
 # The Explorer's GUI half ships in the OTHER package, under a directory that is
-# not an importable Python package here either (in a site it lands in the
-# ``cmk.gui.plugins.wato`` namespace), so it is loaded by path just the same.
+# not an importable Python package here (in a site it lands in the
+# ``cmk.gui.plugins.wato`` namespace), so it is mounted as one, see _gui_package.
 GUI = REPO_ROOT / "gui" / "wato" / "json_explorer"
 
 # ``cmk_addons`` is a namespace package: with the repo root on the path it
@@ -34,23 +30,13 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 
-def _load_file(name: str, path: Path):
-    loader = SourceFileLoader(name, str(path))
-    spec = importlib.util.spec_from_loader(name, loader)
-    assert spec is not None
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[name] = module
-    loader.exec_module(module)
-    return module
-
-
 def _import(dotted: str):
     return importlib.import_module(f"cmk_addons.plugins.json_api.{dotted}")
 
 
 @pytest.fixture(scope="session")
 def agent():
-    return _load_file("ja_agent", FAMILY / "libexec" / "agent_json_api")
+    return _import("special_agent.agent_json_api")
 
 
 @pytest.fixture(scope="session")

@@ -1268,7 +1268,8 @@ Layout:
 cmk_addons/plugins/json_api/
   server_side_calls/   rule -> agent command line
   rulesets/            the Setup form
-  libexec/             the special agent executable
+  special_agent/       the special agent
+  libexec/             its entry point, which Checkmk executes
   agent_based/         section parsing + check
   graphing/            metric definition
   checkman/            man page
