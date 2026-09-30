@@ -35,7 +35,8 @@ class JsonExplorerCreatePage(AjaxPage):
             validate_value_from_frontend,
         )
         from cmk.gui.logged_in import user
-        from cmk.gui.plugins.wato.json_explorer.page import (
+
+        from .page import (
             connection_form_spec,
             extractions_form_spec,
             host_labels_form_spec,

@@ -29,7 +29,8 @@ class JsonExplorerValidatePage(AjaxPage):
         from cmk.gui.form_specs import RawFrontendData
         from cmk.gui.form_specs._utils import validate_value_from_frontend
         from cmk.gui.logged_in import user
-        from cmk.gui.plugins.wato.json_explorer.page import (
+
+        from .page import (
             connection_list_form_spec,
             extractions_form_spec,
             placement_form_spec,

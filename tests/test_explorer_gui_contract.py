@@ -147,9 +147,7 @@ def test_the_form_spec_builders_the_pages_import_exist(module):
     imported = {
         alias.name
         for node in ast.walk(ast.parse(module.read_text()))
-        if isinstance(node, ast.ImportFrom)
-        and node.module is not None
-        and node.module.endswith("json_explorer.page")
+        if isinstance(node, ast.ImportFrom) and node.module == "page" and node.level == 1
         for alias in node.names
     }
     defined = {

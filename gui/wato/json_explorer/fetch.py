@@ -92,7 +92,8 @@ def _connection() -> dict[str, Any]:
         try:
             from cmk.gui.form_specs import RawFrontendData
             from cmk.gui.form_specs._utils import parse_and_validate_frontend_data
-            from cmk.gui.plugins.wato.json_explorer.page import connection_form_spec
+
+            from .page import connection_form_spec
 
             value = parse_and_validate_frontend_data(
                 connection_form_spec(), RawFrontendData(json.loads(raw))

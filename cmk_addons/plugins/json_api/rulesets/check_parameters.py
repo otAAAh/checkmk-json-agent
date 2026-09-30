@@ -35,7 +35,7 @@ from cmk.rulesets.v1.form_specs import (
 )
 from cmk.rulesets.v1.rule_specs import CheckParameters, HostAndItemCondition, Topic
 
-from cmk_addons.plugins.json_api.lib import levels_lower, levels_upper, string_match
+from ..lib import levels_lower, levels_upper, string_match
 
 
 def _parameter_form() -> Dictionary:

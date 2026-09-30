@@ -38,7 +38,7 @@ from cmk.rulesets.v1.form_specs import (
 )
 from cmk.rulesets.v1.rule_specs import SpecialAgent, Topic
 
-from cmk_addons.plugins.json_api.lib import (
+from ..lib import (
     levels_lower,
     levels_upper,
     string_match,
