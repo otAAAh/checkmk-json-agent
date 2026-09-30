@@ -3,6 +3,7 @@
 """Tests for the ruleset's config-time validation."""
 
 import pytest
+from cmk.rulesets.v1.form_specs import FieldSize
 from cmk.rulesets.v1.form_specs.validators import ValidationError
 
 
@@ -434,6 +435,13 @@ def test_timestamp_formats_match_the_parser(ruleset, check):
 def test_endpoint_form_has_an_optional_name(ruleset):
     name = ruleset.endpoint_form().elements["name"]
     assert name.required is False
+
+
+def test_the_url_field_is_wide_enough_to_show_a_whole_url(ruleset):
+    """URLs, paths and bodies are long; at the default width a URL is cut off
+    in the rule editor (issue #235)."""
+    url = ruleset.endpoint_form().elements["url"].parameter_form
+    assert url.field_size is FieldSize.LARGE
 
 
 def _endpoints(*specs):
