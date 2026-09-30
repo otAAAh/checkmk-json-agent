@@ -432,7 +432,7 @@ def test_timestamp_formats_match_the_parser(ruleset, check):
 
 
 def test_endpoint_form_has_an_optional_name(ruleset):
-    name = ruleset._endpoint().elements["name"]
+    name = ruleset.endpoint_form().elements["name"]
     assert name.required is False
 
 
@@ -441,7 +441,7 @@ def _endpoints(*specs):
 
 
 def test_unique_endpoints_accepts_distinct_names(ruleset):
-    ruleset._validate_unique_endpoints(  # must not raise
+    ruleset.validate_unique_endpoints(  # must not raise
         _endpoints({"name": "frontend"}, {"name": "backend"})
     )
 
@@ -449,7 +449,7 @@ def test_unique_endpoints_accepts_distinct_names(ruleset):
 def test_unique_endpoints_accepts_unnamed_endpoints(ruleset):
     # A name is optional; several endpoints without one is the normal case and
     # each falls back to its own (already-unique) URL.
-    ruleset._validate_unique_endpoints(_endpoints({}, {}))  # must not raise
+    ruleset.validate_unique_endpoints(_endpoints({}, {}))  # must not raise
 
 
 def test_duplicate_endpoint_names_rejected(ruleset):
@@ -457,26 +457,26 @@ def test_duplicate_endpoint_names_rejected(ruleset):
     # only be resolved positionally at runtime, so reordering the endpoints would
     # swap two services' histories - reject it at config time instead.
     with pytest.raises(ValidationError, match="frontend"):
-        ruleset._validate_unique_endpoints(_endpoints({"name": "frontend"}, {"name": "frontend"}))
+        ruleset.validate_unique_endpoints(_endpoints({"name": "frontend"}, {"name": "frontend"}))
 
 
 def test_duplicate_endpoint_names_compared_without_surrounding_whitespace(ruleset):
     # The agent strips the name before using it as the item, so ' api ' and 'api'
     # would collide at runtime; they must collide here too.
     with pytest.raises(ValidationError):
-        ruleset._validate_unique_endpoints(_endpoints({"name": "api"}, {"name": " api "}))
+        ruleset.validate_unique_endpoints(_endpoints({"name": "api"}, {"name": " api "}))
 
 
 def test_duplicate_endpoint_urls_still_rejected(ruleset):
     with pytest.raises(ValidationError, match="https://same/health"):
-        ruleset._validate_unique_endpoints(
+        ruleset.validate_unique_endpoints(
             [{"url": "https://same/health"}, {"url": "https://same/health"}]
         )
 
 
 def test_unique_endpoints_ignores_a_non_list_value(ruleset):
-    ruleset._validate_unique_endpoints(None)  # must not raise
-    ruleset._validate_unique_endpoints("not a list")  # must not raise
+    ruleset.validate_unique_endpoints(None)  # must not raise
+    ruleset.validate_unique_endpoints("not a list")  # must not raise
 
 
 @pytest.mark.parametrize("name", ["X-API-Key", "apikey", "PRIVATE-TOKEN", "X_Api_Key1"])
@@ -628,7 +628,7 @@ def test_inventory_form_has_the_expected_keys(ruleset):
 
 
 def test_endpoint_form_offers_the_service_prefix(ruleset):
-    element = ruleset._endpoint().elements["service_prefix"]
+    element = ruleset.endpoint_form().elements["service_prefix"]
     # Required with a False prefill, like the other endpoint toggles: the form
     # always shows it (that is how it gets discovered) and an existing rule that
     # predates it keeps its plain service names.
@@ -651,7 +651,7 @@ def test_service_prefix_with_a_name_passes(ruleset):
 
 
 def test_report_raw_response_form_has_the_expected_keys(ruleset):
-    form = ruleset._endpoint().elements["show_response"].parameter_form
+    form = ruleset.endpoint_form().elements["show_response"].parameter_form
     assert set(form.elements) == {"max_bytes", "headers"}
     # Reporting the body is the point of the option, so a size is required; the
     # headers come along by default because they are small and informative.
@@ -660,7 +660,7 @@ def test_report_raw_response_form_has_the_expected_keys(ruleset):
 
 
 def test_reporting_the_raw_response_is_optional(ruleset):
-    assert ruleset._endpoint().elements["show_response"].required is False
+    assert ruleset.endpoint_form().elements["show_response"].required is False
 
 
 def test_extraction_offers_a_shared_service(ruleset):
@@ -697,7 +697,7 @@ def test_an_inventory_field_that_keeps_its_service_may_join_one(ruleset):
 
 
 def test_host_label_form_offers_a_filter_and_a_literal_value(ruleset):
-    form = ruleset._endpoint().elements["host_labels"].parameter_form.element_template
+    form = ruleset.endpoint_form().elements["host_labels"].parameter_form.element_template
     assert set(form.elements) == {"path", "key", "value_field", "value", "filter"}
     # The predicate is the same three fields an extraction's filter uses.
     assert set(form.elements["filter"].parameter_form.elements) == {"path", "op", "value"}
@@ -729,7 +729,7 @@ def test_a_host_label_takes_its_value_from_one_place_only(ruleset):
 
 
 def test_field_context_form_has_the_expected_keys(ruleset):
-    form = ruleset._endpoint().elements["field_context"].parameter_form
+    form = ruleset.endpoint_form().elements["field_context"].parameter_form
     assert set(form.elements) == {"source", "max_bytes"}
     # The targeted form is the default: the element the value came from, not the
     # whole body repeated on every field service.
@@ -743,11 +743,11 @@ def test_field_context_form_has_the_expected_keys(ruleset):
 
 
 def test_reporting_the_field_context_is_optional(ruleset):
-    assert ruleset._endpoint().elements["field_context"].required is False
+    assert ruleset.endpoint_form().elements["field_context"].required is False
 
 
 def test_pagination_form_has_the_expected_keys(ruleset):
-    form = ruleset._endpoint().elements["pagination"].parameter_form
+    form = ruleset.endpoint_form().elements["pagination"].parameter_form
     assert set(form.elements) == {"next", "items", "max_pages", "max_elements"}
     # Both halves are needed to follow anything, so both are required; the caps
     # have a default (the page one) and are optional (the element one).
@@ -769,7 +769,7 @@ def test_pagination_form_has_the_expected_keys(ruleset):
 def test_the_counted_pagination_modes_have_the_expected_keys(ruleset):
     choices = {
         e.name: e.parameter_form
-        for e in ruleset._endpoint()
+        for e in ruleset.endpoint_form()
         .elements["pagination"]
         .parameter_form.elements["next"]
         .parameter_form.elements
@@ -806,7 +806,7 @@ def test_counted_pagination_settings_the_agent_could_only_half_honour(ruleset):
 
 
 def test_following_pagination_is_optional(ruleset):
-    assert ruleset._endpoint().elements["pagination"].required is False
+    assert ruleset.endpoint_form().elements["pagination"].required is False
 
 
 def test_the_paths_of_a_pagination_setting_name_single_places(ruleset):

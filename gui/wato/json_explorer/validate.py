@@ -21,7 +21,7 @@ import dataclasses
 import json
 
 from cmk.gui.http import request
-from cmk.gui.pages import AjaxPage, PageContext, PageEndpoint, PageResult, page_registry
+from cmk.gui.pages import AjaxPage, PageContext, PageResult
 
 
 class JsonExplorerValidatePage(AjaxPage):
@@ -29,7 +29,8 @@ class JsonExplorerValidatePage(AjaxPage):
         from cmk.gui.form_specs import RawFrontendData
         from cmk.gui.form_specs._utils import validate_value_from_frontend
         from cmk.gui.logged_in import user
-        from cmk.gui.plugins.wato.json_explorer.page import (
+
+        from .page import (
             connection_list_form_spec,
             extractions_form_spec,
             placement_form_spec,
@@ -50,6 +51,3 @@ class JsonExplorerValidatePage(AjaxPage):
         value = json.loads(request.get_str_input_mandatory("value"))
         messages = validate_value_from_frontend(builder(), RawFrontendData(value))
         return {"ok": True, "messages": [dataclasses.asdict(m) for m in messages]}
-
-
-page_registry.register(PageEndpoint("json_explorer_validate", JsonExplorerValidatePage()))

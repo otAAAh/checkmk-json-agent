@@ -2,9 +2,9 @@
 # SPDX-License-Identifier: GPL-2.0-only
 """A Checkmk GUI page that embeds the JSON API Explorer wizard (our own Vue app).
 
-Registered at import time into the ``cmk.gui.plugins.wato`` namespace (which the
-GUI walks and imports on startup), so it is reachable at
-``check_mk/json_explorer.py`` inside the site chrome — no menu registration.
+Registered by ``registration.register`` (the package imports and calls it when
+the GUI walks the ``cmk.gui.plugins.wato`` namespace on startup), so it is
+reachable at ``check_mk/json_explorer.py`` inside the site chrome.
 
 The wizard bundle ships in the ``web`` MKP part under ``htdocs/json_api/wizard/``
 (hashed assets/ + .vite/manifest.json) and exposes a ``<cmk-json-explorer>``
@@ -13,7 +13,7 @@ custom element. This page loads the bundle and mounts it via
 cmk-frontend-vue apps — passing initial data from Python straight into the app.
 
 This module is the ONLY part of the extension that touches internal GUI APIs
-(page_registry, make_header, html.vue_component); it lives in the optional
+(WatoMode, make_header, html.vue_component); it lives in the optional
 json_api_explorer package, never in the agent. Those APIs are internal and drift
 between releases (e.g. make_header moved modules), hence the guarded import and
 this package's version-matched CI.
@@ -25,6 +25,7 @@ import dataclasses
 import json
 from functools import lru_cache
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import cmk.utils.paths
@@ -34,7 +35,7 @@ from cmk.gui.htmllib.html import html
 from cmk.gui.i18n import _
 from cmk.gui.page_menu import PageMenu, make_simple_form_page_menu
 from cmk.gui.page_menu_entry import enable_page_menu_entry
-from cmk.gui.watolib.mode import WatoMode, mode_registry
+from cmk.gui.watolib.mode import WatoMode
 
 # Where the `web` part installs the built wizard, and how it is referenced from
 # a page served under check_mk/.
@@ -74,6 +75,24 @@ def _vue_theme_stylesheets() -> list[str]:
     return [f"cmk-frontend-vue/{sheet}" for sheet in main.get("css", [])]
 
 
+def _ruleset() -> Any:
+    """The agent package's special-agent ruleset, which the wizard's forms reuse.
+
+    It ships in the OTHER package, and the two can be updated independently: an
+    older agent package only has the builders under their former private names,
+    so fall back to those. Imported on use - the agent package
+    may be missing entirely, which only this page has to care about.
+    """
+    from cmk_addons.plugins.json_api.rulesets import special_agent as ruleset
+
+    if not hasattr(ruleset, "endpoint_form"):  # an older agent package
+        return SimpleNamespace(
+            endpoint_form=ruleset._endpoint,
+            validate_unique_endpoints=ruleset._validate_unique_endpoints,
+        )
+    return ruleset
+
+
 def connection_form_spec() -> object:
     """The ruleset's endpoint Dictionary WITHOUT the extractions / host_labels.
 
@@ -84,9 +103,7 @@ def connection_form_spec() -> object:
     """
     from cmk.rulesets.v1.form_specs import Dictionary
 
-    from cmk_addons.plugins.json_api.rulesets.special_agent import _endpoint
-
-    endpoint = _endpoint()
+    endpoint = _ruleset().endpoint_form()
     step2 = {"extractions", "host_labels"}
     elements = {key: element for key, element in endpoint.elements.items() if key not in step2}
     # Rebuilding the Dictionary drops the ruleset's own endpoint validation, so
@@ -107,14 +124,12 @@ def connection_list_form_spec() -> object:
     from cmk.rulesets.v1 import Title
     from cmk.rulesets.v1.form_specs import List
 
-    from cmk_addons.plugins.json_api.rulesets.special_agent import _validate_unique_endpoints
-
     return List(
         title=Title("Endpoints"),
         element_template=connection_form_spec(),
         # Same uniqueness rule as the ruleset's endpoints List, so the wizard's
         # validate/create path rejects duplicate URLs too (not only the REST API).
-        custom_validate=(_validate_unique_endpoints,),
+        custom_validate=(_ruleset().validate_unique_endpoints,),
     )
 
 
@@ -124,9 +139,7 @@ def extractions_form_spec() -> object:
     thresholds, expected-string and label-path are all native FormSpec fields —
     and the JSON field picker just appends default-seeded entries into its value.
     """
-    from cmk_addons.plugins.json_api.rulesets.special_agent import _endpoint
-
-    return _endpoint().elements["extractions"].parameter_form
+    return _ruleset().endpoint_form().elements["extractions"].parameter_form
 
 
 def host_labels_form_spec() -> object:
@@ -136,9 +149,7 @@ def host_labels_form_spec() -> object:
     create page validates + converts it like the extractions and merges it back
     into the endpoint. Host labels are endpoint-level, so they need no service.
     """
-    from cmk_addons.plugins.json_api.rulesets.special_agent import _endpoint
-
-    return _endpoint().elements["host_labels"].parameter_form
+    return _ruleset().endpoint_form().elements["host_labels"].parameter_form
 
 
 def placement_form_spec() -> object:
@@ -332,6 +343,3 @@ class ModeJsonExplorer(WatoMode):
         # then mount it — data is JSON-passed from Python into the Vue app.
         html.javascript_file(js, type_="module")
         html.vue_component("cmk-json-explorer", data=_app_data())
-
-
-mode_registry.register(ModeJsonExplorer)

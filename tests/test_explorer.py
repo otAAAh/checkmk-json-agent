@@ -38,7 +38,7 @@ def _required_keys(func_name: str) -> set[str]:
 
     AST-parses ``special_agent.py`` (no ``cmk`` import needed) and reads the
     single ``Dictionary(elements={...})`` returned by ``func_name`` (e.g.
-    ``_endpoint`` / ``_extraction``).
+    ``endpoint_form`` / ``_extraction``).
     """
     tree = ast.parse(_RULESET.read_text())
     func = next(
@@ -106,13 +106,13 @@ def rule_value(explorer_output: dict) -> dict:
 def test_ruleset_has_required_keys_to_check():
     # Guard the guard: if the AST parse found nothing, the checks below are
     # vacuous and the whole test is worthless.
-    assert _required_keys("_endpoint") >= {"url", "method", "extractions"}
+    assert _required_keys("endpoint_form") >= {"url", "method", "extractions"}
     assert _required_keys("_extraction") == {"service", "path"}
 
 
 def test_explorer_value_raw_covers_required_endpoint_keys(rule_value: dict):
     endpoint = rule_value["endpoints"][0]
-    missing = _required_keys("_endpoint") - set(endpoint)
+    missing = _required_keys("endpoint_form") - set(endpoint)
     assert not missing, f"Explorer value_raw omits required endpoint keys: {missing}"
 
 
@@ -128,7 +128,7 @@ def test_explorer_cli_object_covers_required_endpoint_keys(explorer_output: dict
     # connection keys must be present there too (auth is a bare string in the
     # CLI form, so it is not compared by value here).
     cli = explorer_output["cli"][0]
-    missing = _required_keys("_endpoint") - set(cli)
+    missing = _required_keys("endpoint_form") - set(cli)
     assert not missing, f"Explorer CLI object omits required keys: {missing}"
 
 

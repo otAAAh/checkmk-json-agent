@@ -59,7 +59,7 @@ import requests
 from cmk.gui.http import request
 from cmk.gui.i18n import _
 from cmk.gui.logged_in import user
-from cmk.gui.pages import AjaxPage, PageContext, PageEndpoint, PageResult, page_registry
+from cmk.gui.pages import AjaxPage, PageContext, PageResult
 
 _TIMEOUT = 10
 
@@ -92,7 +92,8 @@ def _connection() -> dict[str, Any]:
         try:
             from cmk.gui.form_specs import RawFrontendData
             from cmk.gui.form_specs._utils import parse_and_validate_frontend_data
-            from cmk.gui.plugins.wato.json_explorer.page import connection_form_spec
+
+            from .page import connection_form_spec
 
             value = parse_and_validate_frontend_data(
                 connection_form_spec(), RawFrontendData(json.loads(raw))
@@ -421,6 +422,3 @@ class JsonExplorerFetchPage(AjaxPage):
             # JSON round trip, and the picker matches case-insensitively anyway.
             "headers": dict(resp.headers),
         }
-
-
-page_registry.register(PageEndpoint("json_explorer_fetch", JsonExplorerFetchPage()))

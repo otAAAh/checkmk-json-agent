@@ -9,8 +9,8 @@ defaults* for a field's thresholds / string matching; the check-parameters rule
 folder / host / service. Both build the identical form controls, so the widgets
 (and their translated strings) live here once. This module is not a plugin part
 - the discovery loader ignores it - but it ships in the MKP (packaged by
-``rglob`` from the family root) and is importable at runtime as
-``cmk_addons.plugins.json_api.lib``.
+``rglob`` from the family root). The rulesets import it relatively
+(``from ..lib import ...``), so it resolves wherever the family is installed.
 """
 
 import re

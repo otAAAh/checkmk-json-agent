@@ -25,7 +25,7 @@ RULESET = (
 def dictionary_elements(func_name: str) -> dict[str, ast.expr]:
     """The ``elements`` of the first ``Dictionary(...)`` a builder returns.
 
-    ``func_name`` is a ruleset builder such as ``_endpoint`` or
+    ``func_name`` is a ruleset builder such as ``endpoint_form`` or
     ``_parameter_form``; ``ast.walk`` reaches the outer Dictionary first, which
     is the form the builder is named for.
     """

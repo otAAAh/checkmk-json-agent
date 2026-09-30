@@ -103,14 +103,16 @@ time.
 cmk_addons/plugins/json_api/
   server_side_calls/   rule -> agent command line
   rulesets/            the Setup form
-  libexec/             the special agent executable
+  special_agent/       the special agent
+  libexec/             its entry point, which Checkmk executes
   agent_based/         section parsing + check
   graphing/            metric definition
   checkman/            man page
 explorer/              standalone, dependency-free config Explorer
 locales/               translation catalogs (one .po per language)
 scripts/               build_mkp.py, gen_changelog.py, ...
-tests/                 pytest suite
+tests/                 pytest suite; the plugin tests mirror the family
+                       (agent_based/, rulesets/, special_agent/, ...)
 ```
 
 ## Compatibility

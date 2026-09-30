@@ -12,7 +12,7 @@
 // the site says so; the sample here can, before the rule exists.
 //
 // Ported from the agent's _expand_wildcards / _element_labels
-// (cmk_addons/plugins/json_api/libexec/agent_json_api), the only place these
+// (cmk_addons/plugins/json_api/special_agent/agent_json_api.py), the only place these
 // names are really decided: the label path is resolved at EVERY wildcard level
 // against that level's element, a repeat is suffixed within its own container
 // (two pods may each have a container called 'app'), and the per-level parts
