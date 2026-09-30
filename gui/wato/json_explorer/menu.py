@@ -18,7 +18,7 @@ from collections.abc import Sequence
 from cmk.gui.i18n import _
 from cmk.gui.type_defs import StaticIcon
 from cmk.gui.wato._main_module_topics import MainModuleTopicQuickSetup
-from cmk.gui.watolib.main_menu import ABCMainModule, MainModuleTopic, main_module_registry
+from cmk.gui.watolib.main_menu import ABCMainModule, MainModuleTopic
 from cmk.shared_typing.icon import IconNames
 
 
@@ -60,6 +60,3 @@ class MainModuleJsonApiExplorer(ABCMainModule):
     @classmethod
     def main_menu_search_terms(cls) -> Sequence[str]:
         return ["json", "api", "http", "rest", "endpoint"]
-
-
-main_module_registry.register(MainModuleJsonApiExplorer)

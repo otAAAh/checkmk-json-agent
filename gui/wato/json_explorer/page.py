@@ -2,9 +2,9 @@
 # SPDX-License-Identifier: GPL-2.0-only
 """A Checkmk GUI page that embeds the JSON API Explorer wizard (our own Vue app).
 
-Registered at import time into the ``cmk.gui.plugins.wato`` namespace (which the
-GUI walks and imports on startup), so it is reachable at
-``check_mk/json_explorer.py`` inside the site chrome — no menu registration.
+Registered by ``registration.register`` (the package imports and calls it when
+the GUI walks the ``cmk.gui.plugins.wato`` namespace on startup), so it is
+reachable at ``check_mk/json_explorer.py`` inside the site chrome.
 
 The wizard bundle ships in the ``web`` MKP part under ``htdocs/json_api/wizard/``
 (hashed assets/ + .vite/manifest.json) and exposes a ``<cmk-json-explorer>``
@@ -13,7 +13,7 @@ custom element. This page loads the bundle and mounts it via
 cmk-frontend-vue apps — passing initial data from Python straight into the app.
 
 This module is the ONLY part of the extension that touches internal GUI APIs
-(page_registry, make_header, html.vue_component); it lives in the optional
+(WatoMode, make_header, html.vue_component); it lives in the optional
 json_api_explorer package, never in the agent. Those APIs are internal and drift
 between releases (e.g. make_header moved modules), hence the guarded import and
 this package's version-matched CI.
@@ -35,7 +35,7 @@ from cmk.gui.htmllib.html import html
 from cmk.gui.i18n import _
 from cmk.gui.page_menu import PageMenu, make_simple_form_page_menu
 from cmk.gui.page_menu_entry import enable_page_menu_entry
-from cmk.gui.watolib.mode import WatoMode, mode_registry
+from cmk.gui.watolib.mode import WatoMode
 
 # Where the `web` part installs the built wizard, and how it is referenced from
 # a page served under check_mk/.
@@ -343,6 +343,3 @@ class ModeJsonExplorer(WatoMode):
         # then mount it — data is JSON-passed from Python into the Vue app.
         html.javascript_file(js, type_="module")
         html.vue_component("cmk-json-explorer", data=_app_data())
-
-
-mode_registry.register(ModeJsonExplorer)

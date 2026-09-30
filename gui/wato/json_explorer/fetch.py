@@ -59,7 +59,7 @@ import requests
 from cmk.gui.http import request
 from cmk.gui.i18n import _
 from cmk.gui.logged_in import user
-from cmk.gui.pages import AjaxPage, PageContext, PageEndpoint, PageResult, page_registry
+from cmk.gui.pages import AjaxPage, PageContext, PageResult
 
 _TIMEOUT = 10
 
@@ -422,6 +422,3 @@ class JsonExplorerFetchPage(AjaxPage):
             # JSON round trip, and the picker matches case-insensitively anyway.
             "headers": dict(resp.headers),
         }
-
-
-page_registry.register(PageEndpoint("json_explorer_fetch", JsonExplorerFetchPage()))

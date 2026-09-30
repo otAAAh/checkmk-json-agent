@@ -24,7 +24,7 @@ import json
 from typing import Any
 
 from cmk.gui.http import request
-from cmk.gui.pages import AjaxPage, PageContext, PageEndpoint, PageResult, page_registry
+from cmk.gui.pages import AjaxPage, PageContext, PageResult
 
 
 class JsonExplorerCreatePage(AjaxPage):
@@ -95,6 +95,3 @@ class JsonExplorerCreatePage(AjaxPage):
                 placement_spec, RawFrontendData(placement_raw)
             )
         return result
-
-
-page_registry.register(PageEndpoint("json_explorer_create", JsonExplorerCreatePage()))
