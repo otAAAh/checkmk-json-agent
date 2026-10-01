@@ -5,6 +5,8 @@
 import sys
 from pathlib import Path
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 
 import gen_changelog  # noqa: E402  (resolved via the path insert above)
@@ -82,6 +84,52 @@ def test_render_version_without_date_and_without_commits():
     assert rendered.startswith("## [0.9.0]")
     assert " - " not in rendered.splitlines()[0]  # no date suffix
     assert "_No user-facing changes recorded._" in rendered
+
+
+@pytest.mark.parametrize(
+    ("project", "expected"),
+    [
+        ("0.23.0", "0.23.0"),  # bumped, not tagged yet
+        ("0.22.0", None),  # the newest tag's own version
+        ("0.21.0", None),  # older than the newest tag
+        ("1.0.0.dev1", None),  # not a release version
+    ],
+)
+def test_pending_version_is_an_untagged_newer_pyproject_version(monkeypatch, project, expected):
+    monkeypatch.setattr(gen_changelog, "_project_version", lambda: project)
+
+    assert gen_changelog._pending_version(["v0.21.0", "v0.22.0"]) == expected
+
+
+def _fake_history(monkeypatch, project):
+    monkeypatch.setattr(gen_changelog, "_project_version", lambda: project)
+    monkeypatch.setattr(gen_changelog, "_version_tags", lambda: ["v0.22.0"])
+    monkeypatch.setattr(
+        gen_changelog,
+        "_commits",
+        lambda revrange: [("abc1234", "fix: a fix (#9)")] if revrange.endswith("HEAD") else [],
+    )
+    monkeypatch.setattr(
+        gen_changelog, "_tag_date", lambda ref: "2026-10-01" if ref == "HEAD" else "2026-09-25"
+    )
+
+
+def test_commits_after_the_newest_tag_are_unreleased_until_the_bump(monkeypatch):
+    _fake_history(monkeypatch, "0.22.0")
+
+    assert gen_changelog._sections()[0] == ("Unreleased", None, [("abc1234", "fix: a fix (#9)")])
+
+
+def test_a_bumped_untagged_version_renders_as_the_tag_will(monkeypatch):
+    # The bump commit's CHANGELOG must equal what the tag regenerates, or CI's
+    # staleness check fails on the bump PR and on main until the tag is pushed.
+    _fake_history(monkeypatch, "0.23.0")
+
+    assert gen_changelog._sections()[0] == (
+        "0.23.0",
+        "2026-10-01",
+        [("abc1234", "fix: a fix (#9)")],
+    )
 
 
 _UPGRADING = """<!-- SPDX-License-Identifier: GPL-2.0-only -->
