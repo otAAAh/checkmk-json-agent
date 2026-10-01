@@ -3,6 +3,23 @@
 All notable changes to this project, one section per released version.
 Generated from the git history by `scripts/gen_changelog.py`.
 
+## [0.23.0] - 2026-10-01
+
+### Fixes
+
+- The Explorer loads on 3.0, where StaticIcon left cmk.gui.type_defs ([#239](https://github.com/otAAAh/checkmk-json-agent/pull/239)) ([`4cbe75f`](https://github.com/otAAAh/checkmk-json-agent/commit/4cbe75f))
+- The wizard previews a label's key the way the agent derives it ([#238](https://github.com/otAAAh/checkmk-json-agent/pull/238)) ([`eb8021f`](https://github.com/otAAAh/checkmk-json-agent/commit/eb8021f))
+- Widen the rule's inputs for URLs, paths and free text ([#237](https://github.com/otAAAh/checkmk-json-agent/pull/237)) ([`99ef0c1`](https://github.com/otAAAh/checkmk-json-agent/commit/99ef0c1))
+- The picker's Add button stays at the visible right border ([#236](https://github.com/otAAAh/checkmk-json-agent/pull/236)) ([`da707fe`](https://github.com/otAAAh/checkmk-json-agent/commit/da707fe))
+
+### Other
+
+- A version bump's changelog section passes CI before its tag exists ([#241](https://github.com/otAAAh/checkmk-json-agent/pull/241)) ([`99d12a9`](https://github.com/otAAAh/checkmk-json-agent/commit/99d12a9))
+- Split the special agent into modules ([#234](https://github.com/otAAAh/checkmk-json-agent/pull/234)) ([`0a58b0b`](https://github.com/otAAAh/checkmk-json-agent/commit/0a58b0b))
+- Prepare the plugin for mainlining, without dropping 2.4/2.5 support ([#233](https://github.com/otAAAh/checkmk-json-agent/pull/233)) ([`12b4255`](https://github.com/otAAAh/checkmk-json-agent/commit/12b4255))
+- Deps: bump ruff from 0.16.8 to 0.16.9 ([#231](https://github.com/otAAAh/checkmk-json-agent/pull/231)) ([`d75e56b`](https://github.com/otAAAh/checkmk-json-agent/commit/d75e56b))
+- Bump the actions group with 2 updates ([#232](https://github.com/otAAAh/checkmk-json-agent/pull/232)) ([`5fa5f68`](https://github.com/otAAAh/checkmk-json-agent/commit/5fa5f68))
+
 ## [0.22.0] - 2026-09-25
 
 ### Features
