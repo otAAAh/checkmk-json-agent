@@ -101,16 +101,19 @@ def test_pending_version_is_an_untagged_newer_pyproject_version(monkeypatch, pro
     assert gen_changelog._pending_version(["v0.21.0", "v0.22.0"]) == expected
 
 
-def _fake_history(monkeypatch, project):
+def _fake_history(monkeypatch, project, after_bump=()):
+    """v0.22.0, then a fix and the bump commit 'bump000', then ``after_bump``."""
+    log = {
+        "v0.22.0..HEAD": [*after_bump, ("abc1234", "fix: a fix (#9)")],
+        "v0.22.0..bump000": [("abc1234", "fix: a fix (#9)")],
+        "bump000..HEAD": list(after_bump),
+    }
     monkeypatch.setattr(gen_changelog, "_project_version", lambda: project)
     monkeypatch.setattr(gen_changelog, "_version_tags", lambda: ["v0.22.0"])
+    monkeypatch.setattr(gen_changelog, "_bump_commit", lambda since: "bump000")
+    monkeypatch.setattr(gen_changelog, "_commits", lambda revrange: log.get(revrange, []))
     monkeypatch.setattr(
-        gen_changelog,
-        "_commits",
-        lambda revrange: [("abc1234", "fix: a fix (#9)")] if revrange.endswith("HEAD") else [],
-    )
-    monkeypatch.setattr(
-        gen_changelog, "_tag_date", lambda ref: "2026-10-01" if ref == "HEAD" else "2026-09-25"
+        gen_changelog, "_tag_date", lambda ref: "2026-10-01" if ref == "bump000" else "2026-09-25"
     )
 
 
@@ -130,6 +133,18 @@ def test_a_bumped_untagged_version_renders_as_the_tag_will(monkeypatch):
         "2026-10-01",
         [("abc1234", "fix: a fix (#9)")],
     )
+
+
+def test_a_commit_after_the_untagged_bump_stays_unreleased(monkeypatch):
+    # The tag goes on the bump commit, so a PR merged before the tag is pushed
+    # must not join the pending section - its CHANGELOG would differ from the
+    # bump's, and every such PR would fail the staleness check.
+    _fake_history(monkeypatch, "0.23.0", after_bump=[("def5678", "deps: bump x (#10)")])
+
+    assert gen_changelog._sections()[:2] == [
+        ("Unreleased", None, [("def5678", "deps: bump x (#10)")]),
+        ("0.23.0", "2026-10-01", [("abc1234", "fix: a fix (#9)")]),
+    ]
 
 
 _UPGRADING = """<!-- SPDX-License-Identifier: GPL-2.0-only -->

@@ -180,24 +180,37 @@ def _pending_version(tags: list[str]) -> str | None:
     return _project_version()
 
 
+def _bump_commit(since: str) -> str | None:
+    """The newest commit after ``since`` that changed pyproject's version line."""
+    found = _git(
+        "log", "-1", "--format=%H", "-G", r"^version = ", f"{since}..HEAD", "--", "pyproject.toml"
+    )
+    return found or None
+
+
 def _sections() -> list[tuple[str, str | None, list[tuple[str, str]]]]:
     """Ordered (version, date, commits) newest first, incl. an Unreleased head."""
     tags = _version_tags()
     result: list[tuple[str, str | None, list[tuple[str, str]]]] = []
 
     # Anything committed after the newest tag is "Unreleased" - unless pyproject
-    # already names the next version, in which case those commits ARE that
-    # release, only not tagged yet (the version-bump commit, before its tag is
-    # pushed). Rendering them as the tag will, dated by HEAD, lets the bump commit
-    # carry its own section and still pass the CI staleness check.
+    # already names the next version, in which case the commits up to the one
+    # that bumped it ARE that release, only not tagged yet (the bump is merged,
+    # its tag not pushed). Rendering them as the tag on the bump commit will lets
+    # the bump carry its own section and still pass the CI staleness check.
+    # Commits landing after the bump, before the tag, stay "Unreleased".
     if tags:
-        unreleased = _commits(f"{tags[-1]}..HEAD")
-        if unreleased:
-            pending = _pending_version(tags)
-            if pending is None:
+        pending = _pending_version(tags)
+        bump = _bump_commit(tags[-1]) if pending else None
+        if pending is None or bump is None:
+            unreleased = _commits(f"{tags[-1]}..HEAD")
+            if unreleased:
                 result.append(("Unreleased", None, unreleased))
-            else:
-                result.append((pending, _tag_date("HEAD"), unreleased))
+        else:
+            unreleased = _commits(f"{bump}..HEAD")
+            if unreleased:
+                result.append(("Unreleased", None, unreleased))
+            result.append((pending, _tag_date(bump), _commits(f"{tags[-1]}..{bump}")))
     else:
         # No tags yet: everything is unreleased under the pyproject version.
         return [(_project_version(), None, _commits("HEAD"))]
