@@ -168,16 +168,36 @@ def _render_version(version: str, date: str | None, commits: list[tuple[str, str
     return "\n".join(lines)
 
 
+def _pending_version(tags: list[str]) -> str | None:
+    """The pyproject version when it is newer than every tag, else ``None``."""
+    match = _VERSION_TAG.match(f"v{_project_version()}")
+    newest = _VERSION_TAG.match(tags[-1]) if tags else None
+    if match is None or newest is None:
+        return None
+    current = tuple(int(n) for n in match.groups())
+    if current <= tuple(int(n) for n in newest.groups()):
+        return None
+    return _project_version()
+
+
 def _sections() -> list[tuple[str, str | None, list[tuple[str, str]]]]:
     """Ordered (version, date, commits) newest first, incl. an Unreleased head."""
     tags = _version_tags()
     result: list[tuple[str, str | None, list[tuple[str, str]]]] = []
 
-    # Anything committed after the newest tag is "Unreleased".
+    # Anything committed after the newest tag is "Unreleased" - unless pyproject
+    # already names the next version, in which case those commits ARE that
+    # release, only not tagged yet (the version-bump commit, before its tag is
+    # pushed). Rendering them as the tag will, dated by HEAD, lets the bump commit
+    # carry its own section and still pass the CI staleness check.
     if tags:
         unreleased = _commits(f"{tags[-1]}..HEAD")
         if unreleased:
-            result.append(("Unreleased", None, unreleased))
+            pending = _pending_version(tags)
+            if pending is None:
+                result.append(("Unreleased", None, unreleased))
+            else:
+                result.append((pending, _tag_date("HEAD"), unreleased))
     else:
         # No tags yet: everything is unreleased under the pyproject version.
         return [(_project_version(), None, _commits("HEAD"))]
