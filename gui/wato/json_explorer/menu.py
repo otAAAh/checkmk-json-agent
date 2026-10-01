@@ -16,7 +16,11 @@ from __future__ import annotations
 from collections.abc import Sequence
 
 from cmk.gui.i18n import _
-from cmk.gui.type_defs import StaticIcon
+
+try:  # 3.0 moved the icon types out of the GUI package
+    from cmk.web.utils.icons import StaticIcon
+except ImportError:  # 2.4 / 2.5
+    from cmk.gui.type_defs import StaticIcon
 from cmk.gui.wato._main_module_topics import MainModuleTopicQuickSetup
 from cmk.gui.watolib.main_menu import ABCMainModule, MainModuleTopic
 from cmk.shared_typing.icon import IconNames
