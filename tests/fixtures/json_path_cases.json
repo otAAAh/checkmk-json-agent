@@ -8,7 +8,9 @@
     "cases from one file instead of each side's tests asserting its own idea.",
     "Only WELL-FORMED paths live here: for a malformed path the two differ on",
     "purpose (the port refuses it, the agent's tokenizer skips the junk), which",
-    "each side's own tests pin down."
+    "each side's own tests pin down.",
+    "'label_keys' holds the default label key each side derives from a label's",
+    "path when the label sets no key of its own (the agent's _label_key_from_path)."
   ],
   "documents": {
     "health": {
@@ -261,6 +263,48 @@
       "values": [
         "application/json"
       ]
+    }
+  ],
+  "label_keys": [
+    {
+      "path": "metadata.name",
+      "key": "name"
+    },
+    {
+      "path": "$.metadata.name",
+      "key": "name"
+    },
+    {
+      "path": "meta.content-type",
+      "key": "content-type"
+    },
+    {
+      "path": "meta.my key",
+      "key": "my key"
+    },
+    {
+      "path": "data['foo.bar']",
+      "key": "foo.bar"
+    },
+    {
+      "path": "data[\"it's\"]",
+      "key": "it's"
+    },
+    {
+      "path": "components[*]",
+      "key": "components"
+    },
+    {
+      "path": "nodes[*].cpu-load",
+      "key": "cpu-load"
+    },
+    {
+      "path": "items[0]",
+      "key": "items"
+    },
+    {
+      "path": "[0]",
+      "key": "[0]"
     }
   ]
 }

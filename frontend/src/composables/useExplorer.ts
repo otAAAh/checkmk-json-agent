@@ -14,7 +14,7 @@ import {
   validateSpec,
   type ValidationMessage,
 } from '../api/rules'
-import { defaultService } from '../lib/jsonpaths'
+import { defaultService, labelKeyOf } from '../lib/jsonpaths'
 import {
   endpointUrl,
   extractionPath,
@@ -317,21 +317,6 @@ function addHostLabel(endpointIndex: number, path: string): void {
     return // already added
   }
   services.hostLabels = [...existing, { path }]
-}
-
-/** The label key the agent will use for a stored label spec: the explicit key,
- * else the path's last segment (mirrors the agent's _label_key_from_path). */
-function labelKeyOf(spec: Record<string, unknown>): string {
-  if (typeof spec.key === 'string' && spec.key) {
-    return spec.key
-  }
-  const path = typeof spec.path === 'string' ? spec.path : ''
-  const tokens = path.replace(/\[\*\]/g, '').match(/[A-Za-z0-9_]+|\['[^']*'\]|\["[^"]*"\]/g)
-  if (!tokens || !tokens.length) {
-    return path
-  }
-  const last = tokens[tokens.length - 1]!
-  return last.startsWith("['") || last.startsWith('["') ? last.slice(2, -2) : last
 }
 
 /** Entry in an endpoint's label summary — a host label (endpoint-level, `hi`
