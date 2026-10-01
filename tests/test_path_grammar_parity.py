@@ -26,6 +26,7 @@ from pathlib import Path
 
 import pytest
 
+from cmk_addons.plugins.json_api.special_agent import extract as agent_extract
 from cmk_addons.plugins.json_api.special_agent import paths as agent_paths
 
 _CASES = json.loads((Path(__file__).parent / "fixtures" / "json_path_cases.json").read_text())
@@ -53,6 +54,13 @@ def test_the_agent_resolves_the_shared_path_cases(agent, case):
     document = _CASES["documents"][case["document"]]
 
     assert _agent_values(agent, document, case["path"]) == case["values"]
+
+
+@pytest.mark.parametrize("case", _CASES["label_keys"], ids=lambda case: case["path"])
+def test_the_agent_derives_the_shared_label_keys(case):
+    """A label without a key of its own is keyed by its path's last dict key; the
+    wizard previews that key (json_api/<key>) before the rule exists."""
+    assert agent_extract._label_key_from_path(case["path"]) == case["key"]
 
 
 def test_a_malformed_path_resolves_the_tokens_it_can():

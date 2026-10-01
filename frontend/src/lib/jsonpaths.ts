@@ -61,6 +61,38 @@ export function defaultService(path: string): string {
   return last.charAt(0).toUpperCase() + last.slice(1)
 }
 
+/** The label key the agent derives from a label's path when no key is set: the
+ * path's last dict-key segment, else the cleaned path itself — the agent's
+ * _label_key_from_path. 'metadata.name' -> 'name', "data['foo.bar']" ->
+ * 'foo.bar', 'components[*]' -> 'components', 'items[0]' -> 'items'. */
+export function labelKeyFromPath(path: string): string {
+  let cleaned = path.trim()
+  if (cleaned.startsWith('$.')) {
+    cleaned = cleaned.slice(2)
+  } else if (cleaned.startsWith('$')) {
+    cleaned = cleaned.slice(1)
+  }
+  cleaned = cleaned.replace(/\[\*\]/g, '')
+  let key = ''
+  for (const tok of cleaned.match(_SEG) ?? []) {
+    if (tok.startsWith("['") || tok.startsWith('["')) {
+      key = tok.slice(2, -2)
+    } else if (!tok.startsWith('[')) {
+      key = tok
+    }
+  }
+  return key || cleaned
+}
+
+/** The label key the agent uses for a stored label spec: its explicit key, else
+ * the one its path gives (labelKeyFromPath). */
+export function labelKeyOf(spec: Record<string, unknown>): string {
+  if (typeof spec.key === 'string' && spec.key) {
+    return spec.key
+  }
+  return labelKeyFromPath(typeof spec.path === 'string' ? spec.path : '')
+}
+
 function preview(v: Json): string {
   return typeof v === 'string' ? JSON.stringify(v) : String(v)
 }

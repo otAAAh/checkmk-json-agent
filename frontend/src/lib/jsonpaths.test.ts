@@ -9,7 +9,16 @@ import { readFileSync } from 'node:fs'
 
 import { describe, expect, it } from 'vitest'
 
-import { buildTree, defaultService, joinKey, resolvePath, segFor, type Json } from './jsonpaths'
+import {
+  buildTree,
+  defaultService,
+  joinKey,
+  labelKeyFromPath,
+  labelKeyOf,
+  resolvePath,
+  segFor,
+  type Json,
+} from './jsonpaths'
 
 interface PathCase {
   name: string
@@ -20,7 +29,11 @@ interface PathCase {
 
 const fixture = JSON.parse(
   readFileSync(new URL('../../../tests/fixtures/json_path_cases.json', import.meta.url), 'utf8'),
-) as { documents: Record<string, Json>; cases: PathCase[] }
+) as {
+  documents: Record<string, Json>
+  cases: PathCase[]
+  label_keys: Array<{ path: string; key: string }>
+}
 
 describe('resolvePath — the shared grammar', () => {
   it.each(fixture.cases.map((c) => [c.name, c] as const))('%s', (_name, testCase) => {
@@ -140,5 +153,16 @@ describe('buildTree — what the picker offers', () => {
   it('has nothing to offer for a scalar or empty document', () => {
     expect(buildTree('just a string')).toEqual([])
     expect(buildTree({})).toEqual([])
+  })
+})
+
+describe('labelKeyFromPath — the label key a path gives, as the agent derives it', () => {
+  it.each(fixture.label_keys.map((c) => [c.path, c.key] as const))('%s -> %s', (path, key) => {
+    expect(labelKeyFromPath(path)).toBe(key)
+  })
+
+  it("prefers a label's own key over its path", () => {
+    expect(labelKeyOf({ key: 'env', path: 'meta.content-type' })).toBe('env')
+    expect(labelKeyOf({ key: '', path: 'meta.content-type' })).toBe('content-type')
   })
 })

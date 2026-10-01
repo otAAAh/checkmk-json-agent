@@ -20,7 +20,7 @@ import CmkParagraph from '@/components/typography/CmkParagraph.vue'
 
 import { useExplorer } from '../../composables/useExplorer'
 import { labelWarnings, resolveLabelled, type LabelledValue } from '../../lib/elementlabels'
-import { resolvePath, type Json } from '../../lib/jsonpaths'
+import { labelKeyOf, resolvePath, type Json } from '../../lib/jsonpaths'
 import {
   endpointUrl,
   extractionPath,
@@ -490,21 +490,6 @@ interface EndpointReview {
   serviceCount: number
   inventoryCount: number
   hostLabels: Array<{ label: string; value: string }>
-}
-
-/** The label key the agent will use (explicit key, else the path's last segment)
- * — mirrors the agent's _label_key_from_path. */
-function labelKeyOf(spec: Record<string, unknown>): string {
-  if (typeof spec.key === 'string' && spec.key) {
-    return spec.key
-  }
-  const path = typeof spec.path === 'string' ? spec.path : ''
-  const tokens = path.replace(/\[\*\]/g, '').match(/[A-Za-z0-9_]+|\['[^']*'\]|\["[^"]*"\]/g)
-  if (!tokens || !tokens.length) {
-    return path
-  }
-  const last = tokens[tokens.length - 1]!
-  return last.startsWith("['") || last.startsWith('["') ? last.slice(2, -2) : last
 }
 
 /** Whether a label spec carries an element condition.
