@@ -67,6 +67,8 @@ _Match = tuple[str, object] | None
 # CascadingSingleChoice (JSON-encoded by the agent). After _coerce_value_as:
 #   ("counter", None)                    -> monitor the per-second rate
 #   ("timestamp", {"format": "auto"})    -> monitor the age in seconds
+#   ("timestamp", {"format": "custom", "pattern": "%d.%m.%Y"}) -> likewise, read
+#                                           with that strptime pattern
 # ``None`` monitors the value as it stands.
 _ValueAs = tuple[str, object] | None
 
@@ -486,7 +488,10 @@ def _coerce_value_as(raw: object) -> _ValueAs:
             return ("counter", None)
         case ["timestamp", dict() as cfg]:
             fmt = cfg.get("format")
-            return ("timestamp", {"format": fmt if isinstance(fmt, str) and fmt else "auto"})
+            coerced = {"format": fmt if isinstance(fmt, str) and fmt else "auto"}
+            if isinstance(pattern := cfg.get("pattern"), str) and pattern:
+                coerced["pattern"] = pattern
+            return ("timestamp", coerced)
         case ["timestamp", _] | "timestamp":
             return ("timestamp", {"format": "auto"})
     return None
@@ -992,10 +997,33 @@ def _parse_go_time(text: str) -> float | None:
     return _parse_iso_timestamp(f"{match[1]}{match[2]}")
 
 
-def _parse_timestamp(value: object, fmt: str) -> float | None:
+def _parse_custom_timestamp(text: str, pattern: str) -> float | None:
+    """The text read with a strptime pattern as a Unix epoch float, or None.
+
+    Without '%z' in the pattern the result is naive and read as UTC, like an ISO
+    8601 timestamp without a zone. A pattern strptime rejects (the ruleset
+    validates it, but a rule imported over the REST API is not) is a value that
+    cannot be read, not a crashed check.
+    """
+    try:
+        parsed = datetime.strptime(text.strip(), pattern)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=UTC)
+    return parsed.timestamp()
+
+
+def _parse_timestamp(value: object, fmt: str, pattern: str | None = None) -> float | None:
     """The value as a Unix epoch float, per the configured format, or None."""
     number = _as_number(value)
     match fmt:
+        case "custom":
+            # A number is read as text: a pattern such as '%Y%m%d' is for exactly
+            # the digits an API may send as a JSON number.
+            if pattern is None or isinstance(value, bool) or value is None:
+                return None
+            return _parse_custom_timestamp(str(value), pattern)
         case "epoch":
             return number
         case "epoch_ms":
@@ -1087,7 +1115,12 @@ def _derive(entry: Item) -> tuple[float | None, str, Callable[[float], str] | No
         )
 
     fmt = cfg.get("format") if isinstance(cfg, dict) else None
-    stamp = _parse_timestamp(entry.value, fmt if isinstance(fmt, str) else "auto")
+    pattern = cfg.get("pattern") if isinstance(cfg, dict) else None
+    stamp = _parse_timestamp(
+        entry.value,
+        fmt if isinstance(fmt, str) else "auto",
+        pattern if isinstance(pattern, str) else None,
+    )
     if stamp is None:
         return (
             None,

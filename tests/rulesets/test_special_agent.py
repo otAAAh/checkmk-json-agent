@@ -426,12 +426,41 @@ def test_timestamp_formats_match_the_parser(ruleset, check):
         element.name
         for element in timestamp.parameter_form.elements["format"].parameter_form.elements
     }
-    assert formats == {"auto", "epoch", "epoch_ms", "iso"}
+    assert formats == {"auto", "epoch", "epoch_ms", "iso", "custom"}
     # Each offered format parses its canonical example.
     assert check._parse_timestamp(1700000000, "epoch")
     assert check._parse_timestamp(1700000000000, "epoch_ms")
     assert check._parse_timestamp("2023-11-14T22:13:20Z", "iso")
     assert check._parse_timestamp("2023-11-14T22:13:20Z", "auto")
+    assert check._parse_timestamp("14.11.2023 22:13:20", "custom", "%d.%m.%Y %H:%M:%S")
+    # The pattern travels next to the format, through the check's coercion.
+    assert "pattern" in timestamp.parameter_form.elements
+    assert check._coerce_value_as(["timestamp", {"format": "custom", "pattern": "%Y"}]) == (
+        "timestamp",
+        {"format": "custom", "pattern": "%Y"},
+    )
+
+
+@pytest.mark.parametrize(
+    "pattern", ["%d.%m.%Y %H:%M:%S", "%m/%d/%Y %I:%M %p", "%Y%m%d", "%Y-%m-%d (100%%)"]
+)
+def test_custom_timestamp_pattern_accepts_strptime_patterns(ruleset, pattern):
+    ruleset._validate_strptime_pattern(pattern)  # must not raise
+
+
+@pytest.mark.parametrize("pattern", ["%Q", "%Y %", "%s", "no directive", "100%%"])
+def test_custom_timestamp_pattern_rejects_unusable_patterns(ruleset, pattern):
+    with pytest.raises(ValidationError):
+        ruleset._validate_strptime_pattern(pattern)
+
+
+def test_custom_timestamp_format_needs_a_pattern(ruleset):
+    with pytest.raises(ValidationError):
+        ruleset._validate_timestamp_format({"format": "custom"})
+    ruleset._validate_timestamp_format({"format": "custom", "pattern": "%Y"})
+    # Another format ignores a left-over pattern rather than refusing the rule.
+    ruleset._validate_timestamp_format({"format": "auto"})
+    ruleset._validate_timestamp_format({"format": "iso", "pattern": "%Y"})
 
 
 def test_endpoint_form_has_an_optional_name(ruleset):

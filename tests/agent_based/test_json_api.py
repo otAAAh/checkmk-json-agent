@@ -826,6 +826,15 @@ def test_coerce_value_as(check):
     )
     # A timestamp without a format falls back to auto-detection.
     assert check._coerce_value_as(["timestamp", {}]) == ("timestamp", {"format": "auto"})
+    # A custom pattern is carried along; an empty or non-string one is dropped.
+    assert check._coerce_value_as(["timestamp", {"format": "custom", "pattern": "%Y"}]) == (
+        "timestamp",
+        {"format": "custom", "pattern": "%Y"},
+    )
+    assert check._coerce_value_as(["timestamp", {"format": "custom", "pattern": ""}]) == (
+        "timestamp",
+        {"format": "custom"},
+    )
     # Absent / unknown: monitor the value as it stands.
     assert check._coerce_value_as(None) is None
     assert check._coerce_value_as(["something_new", {}]) is None
@@ -1063,6 +1072,47 @@ def test_parse_timestamp_auto_reads_go_time(check):
     assert check._parse_timestamp("2023-11-14 22:13:20 +0000 UTC tomorrow", "auto") is None
     # The explicit formats stay strict.
     assert check._parse_timestamp("2023-11-14 22:13:20 +0000 UTC", "iso") is None
+
+
+def test_parse_timestamp_custom_pattern(check):
+    """'custom' reads the value with the rule's strptime pattern - the escape
+    hatch for the formats 'auto' cannot guess, such as a locale's."""
+    assert check._parse_timestamp("14.11.2023 22:13:20", "custom", "%d.%m.%Y %H:%M:%S") == (
+        1700000000.0
+    )
+    assert check._parse_timestamp("11/14/2023 10:13 PM", "custom", "%m/%d/%Y %I:%M %p") == (
+        1699999980.0
+    )
+    # Without %z the time is UTC; with it, the offset decides.
+    assert check._parse_timestamp(
+        "14/Nov/2023:23:13:20 +0100", "custom", "%d/%b/%Y:%H:%M:%S %z"
+    ) == (1700000000.0)
+    # A JSON number is read as its digits, for patterns like '%Y%m%d'.
+    assert check._parse_timestamp(20231114, "custom", "%Y%m%d") == 1699920000.0
+    # Not matching, no pattern, or a pattern strptime refuses: not a timestamp,
+    # and never an exception.
+    assert check._parse_timestamp("2023-11-14", "custom", "%d.%m.%Y") is None
+    assert check._parse_timestamp("14.11.2023", "custom") is None
+    assert check._parse_timestamp("14.11.2023", "custom", "%Q") is None
+    assert check._parse_timestamp(None, "custom", "%Y") is None
+    assert check._parse_timestamp(True, "custom", "%Y") is None
+
+
+def test_timestamp_age_with_a_custom_pattern(check, monkeypatch):
+    _fixed_clock(check, monkeypatch, 1700003600.0)
+    section = _section(
+        check,
+        [
+            _entry(
+                "Backup",
+                value="14.11.2023 22:13:20",
+                value_as=["timestamp", {"format": "custom", "pattern": "%d.%m.%Y %H:%M:%S"}],
+            )
+        ],
+    )
+    results = list(check.check_json_api("Backup", {}, section))
+    (metric,) = [r for r in results if isinstance(r, Metric)]
+    assert metric.value == 3600.0
 
 
 def test_parse_timestamp_keeps_epoch_zero(check):

@@ -744,7 +744,7 @@ function addExtraction(path) {
     label_path: path.includes("[*]") ? guessLabel(path) : "",
     pbHost: "", pbLabels: "",
     aggregate: "",
-    valueAs: "", tsFormat: "auto",
+    valueAs: "", tsFormat: "auto", tsPattern: "",
     flPath: "", flOp: "not_equals", flValue: "",
     unit: "", metricName: "", vr_min: "", vr_max: "",
     calc: "", calcPath: "", summary: "", lu_w: "", lu_c: "", ll_w: "", ll_c: "",
@@ -793,11 +793,16 @@ function renderFields() {
           `<option value="${v}"${e.valueAs === v ? " selected" : ""}>${lbl}</option>`).join("") +
       `</select></div>` +
       (e.valueAs === "timestamp"
-        ? `<div class="row"><label>Timestamp format</label><select data-f="tsFormat" data-i="${i}">` +
+        ? `<div class="row"><label>Timestamp format</label><select data-f="tsFormat" data-rerender="1" data-i="${i}">` +
             [["auto", "detect automatically"], ["epoch", "Unix epoch seconds"],
-             ["epoch_ms", "Unix epoch milliseconds"], ["iso", "ISO 8601 / RFC 3339"]].map(([v, lbl]) =>
+             ["epoch_ms", "Unix epoch milliseconds"], ["iso", "ISO 8601 / RFC 3339"],
+             ["custom", "custom format (pattern below)"]].map(([v, lbl]) =>
               `<option value="${v}"${e.tsFormat === v ? " selected" : ""}>${lbl}</option>`).join("") +
-          `</select></div>`
+          `</select></div>` +
+          (e.tsFormat === "custom"
+            ? `<div class="row"><label>Format pattern</label><input type="text" data-f="tsPattern" data-i="${i}" value="${escAttr(e.tsPattern)}" placeholder="Python strptime, e.g. %d.%m.%Y %H:%M:%S — no %z means UTC"></div>` +
+              `<div class="subnote err" data-tsnote="${i}">${escAttr(tsPatternError(e))}</div>`
+            : "")
         : "") +
       `<div class="row"><label>Unit</label><select data-f="unit" data-rerender="1" data-i="${i}">` +
         [["", "no unit"], ...UNITS].map(([u, lbl]) =>
@@ -847,6 +852,8 @@ function renderFields() {
       // take the cursor out of the input being typed in.
       const note = box.querySelector(`[data-lpnote="${inp.dataset.i}"]`);
       if (note) note.innerHTML = labelPathNote(ep().extractions[+inp.dataset.i]);
+      const tsNote = box.querySelector(`[data-tsnote="${inp.dataset.i}"]`);
+      if (tsNote) tsNote.textContent = tsPatternError(ep().extractions[+inp.dataset.i]);
       if (inp.dataset.rerender) renderFields();
       renderOutputs();
     };
@@ -893,6 +900,17 @@ const UNITS = [
 const COUNTABLE_UNITS = new Set(["count", "bytes", "seconds", "percent"]);
 
 /** Why Setup would refuse this unit for this field, or "" if it is fine. */
+/** Why Setup would refuse this custom timestamp pattern, or "" if it is fine.
+ *  Mirrors the ruleset's checks as far as JS can: a pattern is required and needs
+ *  a directive; whether strptime knows each directive is left to Setup. */
+function tsPatternError(e) {
+  if (e.valueAs !== "timestamp" || e.tsFormat !== "custom") return "";
+  const v = (e.tsPattern || "").trim();
+  if (!v) return "'Custom format' needs a format pattern.";
+  if (!/%[^%]/.test(v.replace(/%%/g, ""))) return "The pattern needs at least one directive, e.g. '%Y' for the year.";
+  return "";
+}
+
 function unitError(e) {
   if (e.valueAs === "counter" && e.unit && !COUNTABLE_UNITS.has(e.unit))
     return "A counter is read as a rate per second, so its unit has to be one things are counted in: count, bytes, seconds, percent or none.";
@@ -1119,7 +1137,11 @@ function extractionObjs(e) {
     }
     if (x.aggregate) o.aggregate = x.aggregate;
     if (x.valueAs === "counter") o.value_as = ["counter", null];
-    else if (x.valueAs === "timestamp") o.value_as = ["timestamp", { format: x.tsFormat || "auto" }];
+    else if (x.valueAs === "timestamp") {
+      const ts = { format: x.tsFormat || "auto" };
+      if (ts.format === "custom" && (x.tsPattern || "").trim()) ts.pattern = x.tsPattern.trim();
+      o.value_as = ["timestamp", ts];
+    }
     if (x.flPath && x.flPath.trim())
       o.filter = { path: x.flPath.trim(), op: x.flOp || "equals", value: x.flValue || "" };
     if (x.unit) o.unit = x.unit;
@@ -1178,7 +1200,8 @@ function pyExtraction(o) {
   if (o.aggregate) p.push(`'aggregate': ${pyStr(o.aggregate)}`);
   if (o.value_as) {
     const [mode, cfg] = o.value_as;
-    p.push(`'value_as': (${pyStr(mode)}, ${cfg === null ? "None" : `{'format': ${pyStr(cfg.format)}}`})`);
+    const pattern = cfg && cfg.pattern !== undefined ? `, 'pattern': ${pyStr(cfg.pattern)}` : "";
+    p.push(`'value_as': (${pyStr(mode)}, ${cfg === null ? "None" : `{'format': ${pyStr(cfg.format)}${pattern}}`})`);
   }
   if (o.filter) p.push(`'filter': {'path': ${pyStr(o.filter.path)}, 'op': ${pyStr(o.filter.op)}, 'value': ${pyStr(o.filter.value)}}`);
   if (o.unit) p.push(`'unit': ${pyStr(o.unit)}`);

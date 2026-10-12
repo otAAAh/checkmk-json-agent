@@ -158,6 +158,17 @@ def test_explorer_emits_aggregate_and_value_as(rule_value: dict, explorer_output
     assert cli["Requests"]["value_as"] == ["counter", None]
 
 
+def test_explorer_emits_a_custom_timestamp_pattern(rule_value: dict, explorer_output: dict):
+    # The pattern rides next to the format, trimmed, in both the rule value and
+    # the agent's CLI object - and only for the custom format.
+    expected = {"format": "custom", "pattern": "%d.%m.%Y %H:%M"}
+    extractions = rule_value["endpoints"][0]["extractions"]
+    by_service = {x["service"]: x for x in extractions}
+    assert by_service["Expiry"]["value_as"] == ("timestamp", expected)
+    cli = {x["service"]: x for x in explorer_output["cli"][0]["extractions"]}
+    assert cli["Expiry"]["value_as"] == ["timestamp", expected]
+
+
 def test_explorer_choices_match_the_ruleset(explorer_output: dict):
     # Every aggregate / value_as / timestamp-format choice the Explorer offers
     # must exist in the ruleset, or it generates a rule Checkmk rejects.
@@ -168,8 +179,11 @@ def test_explorer_choices_match_the_ruleset(explorer_output: dict):
     for choice in ("counter", "timestamp"):
         assert f'name="{choice}"' in ruleset
         assert f'"{choice}"' in source
-    for fmt in ("auto", "epoch", "epoch_ms", "iso"):
+    for fmt in ("auto", "epoch", "epoch_ms", "iso", "custom"):
         assert f'"{fmt}"' in ruleset
+        assert f'"{fmt}"' in source
+    # The custom format's pattern key is the ruleset's.
+    assert '"pattern": DictElement(' in ruleset
 
 
 def test_explorer_emits_the_piggyback_host_field(rule_value: dict, explorer_output: dict):
