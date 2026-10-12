@@ -1430,8 +1430,11 @@ def _extraction() -> Dictionary:
                                                 "'Detect automatically' reads a "
                                                 "number as Unix epoch seconds "
                                                 "(milliseconds when it is far too "
-                                                "large for seconds) and anything "
-                                                "else as ISO 8601. A timestamp "
+                                                "large for seconds) and text as "
+                                                "ISO 8601, as an HTTP-date ('Wed, "
+                                                "21 Oct 2015 07:28:00 GMT') or in "
+                                                "Go's default layout ('2015-10-21 "
+                                                "07:28:00 +0000 UTC'). A timestamp "
                                                 "without a time zone is read as UTC."
                                             ),
                                             elements=[

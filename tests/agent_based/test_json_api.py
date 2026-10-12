@@ -1042,6 +1042,29 @@ def test_parse_timestamp_auto_reads_an_http_date(check):
     assert check._parse_timestamp("Wed, 21 Oct 2015 07:28:00 GMT", "iso") is None
 
 
+def test_parse_timestamp_auto_reads_go_time(check):
+    """'auto' also accepts Go's default time layout, which APIs written in Go
+    leak into their JSON - Cloudflare's origin certificate 'expires_on' (#246)."""
+    assert check._parse_timestamp("2023-11-14 22:13:20 +0000 UTC", "auto") == 1700000000.0
+    # The offset decides, not the zone name - which may be an abbreviation or,
+    # for a zone without one, the offset again.
+    assert check._parse_timestamp("2023-11-14 23:13:20 +0100 CET", "auto") == 1700000000.0
+    assert check._parse_timestamp("2023-11-14 17:43:20 -0430 -0430", "auto") == 1700000000.0
+    # Nanoseconds, and the monotonic-clock reading of a time.Now() value.
+    assert (
+        check._parse_timestamp("2023-11-14 22:13:20.123456789 +0000 UTC", "auto")
+        == 1700000000.123456
+    )
+    assert (
+        check._parse_timestamp("2023-11-14 22:13:20 +0000 UTC m=+0.000012345", "auto")
+        == 1700000000.0
+    )
+    # Not a prefix match: trailing garbage is still not a timestamp.
+    assert check._parse_timestamp("2023-11-14 22:13:20 +0000 UTC tomorrow", "auto") is None
+    # The explicit formats stay strict.
+    assert check._parse_timestamp("2023-11-14 22:13:20 +0000 UTC", "iso") is None
+
+
 def test_parse_timestamp_keeps_epoch_zero(check):
     """1970-01-01 is a real timestamp, not a parse failure: the ISO result must
     not be discarded as falsy before the HTTP-date fallback is tried."""

@@ -970,6 +970,28 @@ def _parse_http_date(text: str) -> float | None:
     return parsed.timestamp()
 
 
+# Go's default time layout, what ``time.Time.String()`` (and so ``fmt.Print``)
+# emits: '2006-01-02 15:04:05.999999999 -0700 MST'. APIs written in Go leak it
+# into their JSON (Cloudflare's origin certificate 'expires_on'). The zone name
+# is an abbreviation, or the offset again when the zone has none; a time read
+# from the monotonic clock carries an ' m=+0.000000001' suffix.
+_GO_TIME = re.compile(
+    r"(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}(?:\.\d+)?) ([+-]\d{4}) \S+(?: m=[+-]\d+(?:\.\d+)?)?"
+)
+
+
+def _parse_go_time(text: str) -> float | None:
+    """A timestamp in Go's default layout as a Unix epoch float, or None.
+
+    Only the numeric offset is read: a zone abbreviation is ambiguous ('IST' is
+    three different zones), and Go always writes the offset next to it.
+    """
+    match = _GO_TIME.fullmatch(text.strip())
+    if match is None:
+        return None
+    return _parse_iso_timestamp(f"{match[1]}{match[2]}")
+
+
 def _parse_timestamp(value: object, fmt: str) -> float | None:
     """The value as a Unix epoch float, per the configured format, or None."""
     number = _as_number(value)
@@ -981,17 +1003,19 @@ def _parse_timestamp(value: object, fmt: str) -> float | None:
         case "iso":
             return _parse_iso_timestamp(value) if isinstance(value, str) else None
     # "auto" (and anything unknown): a number is an epoch, in milliseconds when
-    # it is far too large to be seconds; a string is tried as ISO 8601 and then
-    # as an HTTP-date, so a 'Last-Modified' header read via '@header.' resolves
-    # without the rule having to name a format.
+    # it is far too large to be seconds; a string is tried as ISO 8601, then as
+    # an HTTP-date, so a 'Last-Modified' header read via '@header.' resolves
+    # without the rule having to name a format, and then in Go's default layout.
     if number is not None:
         return number / 1000.0 if abs(number) > _EPOCH_MS_THRESHOLD else number
     if not isinstance(value, str):
         return None
-    # Not `iso or http_date`: a timestamp of exactly epoch 0 is a real value and
-    # would be discarded as falsy.
-    stamp = _parse_iso_timestamp(value)
-    return stamp if stamp is not None else _parse_http_date(value)
+    # Not `iso or http_date or ...`: a timestamp of exactly epoch 0 is a real
+    # value and would be discarded as falsy.
+    for parse in (_parse_iso_timestamp, _parse_http_date, _parse_go_time):
+        if (stamp := parse(value)) is not None:
+            return stamp
+    return None
 
 
 def _counter_key(entry: Item) -> str:
