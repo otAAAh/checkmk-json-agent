@@ -448,7 +448,7 @@ def test_custom_timestamp_pattern_accepts_strptime_patterns(ruleset, pattern):
     ruleset._validate_strptime_pattern(pattern)  # must not raise
 
 
-@pytest.mark.parametrize("pattern", ["%Q", "%Y %", "%s", "no directive", "100%%"])
+@pytest.mark.parametrize("pattern", ["%Q", "%Y %", "%Y%%%", "%", "%s", "no directive", "100%%"])
 def test_custom_timestamp_pattern_rejects_unusable_patterns(ruleset, pattern):
     with pytest.raises(ValidationError):
         ruleset._validate_strptime_pattern(pattern)

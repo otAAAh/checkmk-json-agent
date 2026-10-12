@@ -145,6 +145,13 @@ def _validate_strptime_pattern(value: str) -> None:
     being 'Not a valid timestamp'; and a pattern without a single directive
     matches one literal string, which cannot be what was meant.
     """
+    # A trailing lone '%' is checked here rather than left to strptime: which
+    # error it raises for one differs between Python patch releases (3.12.13
+    # reports a mismatch, which reads like a usable pattern).
+    if value.replace("%%", "").endswith("%"):
+        raise validators.ValidationError(
+            Message("A '%' must be followed by a directive; write '%%' for a literal '%'.")
+        )
     try:
         datetime.strptime("", value)
     except ValueError as exc:
