@@ -12,6 +12,23 @@ this list needs none.
 `scripts/gen_changelog.py --version X.Y.Z` appends the matching section to the
 GitHub Release body, so these notes travel with the release people actually read.
 
+## [0.24.0]
+
+### A timestamp field with format `auto` now reads Go's default time layout
+
+`Interpret the value as → a timestamp` with format `auto` previously accepted a
+number (epoch seconds or milliseconds), an ISO 8601 string or an HTTP-date, and
+reported anything else as `Not a valid timestamp` (UNKNOWN). It now also accepts
+the layout Go's `time.Time.String()` writes — `2027-07-11 08:40:00 +0000 UTC` —
+which APIs written in Go put into their JSON; Cloudflare's origin certificate
+`expires_on` is one ([#246](https://github.com/otAAAh/checkmk-json-agent/issues/246)).
+The numeric offset decides the time; the zone name after it is ignored.
+
+**Effect:** a field that was stuck at UNKNOWN because its value was in this
+layout now resolves to a real age. If that field has upper levels configured, it
+can go WARN or CRIT on the next check where it previously sat UNKNOWN. The
+explicit `ISO 8601` format is unchanged and stays strict.
+
 ## [0.21.0]
 
 ### Counters sharing a service each keep their own reading
