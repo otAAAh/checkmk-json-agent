@@ -12,6 +12,7 @@ import ast
 import re
 from collections import Counter
 from collections.abc import Mapping
+from datetime import datetime
 from urllib.parse import urlparse
 
 from cmk.rulesets.v1 import Help, Label, Message, Title
@@ -135,6 +136,39 @@ _DECLARED_METRICS = frozenset(
         "json_api_cert_expiry",
     }
 )
+
+
+def _validate_strptime_pattern(value: str) -> None:
+    """A custom timestamp pattern must be one strptime can use at all.
+
+    A typo such as '%Q' is otherwise only noticed at check time, as every value
+    being 'Not a valid timestamp'; and a pattern without a single directive
+    matches one literal string, which cannot be what was meant.
+    """
+    # A trailing lone '%' is checked here rather than left to strptime: which
+    # error it raises for one differs between Python patch releases (3.12.13
+    # reports a mismatch, which reads like a usable pattern).
+    if value.replace("%%", "").endswith("%"):
+        raise validators.ValidationError(
+            Message("A '%' must be followed by a directive; write '%%' for a literal '%'.")
+        )
+    try:
+        datetime.strptime("", value)
+    except ValueError as exc:
+        if "does not match format" not in str(exc):
+            raise validators.ValidationError(
+                Message("This is not a valid format pattern: %s") % str(exc)
+            ) from exc
+    if not re.search(r"%[^%]", value.replace("%%", "")):
+        raise validators.ValidationError(
+            Message("The pattern needs at least one directive, e.g. '%Y' for the year.")
+        )
+
+
+def _validate_timestamp_format(value: Mapping[str, object]) -> None:
+    """'Custom format' needs a pattern to read the value with."""
+    if value.get("format") == "custom" and not value.get("pattern"):
+        raise validators.ValidationError(Message("'Custom format' needs a format pattern."))
 
 
 def _validate_metric_name(value: str) -> None:
@@ -1434,8 +1468,10 @@ def _extraction() -> Dictionary:
                                                 "ISO 8601, as an HTTP-date ('Wed, "
                                                 "21 Oct 2015 07:28:00 GMT') or in "
                                                 "Go's default layout ('2015-10-21 "
-                                                "07:28:00 +0000 UTC'). A timestamp "
-                                                "without a time zone is read as UTC."
+                                                "07:28:00 +0000 UTC'). 'Custom "
+                                                "format' reads text with the pattern "
+                                                "below. A timestamp without a time "
+                                                "zone is read as UTC."
                                             ),
                                             elements=[
                                                 SingleChoiceElement(
@@ -1455,11 +1491,34 @@ def _extraction() -> Dictionary:
                                                         "e.g. '2026-07-28T02:00:00Z'"
                                                     ),
                                                 ),
+                                                SingleChoiceElement(
+                                                    "custom",
+                                                    Title("Custom format (pattern below)"),
+                                                ),
                                             ],
                                             prefill=DefaultValue("auto"),
                                         ),
                                     ),
+                                    "pattern": DictElement(
+                                        required=False,
+                                        parameter_form=String(
+                                            title=Title("Custom format pattern"),
+                                            help_text=Help(
+                                                "Only used with 'Custom format'. "
+                                                "Python strptime directives, e.g. "
+                                                "'%d.%m.%Y %H:%M:%S' for "
+                                                "'28.07.2026 02:00:00' or "
+                                                "'%m/%d/%Y %I:%M %p' for "
+                                                "'07/28/2026 02:00 AM'. Without %z "
+                                                "in the pattern the time is read "
+                                                "as UTC."
+                                            ),
+                                            field_size=FieldSize.LARGE,
+                                            custom_validate=(_validate_strptime_pattern,),
+                                        ),
+                                    ),
                                 },
+                                custom_validate=(_validate_timestamp_format,),
                             ),
                         ),
                     ],
