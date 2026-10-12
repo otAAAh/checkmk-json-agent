@@ -4,5 +4,5 @@
 # not from here; pydantic is needed only so mypy can type-check the server-side call.
 ruff==0.16.10
 mypy==2.4.0
-pydantic==2.13.5
+pydantic==2.14.0
 pytest==9.1.1
