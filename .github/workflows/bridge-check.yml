@@ -8,13 +8,13 @@ name: Bridge check
 # mounts. A red build is the earliest signal that a Checkmk release changed the
 # custom-element names or the `data` contract the Explorer relies on.
 #
-# Runs weekly (drift catch as dailies move) and on demand only — NOT on PRs.
-# The smoke needs a *current* check-mk-raw 2.5.0 image, but until 2.5.0 goes
-# stable the only public tags are stale beta dailies whose internal
-# cmk-frontend-vue contract no longer matches, so gating PRs on it would wedge
-# every change. The weekly run keeps catching real drift once a current 2.5.0
-# image is published. Kept out of the main CI regardless, to avoid adding
-# container + browser time to unrelated changes.
+# Runs weekly (drift catch as dailies move) and on demand only — NOT on PRs,
+# to keep container + browser time out of unrelated changes.
+#
+# From 2.5 on, Checkmk publishes its free edition as checkmk/check-mk-community;
+# checkmk/check-mk-raw stops at 2.4 (its last 2.5.0 tag is the 2025-11-04 beta
+# daily). Resolving 2.5 against check-mk-raw silently pinned this check to that
+# stale beta, so it went red every week without testing a current site.
 on:
   workflow_dispatch:
   schedule:
@@ -57,23 +57,29 @@ jobs:
           pip install playwright pytest
           playwright install --with-deps chromium
 
-      # The newest 2.5 daily (2.5 has no floating '-latest' tag and dailies are
-      # pruned, so it's resolved at run time rather than hard-coded).
+      # The newest daily of each line. Dated tags are pruned and 3.0.0 has no
+      # floating '-daily' tag, so they are resolved at run time. 3.0 is where
+      # cmk-frontend-vue's shared code moves into cmk-ui-library, so it is the
+      # earliest warning that the next release breaks the bridge.
       - name: Resolve the Checkmk images to test against
         id: images
         run: |
           set -euo pipefail
+          repo=checkmk/check-mk-community
           newest_daily() {
-            curl -fsSL "https://hub.docker.com/v2/repositories/checkmk/check-mk-raw/tags/?page_size=100&name=$1" \
+            curl -fsSL "https://hub.docker.com/v2/repositories/$repo/tags/?page_size=100&ordering=last_updated&name=$1" \
               | python3 -c "import sys, json; ts=[t['name'] for t in json.load(sys.stdin)['results'] if t['name'].startswith('$1')]; print(sorted(ts)[-1] if ts else '')"
           }
           # The Explorer MKP requires Checkmk >= 2.5.0, so only smoke it on 2.5.0+
           # sites (the agent's 2.4 support is covered by the main CI 'test' job).
-          v25="$(newest_daily 2.5.0-2 || true)"
-          [ -n "$v25" ] || { echo "::error::no check-mk-raw 2.5.0 daily image found"; exit 1; }
-          images="checkmk/check-mk-raw:$v25"
+          images=""
+          for line in 2.5.0 3.0.0; do
+            tag="$(newest_daily "$line-2" || true)"
+            [ -n "$tag" ] || { echo "::error::no $repo $line daily image found"; exit 1; }
+            images="$images $repo:$tag"
+          done
           echo "list=$images" >> "$GITHUB_OUTPUT"
-          echo "Testing against: $images"
+          echo "Testing against:$images"
 
       - name: Bridge smoke against each Checkmk site
         env:
