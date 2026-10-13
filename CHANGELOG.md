@@ -3,6 +3,24 @@
 All notable changes to this project, one section per released version.
 Generated from the git history by `scripts/gen_changelog.py`.
 
+## [0.24.0] - 2026-10-13
+
+### Features
+
+- A timestamp field can be read with a custom strptime pattern ([#253](https://github.com/otAAAh/checkmk-json-agent/pull/253)) ([`6ba5ba2`](https://github.com/otAAAh/checkmk-json-agent/commit/6ba5ba2))
+- A timestamp field reads Go's default time layout ([#252](https://github.com/otAAAh/checkmk-json-agent/pull/252)) ([`1de2467`](https://github.com/otAAAh/checkmk-json-agent/commit/1de2467))
+
+### Other
+
+- Bump postcss-selector-parser from 7.1.4 to 7.1.6 in /frontend ([#249](https://github.com/otAAAh/checkmk-json-agent/pull/249)) ([`e192518`](https://github.com/otAAAh/checkmk-json-agent/commit/e192518))
+- Deps: bump pydantic from 2.13.5 to 2.14.0 ([#247](https://github.com/otAAAh/checkmk-json-agent/pull/247)) ([`28951ed`](https://github.com/otAAAh/checkmk-json-agent/commit/28951ed))
+- Bump @vue/server-renderer and vue in /frontend ([#251](https://github.com/otAAAh/checkmk-json-agent/pull/251)) ([`fa7abc1`](https://github.com/otAAAh/checkmk-json-agent/commit/fa7abc1))
+- Bump the actions group with 3 updates ([#248](https://github.com/otAAAh/checkmk-json-agent/pull/248)) ([`7dea721`](https://github.com/otAAAh/checkmk-json-agent/commit/7dea721))
+- Deps: bump mypy from 2.3.1 to 2.4.0 ([#244](https://github.com/otAAAh/checkmk-json-agent/pull/244)) ([`2f44893`](https://github.com/otAAAh/checkmk-json-agent/commit/2f44893))
+- Deps: bump ruff from 0.16.9 to 0.16.10 ([#245](https://github.com/otAAAh/checkmk-json-agent/pull/245)) ([`9661ea0`](https://github.com/otAAAh/checkmk-json-agent/commit/9661ea0))
+- The pending release ends at the version bump ([#243](https://github.com/otAAAh/checkmk-json-agent/pull/243)) ([`95df944`](https://github.com/otAAAh/checkmk-json-agent/commit/95df944))
+- Bump brace-expansion from 2.1.2 to 2.1.7 in /frontend ([#242](https://github.com/otAAAh/checkmk-json-agent/pull/242)) ([`77cd50b`](https://github.com/otAAAh/checkmk-json-agent/commit/77cd50b))
+
 ## [0.23.0] - 2026-10-01
 
 ### Fixes
