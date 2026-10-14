@@ -40,6 +40,7 @@ from cmk.gui.watolib.mode import WatoMode
 
 if TYPE_CHECKING:
     # Types only: at runtime the builders import their FormSpecs on use.
+    from cmk.rulesets.v1 import Help, Title
     from cmk.rulesets.v1.form_specs import Dictionary, FormSpec, List
 
 # Where the `web` part installs the built wizard, and how it is referenced from
@@ -173,6 +174,31 @@ def host_labels_form_spec() -> FormSpec[_ListOfDicts]:
     return _ruleset().endpoint_form().elements["host_labels"].parameter_form
 
 
+def _folder_choice(title: Title, help_text: Help) -> FormSpec[str]:
+    """Checkmk's "folder by its full title" chooser, on 2.5 and on 3.0.
+
+    3.0 moved the generator next to the folder tree it reads, and it no longer
+    reads the tree itself: the caller hands it the folders the user may choose.
+    """
+    try:
+        from cmk.gui.watolib.form_spec_generators import create_full_path_folder_choice
+    except ImportError:  # 2.5: reads the folder tree on its own
+        from cmk.gui.form_specs.generators.folder import (
+            create_full_path_folder_choice as create_legacy,
+        )
+
+        return create_legacy(title=title, help_text=help_text, allow_new_folder_creation=True)
+    from cmk.gui.logged_in import user
+    from cmk.gui.watolib.hosts_and_folders import folder_tree
+
+    return create_full_path_folder_choice(
+        title=title,
+        help_text=help_text,
+        allow_new_folder_creation=True,
+        folder_choices=lambda: folder_tree().folder_choices_fulltitle(user),
+    )
+
+
 def placement_form_spec() -> Dictionary:
     """Where the rule lands: target folder + the host it binds to.
 
@@ -187,7 +213,6 @@ def placement_form_spec() -> Dictionary:
     context (it is — only during page render).
     """
     from cmk.gui.form_specs.generators.config_host_name import create_config_host_name
-    from cmk.gui.form_specs.generators.folder import create_full_path_folder_choice
     from cmk.gui.form_specs.generators.setup_site_choice import create_setup_site_choice
     from cmk.rulesets.v1 import Help, Label, Title
     from cmk.rulesets.v1.form_specs import (
@@ -205,10 +230,9 @@ def placement_form_spec() -> Dictionary:
         elements={
             "folder": DictElement(
                 required=True,
-                parameter_form=create_full_path_folder_choice(
+                parameter_form=_folder_choice(
                     title=Title("Target folder"),
                     help_text=Help("Setup folder the rule is created in (Main by default)."),
-                    allow_new_folder_creation=True,
                 ),
             ),
             "host": DictElement(
