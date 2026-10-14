@@ -278,13 +278,19 @@ export async function createHost(params: CreateHostParams): Promise<CreateRuleRe
     }
     if (!res.ok) {
       const base = (json.detail as string) || (json.title as string) || res.statusText
-      // A name clash means the host already exists — fine, bind to it.
-      if (res.status === 400 && /exist/i.test(String(base))) {
+      const fields = json.fields && typeof json.fields === 'object' ? json.fields : null
+      // A name clash means the host already exists — fine, bind to it. The REST
+      // API reports it on the field ("Host 'x' already exists." under
+      // fields.host_name); `detail` only says which fields have problems.
+      const hostNameErrors = (fields as Record<string, unknown> | null)?.host_name
+      const clash = [base, ...(Array.isArray(hostNameErrors) ? hostNameErrors : [])].some((msg) =>
+        /already exists/i.test(String(msg)),
+      )
+      if (res.status === 400 && clash) {
         return { ok: true, status: res.status }
       }
       // Surface the nested per-field errors (REST puts them in `fields`) so an
       // attributes failure names the exact offending key/value.
-      const fields = json.fields && typeof json.fields === 'object' ? json.fields : null
       const detail = fields ? `${base} — ${JSON.stringify(fields)}` : String(base)
       return { ok: false, status: res.status, error: detail }
     }

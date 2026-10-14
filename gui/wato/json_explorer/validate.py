@@ -20,7 +20,9 @@ from __future__ import annotations
 import dataclasses
 import json
 
+from cmk.gui.exceptions import MKUserError
 from cmk.gui.http import request
+from cmk.gui.i18n import _
 from cmk.gui.pages import AjaxPage, PageContext, PageResult
 
 from .guards import check_csrf
@@ -28,8 +30,7 @@ from .guards import check_csrf
 
 class JsonExplorerValidatePage(AjaxPage):
     def page(self, ctx: PageContext) -> PageResult:
-        from cmk.gui.form_specs import RawFrontendData
-        from cmk.gui.form_specs._utils import validate_value_from_frontend
+        from cmk.gui.form_specs import RawFrontendData, validate_value_from_frontend
         from cmk.gui.logged_in import user
 
         from .page import (
@@ -39,6 +40,7 @@ class JsonExplorerValidatePage(AjaxPage):
         )
 
         user.need_permission("wato.use")
+        user.need_permission("wato.rulesets")
         check_csrf(ctx)
 
         builders = {
@@ -49,8 +51,11 @@ class JsonExplorerValidatePage(AjaxPage):
         which = request.get_str_input_mandatory("spec")
         builder = builders.get(which)
         if builder is None:
-            return {"ok": False, "error": f"unknown spec {which!r}"}
+            raise MKUserError("spec", _("Unknown form: %s") % which)
 
-        value = json.loads(request.get_str_input_mandatory("value"))
+        try:
+            value = json.loads(request.get_str_input_mandatory("value"))
+        except ValueError as exc:
+            raise MKUserError("value", _("The value is not valid JSON: %s") % exc) from exc
         messages = validate_value_from_frontend(builder(), RawFrontendData(value))
         return {"ok": True, "messages": [dataclasses.asdict(m) for m in messages]}

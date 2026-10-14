@@ -21,11 +21,11 @@ be kept in step by hand; ``tests/test_explorer_gui.py`` is where that is pinned
 down.
 
 Input (POST): ``connection`` = the connection FormEdit value (JSON); falls back
-to a bare ``url`` query var. Output: ``{ok, status, json, headers}`` or
-``{ok:false, error}``. The headers are returned so the field picker can offer
-them: the agent can monitor one with an '@header.' path (an API quota, a
-Last-Modified age), and the browser cannot see them for itself because this
-request is made server-side.
+to a bare ``url`` query var. Output: ``{ok, status, json, headers}``, or an
+error the ``AjaxPage`` envelope reports (``result_code`` 1). The headers are
+returned so the field picker can offer them: the agent can monitor one with an
+'@header.' path (an API quota, a Last-Modified age), and the browser cannot see
+them for itself because this request is made server-side.
 
 Two endpoint settings are deliberately NOT applied here, because a preview with
 a person waiting is not the same job as an unattended check:
@@ -56,6 +56,8 @@ from typing import Any
 from urllib.parse import quote, quote_plus, unquote_plus, urlsplit, urlunsplit
 
 import requests
+from cmk.ccc.exceptions import MKGeneralException
+from cmk.gui.exceptions import MKUserError
 from cmk.gui.http import request
 from cmk.gui.i18n import _
 from cmk.gui.logged_in import user
@@ -102,24 +104,39 @@ def _resolve_password(value: object) -> str:
 
 def _connection() -> dict[str, Any]:
     """The connection as validated disk values (SingleChoice/Password fields are
-    hashed on the wire — only the visitor yields real values). Falls back to a
-    bare {url} for the legacy ``?url=`` form or when conversion fails."""
+    hashed on the wire — only the visitor yields real values), or a bare {url}
+    for the legacy ``?url=`` form."""
     raw = request.get_str_input("connection")
-    if raw:
-        try:
-            from cmk.gui.form_specs import RawFrontendData
-            from cmk.gui.form_specs._utils import parse_and_validate_frontend_data
+    if not raw:
+        return {"url": request.get_str_input_mandatory("url").strip()}
 
-            from .page import connection_form_spec
+    from cmk.gui.form_specs import (
+        RawFrontendData,
+        parse_and_validate_frontend_data,
+        validate_value_from_frontend,
+    )
 
-            value = parse_and_validate_frontend_data(
-                connection_form_spec(), RawFrontendData(json.loads(raw))
-            )
-            if isinstance(value, dict):
-                return value
-        except Exception:
-            pass
-    return {"url": request.get_str_input_mandatory("url").strip()}
+    from .page import connection_form_spec
+
+    try:
+        data = RawFrontendData(json.loads(raw))
+    except ValueError as exc:
+        raise MKUserError("connection", _("The connection is not valid JSON: %s") % exc) from exc
+    # A connection the form rejects is reported with the fields that are wrong,
+    # not replaced by a bare-URL fetch that would then fail for another reason.
+    spec = connection_form_spec()
+    if problems := validate_value_from_frontend(spec, data):
+        raise MKUserError(
+            "connection",
+            "; ".join(
+                f"{' / '.join(str(part) for part in msg.location)}: {msg.message}"
+                for msg in problems
+            ),
+        )
+    value = parse_and_validate_frontend_data(spec, data)
+    if not isinstance(value, dict):
+        raise MKUserError("connection", _("The connection is not a dictionary"))
+    return value
 
 
 class _PreviewError(Exception):
@@ -408,13 +425,16 @@ def _redacted(text: str, conn: dict[str, Any]) -> str:
 
 class JsonExplorerFetchPage(AjaxPage):
     def page(self, ctx: PageContext) -> PageResult:
-        user.need_permission("wato.use")  # gate the SSRF surface to Setup users
+        # Gate the SSRF surface to the users the wizard is for: Setup users who
+        # may edit rules, which is what the wizard ends in.
+        user.need_permission("wato.use")
+        user.need_permission("wato.rulesets")
         check_csrf(ctx)
 
         conn = _connection()
         url = str(conn.get("url", "")).strip()
         if not url.lower().startswith(("http://", "https://")):
-            return {"ok": False, "error": _("URL must start with http:// or https://")}
+            raise MKUserError("url", _("URL must start with http:// or https://"))
 
         try:
             resp = _perform_request(conn)
@@ -422,19 +442,18 @@ class JsonExplorerFetchPage(AjaxPage):
             # Reported on its own: "the token endpoint said no" (or "this proxy
             # cannot be resolved") is a different problem from "the API said
             # no", and conflating them sends the operator to the wrong URL.
-            return {"ok": False, "error": str(exc)}
+            raise MKGeneralException(str(exc)) from exc
         except requests.RequestException as exc:
             # The message of a connection error quotes the URL it tried to
             # reach - including an API key placed in a query parameter.
-            return {"ok": False, "error": _("Request failed: %s") % _redacted(str(exc), conn)}
+            raise MKGeneralException(_("Request failed: %s") % _redacted(str(exc), conn)) from exc
 
         try:
             data: Any = resp.json()
-        except ValueError:
-            return {
-                "ok": False,
-                "error": _("HTTP %d: response body is not JSON") % resp.status_code,
-            }
+        except ValueError as exc:
+            raise MKGeneralException(
+                _("HTTP %d: response body is not JSON") % resp.status_code
+            ) from exc
         return {
             "ok": True,
             "status": resp.status_code,

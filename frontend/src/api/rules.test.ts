@@ -207,9 +207,34 @@ describe('the REST API calls that write to Setup', () => {
   })
 
   it('treats an already existing host as success, so the wizard can be re-run', async () => {
-    stubFetch({ ok: false, status: 400, json: { detail: 'Host api-host already exists.' } })
+    // The shape the REST API answers with: the clash is on the field, and the
+    // detail only names the fields that have problems.
+    stubFetch({
+      ok: false,
+      status: 400,
+      json: {
+        title: 'Bad Request',
+        detail: 'These fields have problems: host_name',
+        fields: { host_name: ["Host 'api-host' already exists."] },
+      },
+    })
 
     expect(await createHost({ folder: '/', hostName: 'api-host' })).toMatchObject({ ok: true })
+  })
+
+  it('does not mistake a "does not exist" error for an existing host', async () => {
+    stubFetch({
+      ok: false,
+      status: 400,
+      json: {
+        detail: 'These fields have problems: folder',
+        fields: { folder: ["Folder '/nope' does not exist."] },
+      },
+    })
+
+    expect(await createHost({ folder: '/nope', hostName: 'api-host' })).toMatchObject({
+      ok: false,
+    })
   })
 
   it('does not mistake another 400 for an existing host', async () => {
