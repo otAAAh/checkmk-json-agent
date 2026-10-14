@@ -96,7 +96,9 @@ The same paths over HTTPS on `--tls-port`, plus one:
 ### Proxy (`--proxy`)
 
 A forward proxy on `--proxy-port`. It forwards plain HTTP and tunnels HTTPS
-(CONNECT), but only to `localhost` and `127.0.0.1`.
+(CONNECT), but only to the mock itself: `localhost` or `127.0.0.1` on the mock's
+own HTTP and HTTPS ports. Anything else, including other services on the same
+machine, gets a 403.
 
 | Path | Behaviour | Try in the rule |
 |---|---|---|

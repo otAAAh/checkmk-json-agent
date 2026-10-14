@@ -46,12 +46,13 @@ def http(mock):
 
 
 @pytest.fixture(scope="module")
-def tls(mock, tmp_path_factory):
+def tls(mock, http, tmp_path_factory):
     if shutil.which("openssl") is None:
         pytest.skip("the mock's HTTPS mode needs the 'openssl' command")
     files = mock.make_certificates(tmp_path_factory.mktemp("tls"), days=20)
     server = _start(mock.tls_server("127.0.0.1", 0, files))
-    proxy = _start(ThreadingHTTPServer(("127.0.0.1", 0), mock.ProxyHandler))
+    mock_ports = {int(http.rsplit(":", 1)[1]), server.server_address[1]}
+    proxy = _start(mock.proxy_server("127.0.0.1", 0, mock_ports))
     yield {
         "base": f"https://localhost:{server.server_address[1]}",
         "proxy": f"http://127.0.0.1:{proxy.server_address[1]}",
@@ -185,6 +186,17 @@ def test_mutual_tls_presents_the_client_certificate(agent, tls):
     )
     assert without["status"] == 403
     assert values["v"] == "json_api mock client"
+
+
+def test_the_proxy_reaches_nothing_but_the_mock(mock, tls):
+    # Not other services on this machine (the Checkmk site, a database, ...).
+    import urllib.error
+    import urllib.request
+
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({"http": tls["proxy"]}))
+    with pytest.raises(urllib.error.HTTPError) as refused:
+        opener.open("http://127.0.0.1:1/", timeout=10)
+    assert refused.value.code == 403
 
 
 def test_the_proxy_forwards_http_and_tunnels_https(agent, http, tls):

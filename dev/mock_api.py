@@ -582,10 +582,10 @@ def tls_server(host: str, port: int, files: dict[str, Path]) -> ThreadingHTTPSer
 
 # --- proxy --------------------------------------------------------------------
 
-# The proxy only forwards to these hosts: it is for testing the agent's proxy
-# setting against this mock, never a way out of the machine. Both are this
-# machine, so it always connects to _PROXY_UPSTREAM: once the target is
-# accepted, nothing from the request decides where the connection goes.
+# The proxy only forwards to these hosts, and only to the mock's own ports: it is
+# for testing the agent's proxy setting against this mock, never a way to reach
+# anything else, on this machine or beyond. Both names are this machine, so it
+# always connects to _PROXY_UPSTREAM.
 _PROXY_TARGETS = {"localhost", "127.0.0.1"}
 _PROXY_UPSTREAM = "127.0.0.1"
 _HOP_BY_HOP = {
@@ -610,16 +610,26 @@ class ProxyHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _mock_port(self, requested: object) -> int | None:
+        """The mock's own port the request asks for, or None for any other.
+
+        The allow-listed value itself is returned, not the requested one, so
+        the connection's port never comes from the request.
+        """
+        allowed: frozenset[int] = getattr(self.server, "mock_ports", frozenset())
+        return next((port for port in allowed if str(port) == str(requested)), None)
+
     def _forward(self) -> None:
         target = urlsplit(self.path)
-        if target.scheme != "http" or target.hostname not in _PROXY_TARGETS:
-            self._refuse(403, "the mock proxy only forwards http://localhost and 127.0.0.1")
+        port = self._mock_port(target.port or 80)
+        if target.scheme != "http" or target.hostname not in _PROXY_TARGETS or port is None:
+            self._refuse(403, "the mock proxy only forwards to the mock API itself")
             return
         length = int(self.headers.get("Content-Length", 0))
         body = self.rfile.read(length) if length else None
         headers = {k: v for k, v in self.headers.items() if k.lower() not in _HOP_BY_HOP}
         headers["Via"] = "1.1 json_api-mock-proxy"
-        connection = http.client.HTTPConnection(_PROXY_UPSTREAM, target.port or 80, timeout=30)
+        connection = http.client.HTTPConnection(_PROXY_UPSTREAM, port, timeout=30)
         try:
             path = target.path + (f"?{target.query}" if target.query else "")
             connection.request(self.command, path or "/", body=body, headers=headers)
@@ -643,13 +653,14 @@ class ProxyHandler(BaseHTTPRequestHandler):
     do_POST = _forward  # noqa: N815
 
     def do_CONNECT(self) -> None:  # noqa: N802
-        host, _, port = self.path.rpartition(":")
-        if host not in _PROXY_TARGETS:
-            self._refuse(403, "the mock proxy only tunnels to localhost and 127.0.0.1")
+        host, _, requested = self.path.rpartition(":")
+        port = self._mock_port(requested)
+        if host not in _PROXY_TARGETS or port is None:
+            self._refuse(403, "the mock proxy only tunnels to the mock API itself")
             return
         try:
-            upstream = socket.create_connection((_PROXY_UPSTREAM, int(port)), timeout=30)
-        except (OSError, ValueError) as exc:
+            upstream = socket.create_connection((_PROXY_UPSTREAM, port), timeout=30)
+        except OSError as exc:
             self._refuse(502, f"upstream failed: {exc}")
             return
         self.send_response(200, "Connection established")
@@ -670,6 +681,13 @@ class ProxyHandler(BaseHTTPRequestHandler):
 
     def log_message(self, fmt: str, *args: object) -> None:
         print(f"mock_api[proxy]: {self.command} {self.path}", file=sys.stderr)
+
+
+def proxy_server(host: str, port: int, mock_ports: set[int]) -> ThreadingHTTPServer:
+    """The forward proxy, allowed to reach only ``mock_ports`` on this machine."""
+    server = ThreadingHTTPServer((host, port), ProxyHandler)
+    server.mock_ports = frozenset(mock_ports)  # type: ignore[attr-defined]
+    return server
 
 
 # --- main ---------------------------------------------------------------------
@@ -723,7 +741,8 @@ def main() -> None:
         print(f"                                           {files['client.key']}")
         print(f"          server certificate valid for {args.tls_days} days")
     if args.proxy:
-        servers.append(ThreadingHTTPServer((args.host, args.proxy_port), ProxyHandler))
+        mock_ports = {args.port, args.tls_port} if args.tls else {args.port}
+        servers.append(proxy_server(args.host, args.proxy_port, mock_ports))
         print(f"mock_api: proxy  on http://{args.host}:{args.proxy_port}")
     print("mock_api: Ctrl-C to stop; see docs/mock-api.md")
 
