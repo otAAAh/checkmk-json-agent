@@ -291,6 +291,28 @@ def test_a_failing_token_request_never_reports_the_client_secret(explorer_fetch,
     assert "401" in str(caught.value)
 
 
+# --- response size -------------------------------------------------------------
+
+
+def test_the_preview_refuses_a_body_larger_than_the_agent_accepts(
+    explorer_fetch, serve, monkeypatch
+):
+    # A GUI worker must not buffer an unbounded response.
+    monkeypatch.setattr(explorer_fetch, "_MAX_RESPONSE_BYTES", 1000)
+    url, _ = serve(lambda request, handler: _reply(handler, 200, {"pad": "x" * 5000}))
+
+    response = explorer_fetch._perform_request({"url": url})
+    with pytest.raises(explorer_fetch._PreviewError, match="larger than 1000 bytes"):
+        explorer_fetch._read_capped(response)
+
+
+def test_the_preview_reads_a_body_within_the_limit(explorer_fetch, serve):
+    url, _ = serve(lambda request, handler: _reply(handler, 200, {"status": "UP"}))
+
+    response = explorer_fetch._perform_request({"url": url})
+    assert json.loads(explorer_fetch._read_capped(response)) == {"status": "UP"}
+
+
 # --- stored passwords ---------------------------------------------------------
 
 # The preview sends a stored password to a URL the browser chose, so revealing

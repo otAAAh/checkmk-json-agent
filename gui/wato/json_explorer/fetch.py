@@ -67,6 +67,11 @@ from .guards import check_csrf, usable_password_ids
 
 _TIMEOUT = 10
 
+# The most of a response the preview reads - the agent's own limit
+# (_MAX_RESPONSE_BYTES), so the preview refuses exactly what the agent would. A
+# GUI request worker must not buffer an unbounded body.
+_MAX_RESPONSE_BYTES = 50 * 1024 * 1024  # 50 MiB
+
 
 def _resolve_password(value: object) -> str:
     """Reveal a Password FormSpec disk value: ('cmk_postprocessed', kind, (id, pw)).
@@ -404,7 +409,24 @@ def _perform_request(conn: dict[str, Any]) -> requests.Response:
         verify=_verify_arg(conn),
         cert=_client_cert(conn),
         allow_redirects=conn.get("follow_redirects", True),
+        stream=True,  # so _read_capped can bound the buffered body
     )
+
+
+def _read_capped(response: requests.Response) -> bytes:
+    """The response body, refusing to buffer more than ``_MAX_RESPONSE_BYTES``."""
+    chunks: list[bytes] = []
+    total = 0
+    for chunk in response.iter_content(chunk_size=65536):
+        total += len(chunk)
+        if total > _MAX_RESPONSE_BYTES:
+            response.close()
+            raise _PreviewError(
+                _("The response is larger than %d bytes, which is more than the agent accepts")
+                % _MAX_RESPONSE_BYTES
+            )
+        chunks.append(chunk)
+    return b"".join(chunks)
 
 
 def _redacted(text: str, conn: dict[str, Any]) -> str:
@@ -438,6 +460,7 @@ class JsonExplorerFetchPage(AjaxPage):
 
         try:
             resp = _perform_request(conn)
+            body = _read_capped(resp)
         except _PreviewError as exc:
             # Reported on its own: "the token endpoint said no" (or "this proxy
             # cannot be resolved") is a different problem from "the API said
@@ -449,7 +472,7 @@ class JsonExplorerFetchPage(AjaxPage):
             raise MKGeneralException(_("Request failed: %s") % _redacted(str(exc), conn)) from exc
 
         try:
-            data: Any = resp.json()
+            data: Any = json.loads(body)
         except ValueError as exc:
             raise MKGeneralException(
                 _("HTTP %d: response body is not JSON") % resp.status_code

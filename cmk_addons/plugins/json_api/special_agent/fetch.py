@@ -278,7 +278,9 @@ def _attempt(
 
     meta["size"] = len(raw)
     if debug:
-        preview = raw[:_DEBUG_BODY_PREVIEW].decode("utf-8", "replace")
+        # Masked for every auth mode, not just a key in the URL: an API may echo
+        # the credential it was sent back in the body.
+        preview = _redact_secret(raw[:_DEBUG_BODY_PREVIEW].decode("utf-8", "replace"), secret)
         suffix = " ...(truncated)" if len(raw) > _DEBUG_BODY_PREVIEW else ""
         _debug(debug, f"  HTTP {response.status_code}, {len(raw)} bytes")
         _debug(debug, f"  body: {preview}{suffix}")

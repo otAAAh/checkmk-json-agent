@@ -766,6 +766,22 @@ def test_oauth2_debug_output_never_shows_the_bearer_token(agent, monkeypatch, to
     assert "s3cret" not in err  # and the client secret
 
 
+def test_debug_body_preview_masks_a_credential_the_api_echoes(agent, monkeypatch, capsys):
+    """An API that echoes the key it was sent puts it into the body, and --debug
+    prints the start of the body - for any auth mode, not only a key in the URL."""
+    _capture_request(agent, monkeypatch, response=_FakeResponse(body=b'{"key": "sekret"}'))
+
+    agent_fetch._fetch(
+        {"url": "http://x", "auth": "auth_header", "auth_header": "X-API-Key"},
+        "sekret",
+        debug=True,
+    )
+
+    err = capsys.readouterr().err
+    assert "body:" in err
+    assert "sekret" not in err
+
+
 def test_oauth2_expired_token_is_removed_from_disk_on_read(agent, monkeypatch, token_cache):
     """A dead bearer credential should not linger until the 7-day sweep, which
     was written for response bodies and is far too slow for tokens."""

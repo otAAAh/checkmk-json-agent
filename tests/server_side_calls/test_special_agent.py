@@ -1282,3 +1282,9 @@ def test_half_a_value_range_reaches_the_agent_as_half_a_range(ssc):
     (endpoint,) = _endpoints(ssc, args)
 
     assert endpoint["extractions"][0]["value_range"] == {"min": 0.0, "max": None}
+
+
+def test_a_rule_without_endpoints_calls_no_agent(ssc):
+    # The agent requires an '--endpoint' and would only fail with a usage error.
+    params = ssc.Params.model_validate({"endpoints": []})
+    assert list(ssc._commands_function(params, _host())) == []

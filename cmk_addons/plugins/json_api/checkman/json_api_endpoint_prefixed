@@ -8,9 +8,9 @@ description:
  endpoint} - it reports the request rather than the data in the response, with
  the same HTTP status, response time, response size, certificate validity,
  cache, retry and pagination reporting, the optional raw response, and the same
- check
- parameters rule. See that man page for what it monitors; only the service NAME
- differs, and this page exists because a service name is fixed per check plugin.
+ check parameters rule. See that man page for what it monitors; only the service
+ NAME differs, and this page exists because a service name is fixed per check
+ plugin.
 
  An endpoint can be configured to prefix its field service names with its own
  name, so that its fields read {JSON <endpoint> Status}. Its own service is then
