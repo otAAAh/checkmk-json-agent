@@ -619,6 +619,14 @@ def test_apply_calc_arithmetic():
     assert check_calc._apply_calc(1048576.0, "value / 1024 / 1024") == 1.0
     assert check_calc._apply_calc(0.5, "value * 1000") == 500.0
     assert check_calc._apply_calc(212.0, "(value - 32) * 5 / 9") == 100.0
+
+
+def test_an_expression_that_does_not_parse_is_a_value_error():
+    # Not a SyntaxError: the check catches ValueError and reports UNKNOWN; a
+    # SyntaxError used to crash the service (a rule imported over the REST API
+    # skips Setup's validation).
+    with pytest.raises(ValueError, match="not a valid expression"):
+        check_calc._apply_calc(2.0, "value +")
     assert check_calc._apply_calc(3.0, "-value") == -3.0
 
 

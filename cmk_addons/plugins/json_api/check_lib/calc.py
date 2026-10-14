@@ -63,4 +63,11 @@ def _apply_calc(value: float, expr: str, other: float | None = None) -> float:
                 return other
         raise ValueError("unsupported expression")
 
-    return float(_eval(ast.parse(expr, mode="eval")))
+    try:
+        tree = ast.parse(expr, mode="eval")
+    except SyntaxError as exc:
+        # A ValueError like every other broken expression, so the check reports
+        # it on the service (UNKNOWN) instead of crashing. Setup validates the
+        # expression, but a rule imported over the REST API skips that.
+        raise ValueError(f"not a valid expression ({exc.msg})") from exc
+    return float(_eval(tree))
