@@ -25,9 +25,10 @@ from cmk.rulesets.v1.form_specs import (
     Float,
     InputHint,
     LevelDirection,
+    MatchingScope,
+    RegularExpression,
     ServiceState,
     SimpleLevels,
-    String,
     validators,
 )
 
@@ -72,8 +73,9 @@ def string_match() -> CascadingSingleChoice:
                     elements={
                         "pattern": DictElement(
                             required=True,
-                            parameter_form=String(
+                            parameter_form=RegularExpression(
                                 title=Title("Expected value (regex)"),
+                                predefined_help_text=MatchingScope.FULL,
                                 help_text=Help(
                                     "For string values: the value must fully match "
                                     "this regular expression (e.g. 'UP|ok')."
@@ -104,22 +106,25 @@ def string_match() -> CascadingSingleChoice:
                     elements={
                         "ok": DictElement(
                             required=False,
-                            parameter_form=String(
+                            parameter_form=RegularExpression(
                                 title=Title("OK when the value matches (regex)"),
+                                predefined_help_text=MatchingScope.FULL,
                                 custom_validate=(validate_regex,),
                             ),
                         ),
                         "warn": DictElement(
                             required=False,
-                            parameter_form=String(
+                            parameter_form=RegularExpression(
                                 title=Title("WARN when the value matches (regex)"),
+                                predefined_help_text=MatchingScope.FULL,
                                 custom_validate=(validate_regex,),
                             ),
                         ),
                         "crit": DictElement(
                             required=False,
-                            parameter_form=String(
+                            parameter_form=RegularExpression(
                                 title=Title("CRIT when the value matches (regex)"),
+                                predefined_help_text=MatchingScope.FULL,
                                 custom_validate=(validate_regex,),
                             ),
                         ),
