@@ -845,7 +845,7 @@ def test_debug_body_preview_masks_a_credential_the_api_echoes(agent, monkeypatch
     _capture_request(agent, monkeypatch, response=_FakeResponse(body=b'{"key": "sekret"}'))
 
     agent_fetch._fetch(
-        {"url": "http://x", "auth": "auth_header", "auth_header": "X-API-Key"},
+        _endpoint({"url": "http://x", "auth": "auth_header", "auth_header": "X-API-Key"}),
         "sekret",
         debug=True,
     )
