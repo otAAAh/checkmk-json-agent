@@ -402,6 +402,10 @@ def _commands_function(
     params: Params,
     host_config: HostConfig,
 ) -> Iterable[SpecialAgentCommand]:
+    if not params.endpoints:
+        # The agent requires at least one '--endpoint' and would only fail with a
+        # usage error; a rule without endpoints monitors nothing.
+        return
     args: list[str | Secret] = []
     for index, endpoint in enumerate(params.endpoints):
         args += ["--endpoint", _endpoint_json(endpoint, host_config.macros)]
