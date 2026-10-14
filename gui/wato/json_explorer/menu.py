@@ -21,7 +21,10 @@ try:  # 3.0 moved the icon types out of the GUI package
     from cmk.web.utils.icons import StaticIcon
 except ImportError:  # 2.4 / 2.5
     from cmk.gui.type_defs import StaticIcon
-from cmk.gui.wato._main_module_topics import MainModuleTopicQuickSetup
+try:  # where 2.5 defines it
+    from cmk.gui.wato._main_module_topics import MainModuleTopicQuickSetup
+except ImportError:  # moved next to the quick setups themselves later on
+    from cmk.gui.quick_setup._modes import MainModuleTopicQuickSetup
 from cmk.gui.watolib.main_menu import ABCMainModule, MainModuleTopic
 from cmk.shared_typing.icon import IconNames
 
@@ -47,7 +50,8 @@ class MainModuleJsonApiExplorer(ABCMainModule):
 
     @property
     def permission(self) -> None | str:
-        return None
+        # Same as the mode's static_permissions: shown to who may open it.
+        return "rulesets"
 
     @property
     def description(self) -> str:
