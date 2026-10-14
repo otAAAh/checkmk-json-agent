@@ -41,6 +41,11 @@ site or a Checkmk dev virtualenv. Two things need a Python:
   line that has a public image — 2.4, 2.5 and 3.0 — so you don't need any of
   them locally.)
 
+- **Trying a rule against a running API**: `python3 dev/mock_api.py --tls --proxy`
+  starts a mock API with a path for every connection setting of the rule (API
+  keys, OAuth2, redirects, retries, the cache, every pagination mode, HTTPS
+  with a private CA, mutual TLS, a proxy). See [docs/mock-api.md](docs/mock-api.md).
+
 ## Before you open a PR
 
 Run the same checks CI runs. All of them should be green:
@@ -110,6 +115,8 @@ cmk_addons/plugins/json_api/
   graphing/            metric definition
   checkman/            man page
 explorer/              standalone, dependency-free config Explorer
+dev/                   mock_api.py, a mock API for manual testing (docs/mock-api.md)
+docs/                  the mock API's guide, listings, forum posts
 locales/               translation catalogs (one .po per language)
 scripts/               build_mkp.py, gen_changelog.py, ...
 tests/                 pytest suite; the plugin tests mirror the family
