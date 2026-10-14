@@ -3,7 +3,9 @@
 <!-- Wizard step 4: review — one accordion item per endpoint listing every chosen
      service with its defined values (unit / thresholds / match rule) and its
      CURRENT value + state, resolved live against the fetched sample JSON. Then
-     create the rule via the API. -->
+     create the rule via the API. The evaluation itself (calc, thresholds, match
+     rules, host labels) lives in lib/, where it is unit-tested; this file turns
+     its results into rows and words. -->
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 
@@ -19,395 +21,50 @@ import CmkHeading from '@/components/typography/CmkHeading.vue'
 import CmkParagraph from '@/components/typography/CmkParagraph.vue'
 
 import { useExplorer } from '../../composables/useExplorer'
+import { evalCalc } from '../../lib/calc'
 import { labelWarnings, resolveLabelled, type LabelledValue } from '../../lib/elementlabels'
-import { labelKeyOf, resolvePath, type Json } from '../../lib/jsonpaths'
+import { labelKeyOf, type Json } from '../../lib/jsonpaths'
 import {
-  endpointUrl,
-  extractionPath,
-  extractionService,
-  type ExtractionValue,
-  type FilterValue,
-} from '../../lib/rulevalue'
+  elementCount,
+  formatJson,
+  hasFilter,
+  inventoryOnly,
+  inventoryTarget,
+  piggybackField,
+  previewHostLabels,
+  valueAsKind,
+  type HostLabelPreview,
+} from '../../lib/reviewpreview'
+import { endpointUrl, extractionPath, extractionService, type ExtractionValue } from '../../lib/rulevalue'
 import { elementNames, fieldNames, servicePrefix, type FieldNames } from '../../lib/servicenames'
+import {
+  collectChoiceTitles,
+  evalState,
+  levelsPair,
+  matchMode,
+  parseMatch,
+  stateChoiceKind,
+  titleOf as choiceTitleOf,
+  type StateKind,
+} from '../../lib/servicestate'
 
 const { _t } = usei18n()
 const { state, status, createRuleOnSite, extractionsSpec } = useExplorer()
 
-// FormEdit serializes SingleChoice / CascadingSingleChoice / ServiceState values
-// as hashed idents on the wire (e.g. unit "Percent" -> "438dc5f6…"), so the raw
-// extraction values here are hashes, not speaking names. Walk the serialized
-// extractions spec once to map every choice ident -> its human-readable title.
-const choiceTitles = computed<Map<string, string>>(() => {
-  const map = new Map<string, string>()
-  const walk = (node: unknown): void => {
-    if (Array.isArray(node)) {
-      node.forEach(walk)
-      return
-    }
-    if (node && typeof node === 'object') {
-      const o = node as Record<string, unknown>
-      if (typeof o.name === 'string' && typeof o.title === 'string') {
-        map.set(o.name, o.title)
-      }
-      Object.values(o).forEach(walk)
-    }
-  }
-  walk((extractionsSpec.value as { spec?: unknown } | null)?.spec)
-  return map
-})
+// The raw extraction values are hashed choice idents; map them back to titles
+// once per spec (see collectChoiceTitles).
+const choiceTitles = computed(() =>
+  collectChoiceTitles((extractionsSpec.value as { spec?: unknown } | null)?.spec),
+)
 
 /** The speaking title for a (possibly hashed) choice ident, else the value itself. */
 function titleOf(value: unknown): string | null {
-  if (typeof value !== 'string' || !value) {
-    return null
-  }
-  return choiceTitles.value.get(value) ?? value
-}
-
-/** A ServiceState choice (hashed ident or int) -> StateKind, via its title. */
-function stateChoiceKind(value: unknown): StateKind | null {
-  if (typeof value === 'number') {
-    return serviceStateToKind(value)
-  }
-  const title = (titleOf(value) ?? '').toUpperCase()
-  if (title.includes('WARN')) {
-    return 'warn'
-  }
-  if (title.includes('CRIT')) {
-    return 'crit'
-  }
-  if (title.includes('UNKNOWN')) {
-    return 'none'
-  }
-  if (title.includes('OK')) {
-    return 'ok'
-  }
-  return null
-}
-
-/** Infer the 'Interpret the value as' choice from the serialized value.
- *
- * `['<ident>', null]` is the counter (its parameter form is a FixedValue),
- * `['<ident>', {format}]` the timestamp — the mode ident is hashed, so the shape
- * of the sub-value is what tells them apart. */
-function valueAsKind(value: unknown): 'counter' | 'timestamp' | null {
-  if (!Array.isArray(value) || typeof value[0] !== 'string') {
-    return null
-  }
-  const cfg = value[1]
-  if (cfg !== null && typeof cfg === 'object' && !Array.isArray(cfg) && 'format' in cfg) {
-    return 'timestamp'
-  }
-  return cfg === null ? 'counter' : null
-}
-
-/** How many elements an aggregation would reduce, for the preview note. A
- * wildcard path resolves to one match per element that HAS the named field —
- * which is exactly the set the site aggregates; a wildcard-free path resolves to
- * the array/object holding them. Does NOT account for a condition; see
- * `hasFilter`. */
-function elementCount(matches: { value: Json }[], path: string): number | null {
-  if (path.includes('[*]')) {
-    return matches.length
-  }
-  const value = matches[0]?.value
-  if (Array.isArray(value)) {
-    return value.length
-  }
-  if (value !== null && typeof value === 'object') {
-    return Object.keys(value).length
-  }
-  return null
-}
-
-/** The 'one host per element' field, or null. A plain String on the wire (not a
- * hashed choice ident), so it can be read and shown directly. */
-function piggybackField(x: ExtractionValue): string | null {
-  const field = x.piggyback_host
-  return typeof field === 'string' && field.trim() ? field.trim() : null
-}
-
-/** Whether the extraction carries an 'Only elements matching a condition' filter.
- *
- * Only its PRESENCE is determined, never its outcome, and that is deliberate: the
- * operator is a hashed SingleChoice ident whose only handle is its title, and
- * those titles are translated ('does not equal' → 'ist ungleich'), so telling
- * 'equals' from 'matches regex' here would work in an English GUI and silently
- * mispreview in every other one. Duplicating Python's `re.fullmatch` semantics in
- * JS would be a second source of drift. A number labelled as pre-filter is honest;
- * a confidently wrong one is what this preview is meant to avoid.
- *
- * `path` and `value` are plain Strings, so presence is reliable. */
-function hasFilter(x: ExtractionValue): boolean {
-  const filt = x.filter
-  if (!filt || typeof filt !== 'object' || Array.isArray(filt)) {
-    return false
-  }
-  const path = (filt as Record<string, unknown>).path
-  return typeof path === 'string' && path.trim() !== ''
-}
-
-/** The inventory target of an extraction, if it has one. */
-function inventoryTarget(x: ExtractionValue): { node: string; keepService: boolean } | null {
-  const inventory = x.inventory as { node?: unknown; keep_service?: unknown } | undefined
-  if (!inventory || typeof inventory !== 'object' || typeof inventory.node !== 'string') {
-    return null
-  }
-  return { node: inventory.node, keepService: Boolean(inventory.keep_service) }
-}
-
-/** Whether this field is written to the inventory INSTEAD of creating a service. */
-function inventoryOnly(x: ExtractionValue): boolean {
-  const target = inventoryTarget(x)
-  return target !== null && !target.keepService
-}
-
-/** Infer the match mode from the cfg keys (the mode string is a hashed ident, so
- * we key off the non-hashed sub-fields instead). */
-function matchMode(cfg: Record<string, unknown>): 'must_match' | 'state_map' | null {
-  if (typeof cfg.pattern === 'string') {
-    return 'must_match'
-  }
-  if (['ok', 'warn', 'crit'].some((k) => typeof cfg[k] === 'string' && cfg[k])) {
-    return 'state_map'
-  }
-  return null
+  return choiceTitleOf(value, choiceTitles.value)
 }
 
 // Review is read-only: auto-expand the first endpoint, but allow any number
 // open at once (min/max-open 0) — unlike the single-open accordion on step 2.
 const openedItems = ref<string[]>(['0'])
-
-type StateKind = 'ok' | 'warn' | 'crit' | 'none'
-
-/** ['fixed', [warn, crit]] -> [warn, crit], else null. */
-function levelsPair(value: unknown): [number, number] | null {
-  if (Array.isArray(value) && value[0] === 'fixed' && Array.isArray(value[1])) {
-    const [warn, crit] = value[1] as unknown[]
-    if (typeof warn === 'number' && typeof crit === 'number') {
-      return [warn, crit]
-    }
-  }
-  return null
-}
-
-/** Map a Checkmk service-state number (0=OK,1=WARN,2=CRIT,3=UNKNOWN) to a
- * StateKind. There is no 'unknown' StateKind, so 3 maps to 'none'. */
-function serviceStateToKind(n: unknown): StateKind {
-  return n === 1 ? 'warn' : n === 2 ? 'crit' : n === 3 ? 'none' : 'ok'
-}
-
-/** Narrow a serialized match value `[mode, cfg]` into its parts, or null. */
-function parseMatch(match: unknown): { mode: string; cfg: Record<string, unknown> } | null {
-  if (
-    Array.isArray(match) &&
-    typeof match[0] === 'string' &&
-    match[1] !== null &&
-    typeof match[1] === 'object' &&
-    !Array.isArray(match[1])
-  ) {
-    return { mode: match[0], cfg: match[1] as Record<string, unknown> }
-  }
-  return null
-}
-
-/**
- * Safely evaluate an arithmetic `calc` expression over the variable `value`.
- *
- * Mirrors the special-agent grammar: decimal numbers, the identifier `value`,
- * parentheses, binary `+ - * /` (with `*`/`/` binding tighter than `+`/`-`) and
- * unary `+`/`-`. A hand-written recursive-descent parser is used deliberately —
- * NO `eval`/`new Function` — so nothing outside the grammar can run. Returns the
- * computed number, or `null` on any tokenize/parse error, unknown token, or a
- * non-finite result (e.g. division by zero).
- */
-function evalCalc(expr: string, value: number): number | null {
-  // --- Tokenize into numbers / 'value' / operators / parens. ---------------
-  type Token = { t: 'num'; v: number } | { t: 'value' } | { t: 'op'; v: string }
-  const tokens: Token[] = []
-  let i = 0
-  while (i < expr.length) {
-    const c = expr[i]!
-    if (c === ' ' || c === '\t' || c === '\n' || c === '\r') {
-      i += 1
-    } else if (c === '+' || c === '-' || c === '*' || c === '/' || c === '(' || c === ')') {
-      tokens.push({ t: 'op', v: c })
-      i += 1
-    } else if (c >= '0' && c <= '9') {
-      // A decimal number: leading digits, optional single '.' with more digits.
-      let j = i + 1
-      while (j < expr.length && expr[j]! >= '0' && expr[j]! <= '9') {
-        j += 1
-      }
-      if (j < expr.length && expr[j] === '.') {
-        j += 1
-        while (j < expr.length && expr[j]! >= '0' && expr[j]! <= '9') {
-          j += 1
-        }
-      }
-      tokens.push({ t: 'num', v: Number(expr.slice(i, j)) })
-      i = j
-    } else if (c === '.') {
-      // A number starting with '.', e.g. `.5`.
-      let j = i + 1
-      while (j < expr.length && expr[j]! >= '0' && expr[j]! <= '9') {
-        j += 1
-      }
-      if (j === i + 1) { // a lone '.'
-        return null
-      }
-      tokens.push({ t: 'num', v: Number(expr.slice(i, j)) })
-      i = j
-    } else if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')) {
-      // The only identifier allowed is `value`; anything else (function names,
-      // other variables) is rejected.
-      let j = i + 1
-      while (j < expr.length) {
-        const d = expr[j]!
-        if ((d >= 'a' && d <= 'z') || (d >= 'A' && d <= 'Z')) {
-          j += 1
-        } else {
-          break
-        }
-      }
-      if (expr.slice(i, j) !== 'value') {
-        return null
-      }
-      tokens.push({ t: 'value' })
-      i = j
-    } else {
-      return null // unknown character
-    }
-  }
-
-  // --- Recursive-descent parser with standard precedence. ------------------
-  let p = 0
-  const peek = (): Token | undefined => tokens[p]
-  // expr := term (('+' | '-') term)*
-  function parseExpr(): number {
-    let acc = parseTerm()
-    for (let tok = peek(); tok && tok.t === 'op' && (tok.v === '+' || tok.v === '-'); tok = peek()) {
-      p += 1
-      const rhs = parseTerm()
-      acc = tok.v === '+' ? acc + rhs : acc - rhs
-    }
-    return acc
-  }
-  // term := factor (('*' | '/') factor)*
-  function parseTerm(): number {
-    let acc = parseFactor()
-    for (let tok = peek(); tok && tok.t === 'op' && (tok.v === '*' || tok.v === '/'); tok = peek()) {
-      p += 1
-      const rhs = parseFactor()
-      acc = tok.v === '*' ? acc * rhs : acc / rhs
-    }
-    return acc
-  }
-  // factor := ('+' | '-') factor | '(' expr ')' | number | value
-  function parseFactor(): number {
-    const tok = peek()
-    if (!tok) {
-      throw new Error('unexpected end')
-    }
-    if (tok.t === 'op' && (tok.v === '+' || tok.v === '-')) {
-      p += 1
-      const operand = parseFactor()
-      return tok.v === '-' ? -operand : operand
-    }
-    if (tok.t === 'op' && tok.v === '(') {
-      p += 1
-      const inner = parseExpr()
-      const close = peek()
-      if (!close || close.t !== 'op' || close.v !== ')') {
-        throw new Error('missing )')
-      }
-      p += 1
-      return inner
-    }
-    if (tok.t === 'num') {
-      p += 1
-      return tok.v
-    }
-    if (tok.t === 'value') {
-      p += 1
-      return value
-    }
-    throw new Error('unexpected token')
-  }
-
-  try {
-    const result = parseExpr()
-    if (p !== tokens.length) { // trailing tokens left unparsed
-      return null
-    }
-    return Number.isFinite(result) ? result : null
-  } catch {
-    return null
-  }
-}
-
-/** Whether `value` fully matches `pattern` (anchored); false on a bad regex. */
-function fullMatch(value: string, pattern: string): boolean {
-  try {
-    return new RegExp(`^(?:${pattern})$`).test(value)
-  } catch {
-    return false
-  }
-}
-
-/** Evaluate a value against the extraction's thresholds / match rule. */
-function evalState(value: Json | undefined, x: ExtractionValue): StateKind {
-  if (typeof value === 'number') {
-    const upper = levelsPair(x.levels_upper)
-    if (upper) {
-      if (value >= upper[1]) {
-        return 'crit'
-      }
-      if (value >= upper[0]) {
-        return 'warn'
-      }
-    }
-    const lower = levelsPair(x.levels_lower)
-    if (lower) {
-      if (value <= lower[1]) {
-        return 'crit'
-      }
-      if (value <= lower[0]) {
-        return 'warn'
-      }
-    }
-    return upper || lower ? 'ok' : 'none'
-  }
-  if (typeof value === 'string') {
-    const parsed = parseMatch(x.match)
-    if (!parsed) {
-      return 'none'
-    }
-    const { cfg } = parsed
-    const mode = matchMode(cfg)
-    if (mode === 'must_match' && typeof cfg.pattern === 'string') {
-      if (fullMatch(value, cfg.pattern)) {
-        return 'ok'
-      }
-      return stateChoiceKind(cfg.state_no_match) ?? 'crit'
-    }
-    if (mode === 'state_map') {
-      for (const [key, kind] of [
-        ['ok', 'ok'],
-        ['warn', 'warn'],
-        ['crit', 'crit'],
-      ] as const) {
-        const pat = cfg[key]
-        if (typeof pat === 'string' && pat && fullMatch(value, pat)) {
-          return kind
-        }
-      }
-      return stateChoiceKind(cfg.state_no_match) ?? 'ok'
-    }
-    return 'none'
-  }
-  return 'none'
-}
 
 /** Human-readable list of the configured thresholds/unit/match rule. */
 function definedSummary(x: ExtractionValue): string[] {
@@ -465,7 +122,7 @@ function definedSummary(x: ExtractionValue): string[] {
     if (mode === 'must_match' && typeof cfg.pattern === 'string' && cfg.pattern) {
       let desc: string = _t('must match /%{e}/', { e: cfg.pattern })
       const noMatch = titleOf(cfg.state_no_match)
-      if (noMatch && stateChoiceKind(cfg.state_no_match) !== 'crit') {
+      if (noMatch && stateChoiceKind(cfg.state_no_match, choiceTitles.value) !== 'crit') {
         desc += _t(' (else %{s})', { s: noMatch })
       }
       parts.push(desc)
@@ -490,13 +147,7 @@ function definedSummary(x: ExtractionValue): string[] {
 }
 
 function fmtValue(value: Json | undefined): string {
-  if (value === undefined) {
-    return _t('(not found in sample)')
-  }
-  if (value === null) {
-    return 'null'
-  }
-  return typeof value === 'object' ? JSON.stringify(value) : String(value)
+  return formatJson(value, _t('(not found in sample)'))
 }
 
 const tagColor: Record<StateKind, 'success' | 'warning' | 'danger' | 'unknown'> = {
@@ -508,6 +159,7 @@ const tagColor: Record<StateKind, 'success' | 'warning' | 'danger' | 'unknown'> 
 function tagLabel(s: StateKind): string {
   return s === 'ok' ? _t('OK') : s === 'warn' ? _t('WARN') : s === 'crit' ? _t('CRIT') : _t('n/a')
 }
+
 
 interface Row {
   service: string
@@ -536,22 +188,7 @@ interface EndpointReview {
   // Split because an inventory-only field produces a row but no service.
   serviceCount: number
   inventoryCount: number
-  hostLabels: Array<{ label: string; value: string }>
-}
-
-/** Whether a label spec carries an element condition.
- *
- * The preview cannot evaluate one: FormEdit serializes the operator as a hashed
- * ident and the only thing recoverable from it is a (translated) title, so
- * guessing it would be worse than not trying. The preview therefore shows the
- * labels the spec CAN produce and marks them as conditional. */
-function hasCondition(filter: FilterValue | undefined): boolean {
-  return typeof filter?.path === 'string' && filter.path !== ''
-}
-
-/** A previewed label value, marked where a condition decides whether it is set. */
-function mark(value: string, filter: FilterValue | undefined): string {
-  return hasCondition(filter) ? `${value} ${_t('(only when the condition matches)')}` : value
+  hostLabels: HostLabelPreview[]
 }
 
 const reviews = computed<EndpointReview[]>(() =>
@@ -563,60 +200,10 @@ const reviews = computed<EndpointReview[]>(() =>
     } catch {
       sample = null
     }
-    // Mirror the agent's host-label resolution: a plain path -> one label with
-    // the scalar at the path; a '[*]' path -> one label per element, keyed
-    // <base>/<element> with value from value_field (default 'true'). A literal
-    // value collapses a '[*]' path to ONE label keyed as configured, and an
-    // optional condition decides which elements produce a label at all.
-    const hostLabels: Array<{ label: string; value: string }> = []
-    for (const l of services?.hostLabels ?? []) {
-      const base = labelKeyOf(l)
-      const path = typeof l.path === 'string' ? l.path : ''
-      const literal = typeof l.value === 'string' && l.value ? l.value : null
-      const valueField = typeof l.value_field === 'string' ? l.value_field : ''
-      if (!base) {
-        continue
-      }
-      if (!path) {
-        // Described by the rule alone: nothing but the condition is read.
-        if (literal !== null) {
-          hostLabels.push({ label: `json_api/${base}`, value: mark(literal, l.filter) })
-        }
-        continue
-      }
-      const matches = sample !== null ? resolvePath(sample, path) : []
-      if (!path.includes('[*]')) {
-        hostLabels.push({
-          label: `json_api/${base}`,
-          value: mark(
-            literal ??
-              (matches.length ? fmtValue(matches[0]!.value) : _t('(not found in sample)')),
-            l.filter,
-          ),
-        })
-        continue
-      }
-      if (literal !== null) {
-        // One label for the whole collection, keyed exactly as configured - not
-        // one per element - as soon as an element matches.
-        if (sample === null || matches.length) {
-          hostLabels.push({ label: `json_api/${base}`, value: mark(literal, l.filter) })
-        }
-        continue
-      }
-      for (const m of matches) {
-        const key = m.label ? `${base}/${m.label}` : base
-        let value = 'true'
-        if (valueField) {
-          const inner = resolvePath(m.value, valueField)
-          if (!inner.length) {
-            continue
-          }
-          value = fmtValue(inner[0]!.value)
-        }
-        hostLabels.push({ label: `json_api/${key}`, value: mark(value, l.filter) })
-      }
-    }
+    const hostLabels = previewHostLabels(sample, services?.hostLabels ?? [], {
+      notFound: _t('(not found in sample)'),
+      conditional: _t('(only when the condition matches)'),
+    })
     const prefix = servicePrefix(connection)
     const rows: Row[] = (services?.extractions ?? [])
       .filter((x) => extractionPath(x))
@@ -732,7 +319,7 @@ const reviews = computed<EndpointReview[]>(() =>
             }
             value = transformed
           }
-          return { service, line: elementLine, path, value, defined, state: evalState(value, x), labels }
+          return { service, line: elementLine, path, value, defined, state: evalState(value, x, choiceTitles.value), labels }
         })
         // With a host per element the suffix only reaches the services of the
         // elements that stay on the polling host; resolveLabelled has already
