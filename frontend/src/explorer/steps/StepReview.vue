@@ -189,6 +189,8 @@ interface EndpointReview {
   serviceCount: number
   inventoryCount: number
   hostLabels: HostLabelPreview[]
+  // The endpoint follows the API's pagination: the counts describe page one.
+  paginates: boolean
 }
 
 const reviews = computed<EndpointReview[]>(() =>
