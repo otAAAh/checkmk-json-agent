@@ -30,10 +30,11 @@ extracted from the body.
 
 This module is the entry point (arguments, secrets, one endpoint end to end,
 the section). The work is layered below it, each module importing only from the
-ones before it: ``paths`` (the path grammar), ``transport`` (session, auth, TLS,
-debug output and redaction), ``cache``, ``oauth2``, ``pagination``, ``fetch``
-(one endpoint's request, with cache, retries and token refresh) and ``extract``
-(document -> service results and host labels).
+ones before it: ``paths`` (the path grammar), ``models`` (the '--endpoint' blob,
+read once into typed values), ``transport`` (session, auth, TLS, debug output
+and redaction), ``cache``, ``oauth2``, ``pagination``, ``fetch`` (one endpoint's
+request, with cache, retries and token refresh) and ``extract`` (document ->
+service results and host labels).
 """
 
 import argparse
@@ -45,16 +46,23 @@ from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
 
 from .extract import (
-    _context_spec,
     _extract,
     _prefixed,
     _resolve_host_labels,
     _result,
     _service_prefix,
-    _shared_service,
 )
 from .fetch import _fetch
-from .transport import _debug
+from .models import (
+    Endpoint,
+    EndpointConfigError,
+    Extraction,
+    FieldName,
+    InvalidEndpoint,
+    invalid_endpoint,
+    parse_endpoint,
+)
+from .transport import RequestMeta, _debug
 
 try:
     # Checkmk 3.0+: the public password store API, declared stable.
@@ -94,7 +102,8 @@ def _add_secret_option(
 def _reveal_secret(args: argparse.Namespace, name: str) -> str:
     """Resolve a secret from the parsed args, across Checkmk 2.4 and 2.5+."""
     if _HAVE_PWSTORE_V1:
-        return resolve_secret_option(args, name).reveal()
+        secret: str = resolve_secret_option(args, name).reveal()
+        return secret
     # Imported only here: an internal module, so a Checkmk release that moves it
     # must not break the import of the agent on the versions that never need it.
     from cmk.utils import password_store
@@ -103,7 +112,8 @@ def _reveal_secret(args: argparse.Namespace, name: str) -> str:
     if not reference:
         raise ValueError(f"no --{name}-id given")
     secret_id, store_file = reference.split(":", 1)
-    return password_store.lookup(Path(store_file), secret_id)
+    stored: str = password_store.lookup(Path(store_file), secret_id)
+    return stored
 
 
 def parse_arguments(argv: Sequence[str]) -> argparse.Namespace:
@@ -161,17 +171,20 @@ def _url_without_query(url: str) -> str:
     return urlunsplit(split._replace(query="", fragment="")) or url
 
 
-def _endpoint_name(endpoint: dict, url: str) -> str:
+def _endpoint_name(endpoint: Endpoint | InvalidEndpoint, url: str) -> str:
     """The endpoint's service item: its configured name, else the bare URL."""
-    name = endpoint.get("name")
-    if isinstance(name, str) and name.strip():
-        return name.strip()
+    if endpoint.name is not None and endpoint.name.strip():
+        return endpoint.name.strip()
     return _url_without_query(url)
 
 
 def _endpoint_record(
-    endpoint: dict, url: str, ok: bool, error: str | None, meta: dict | None = None
-) -> dict:
+    endpoint: Endpoint | InvalidEndpoint,
+    url: str,
+    ok: bool,
+    error: str | None,
+    meta: RequestMeta | None = None,
+) -> dict[str, object]:
     """One 'endpoints' entry: the outcome of the request itself."""
     meta = meta or {}
     return {
@@ -216,14 +229,8 @@ def _endpoint_record(
     }
 
 
-# A '--endpoint' blob that is not a JSON object. Carried INSIDE the endpoint
-# dict rather than raised, so the failure travels the same path as every other
-# per-endpoint failure and lands on that endpoint's own service.
-_BLOB_ERROR = "_blob_error"
-
-
-def _parse_endpoint(raw: str) -> dict:
-    """One '--endpoint' argument as a dict, or a dict carrying why it is not.
+def _parse_endpoint(raw: str) -> Endpoint | InvalidEndpoint:
+    """One '--endpoint' argument as an ``Endpoint``, or what is wrong with it.
 
     Parsing all of them up front with a bare ``json.loads`` meant one malformed
     blob raised before anything was written: no section at all, so EVERY service
@@ -232,21 +239,40 @@ def _parse_endpoint(raw: str) -> dict:
     possible cause. Setup cannot produce such a blob, but a hand-written rule or
     a program call edited by hand can, and that is exactly when the operator is
     already debugging something.
+
+    So the failure is not raised but returned: an ``InvalidEndpoint`` travels the
+    same path as every other per-endpoint failure and lands on that endpoint's
+    own services.
     """
     try:
-        endpoint = json.loads(raw)
+        blob = json.loads(raw)
     except ValueError as exc:
-        return {_BLOB_ERROR: f"Endpoint configuration is not valid JSON: {exc}"}
-    if not isinstance(endpoint, dict):
-        return {
-            _BLOB_ERROR: f"Endpoint configuration is a {type(endpoint).__name__}, not an object"
-        }
-    return endpoint
+        return InvalidEndpoint(error=f"Endpoint configuration is not valid JSON: {exc}")
+    return _endpoint_from_blob(blob)
+
+
+def _endpoint_from_blob(blob: object) -> Endpoint | InvalidEndpoint:
+    """A decoded '--endpoint' blob as an ``Endpoint``, or what is wrong with it."""
+    if not isinstance(blob, dict):
+        return InvalidEndpoint(
+            error=f"Endpoint configuration is a {type(blob).__name__}, not an object"
+        )
+    try:
+        return parse_endpoint(blob)
+    except EndpointConfigError as exc:
+        return invalid_endpoint(blob, f"Endpoint configuration is invalid: {exc}")
+
+
+def _field_names(endpoint: Endpoint | InvalidEndpoint) -> tuple[FieldName, ...]:
+    """The fields a failing endpoint reports its failure on."""
+    if isinstance(endpoint, InvalidEndpoint):
+        return endpoint.fields
+    return tuple(FieldName(spec.path, spec.service, spec.group) for spec in endpoint.extractions)
 
 
 def _process_endpoint(
-    args: argparse.Namespace, index: int, endpoint: dict
-) -> tuple[list[dict], dict, dict]:
+    args: argparse.Namespace, index: int, endpoint: Endpoint | InvalidEndpoint
+) -> tuple[list[dict[str, object]], dict[str, str], dict[str, object]]:
     """Fetch one endpoint: its (extraction results, host labels, own record).
 
     Any failure is confined to this endpoint: secret resolution, the fetch, and
@@ -256,44 +282,47 @@ def _process_endpoint(
     endpoint contributes no host labels, and its record carries the error for its
     own service.
     """
-    url = endpoint.get("url", "?")
-    debug = getattr(args, "debug", False)
+    url = endpoint.url
+    debug = bool(getattr(args, "debug", False))
     _debug(debug, f"endpoint {index}: {url}")
     prefix = _service_prefix(endpoint)
 
-    def _fail(error: str, meta: dict | None = None) -> tuple[list[dict], dict, dict]:
+    def _fail(
+        error: str, meta: RequestMeta | None = None
+    ) -> tuple[list[dict[str, object]], dict[str, str], dict[str, object]]:
         # Prefixed exactly like the success path: a service that renamed itself
         # while the endpoint was down would go stale and its replacement would
         # be undiscovered, which is precisely when the monitoring is needed.
+        # Only the field's path goes into the result: its levels and matching
+        # describe a value, and there is none.
         results = [
             _result(
-                {"path": spec.get("path", "?")},
-                _prefixed(prefix, _shared_service(spec) or spec.get("service", "?")),
+                Extraction(path=field.path, service=field.service),
+                _prefixed(prefix, field.group or field.service),
                 False,
                 None,
                 error,
                 url,
-                label=spec.get("service", "?") if _shared_service(spec) else None,
+                label=field.service if field.group else None,
             )
-            for spec in endpoint.get("extractions", [])
-            if isinstance(spec, dict)
+            for field in _field_names(endpoint)
         ]
         # Guarantee the failure is visible even when the blob carries no usable
         # extractions to hang it on (otherwise it would silently vanish).
         return (
-            results or [_result({"path": "?"}, url, False, None, error, url)],
+            results or [_result(Extraction(path="?", service=url), url, False, None, error, url)],
             {},
             _endpoint_record(endpoint, url, False, error, meta),
         )
 
-    if (blob_error := endpoint.get(_BLOB_ERROR)) is not None:
-        # Unparseable: there is no URL, no name and no extraction to hang this
-        # on, so it becomes the one service the endpoint always has.
-        _debug(debug, f"  {blob_error}")
-        return _fail(str(blob_error))
+    if isinstance(endpoint, InvalidEndpoint):
+        # Unusable: it becomes the services that can still be named - the one
+        # the endpoint always has, and one per field the blob names.
+        _debug(debug, f"  {endpoint.error}")
+        return _fail(endpoint.error)
 
     try:
-        secret = _reveal_secret(args, f"secret_{index}") if endpoint.get("auth") else None
+        secret = _reveal_secret(args, f"secret_{index}") if endpoint.auth else None
     except Exception as exc:  # e.g. a stale/missing password-store reference
         if debug:
             raise
@@ -305,14 +334,14 @@ def _process_endpoint(
             return _fail(error, meta)
         results = _extract(
             document,
-            endpoint.get("extractions", []),
+            endpoint.extractions,
             url,
             meta.get("headers"),
             prefix,
-            _context_spec(endpoint),
+            endpoint.field_context,
             secret,
         )
-        host_labels = _resolve_host_labels(endpoint.get("host_labels", []), document)
+        host_labels = _resolve_host_labels(endpoint.host_labels, document)
         if debug:
             for result in results:
                 outcome = (
@@ -324,7 +353,7 @@ def _process_endpoint(
             for key, value in host_labels.items():
                 _debug(debug, f"  host label json_api/{key} = {value}")
         return (results, host_labels, _endpoint_record(endpoint, url, True, None, meta))
-    except Exception as exc:  # malformed endpoint blob, unexpected extraction error, ...
+    except Exception as exc:  # an unexpected extraction error, ...
         # The usual Checkmk '--debug' contract: let the error through with its
         # traceback. Unattended, it costs only this endpoint's services.
         if debug:
@@ -333,8 +362,8 @@ def _process_endpoint(
 
 
 def _split_by_host(
-    results: list[dict],
-) -> tuple[list[dict], dict[str, list[dict]], dict[str, dict[str, str]]]:
+    results: list[dict[str, object]],
+) -> tuple[list[dict[str, object]], dict[str, list[dict[str, object]]], dict[str, dict[str, str]]]:
     """Partition results into the polling host's own and per-piggyback-host.
 
     ``host`` and ``host_labels`` are internal routing hints, not part of the
@@ -347,17 +376,17 @@ def _split_by_host(
     they describe the HOST, so two fields of the same element must not each
     write their own section-level label map.
     """
-    own: list[dict] = []
-    piggybacked: dict[str, list[dict]] = {}
+    own: list[dict[str, object]] = []
+    piggybacked: dict[str, list[dict[str, object]]] = {}
     labels: dict[str, dict[str, str]] = {}
     for result in results:
         host = result.pop("host", None)
-        host_labels = result.pop("host_labels", None) or {}
-        if host is None:
+        host_labels = result.pop("host_labels", None)
+        if not isinstance(host, str):
             own.append(result)
             continue
         piggybacked.setdefault(host, []).append(result)
-        if host_labels:
+        if isinstance(host_labels, dict) and host_labels:
             labels.setdefault(host, {}).update(host_labels)
     return own, piggybacked, labels
 
@@ -366,9 +395,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parse_arguments(sys.argv[1:] if argv is None else argv)
 
     endpoints = [_parse_endpoint(raw) for raw in args.endpoint]
-    results: list[dict] = []
+    results: list[dict[str, object]] = []
     host_labels: dict[str, str] = {}
-    endpoint_records: list[dict] = []
+    endpoint_records: list[dict[str, object]] = []
     if endpoints:
         # Fetch endpoints concurrently so total runtime is the slowest endpoint,
         # not the sum. pool.map preserves input order, keeping the merged section

@@ -4,7 +4,17 @@
 
 import json
 import re
+from collections.abc import Sequence
 
+from .models import (
+    Endpoint,
+    Extraction,
+    FieldContext,
+    Filter,
+    HostLabel,
+    InvalidEndpoint,
+    ServiceLabel,
+)
 from .paths import (
     _HEADER_PREFIX,
     _NO_ELEMENT,
@@ -20,21 +30,10 @@ from .paths import (
     _strip_root,
     _token_key,
 )
-from .transport import _MAX_REPORTED_BYTES, _redact_secret
-
-# How much of the JSON context to put into ONE field service's details. Smaller
-# than the raw-response default on purpose: this text is repeated on every field
-# service of the endpoint, not written once to the endpoint's own service.
-_DEFAULT_CONTEXT_BYTES = 1024
+from .transport import _redact_secret
 
 
-def _context_spec(endpoint: dict) -> dict | None:
-    """The endpoint's 'report the JSON context in the field services' settings."""
-    spec = endpoint.get("field_context")
-    return spec if isinstance(spec, dict) else None
-
-
-def _context_object(spec: dict, document: object, path: str, element: object) -> object:
+def _context_object(spec: FieldContext, document: object, path: str, element: object) -> object:
     """The JSON a field's details should show, per the configured source.
 
     'response' is the whole document. 'element' is the JSON the value was
@@ -44,7 +43,7 @@ def _context_object(spec: dict, document: object, path: str, element: object) ->
     the document - the alternative would be to report nothing where the context
     is arguably most useful.
     """
-    if spec.get("source") == "response":
+    if spec.source == "response":
         return document
     if element is not None and element is not _NO_ELEMENT:
         return element
@@ -55,7 +54,7 @@ def _context_object(spec: dict, document: object, path: str, element: object) ->
 
 
 def _context_text(
-    spec: dict | None,
+    spec: FieldContext | None,
     document: object,
     path: str,
     element: object = None,
@@ -71,9 +70,7 @@ def _context_text(
     """
     if spec is None:
         return None
-    raw = spec.get("max_bytes")
-    limit = int(raw) if isinstance(raw, (int, float)) and not isinstance(raw, bool) else 0
-    limit = max(1, min(limit or _DEFAULT_CONTEXT_BYTES, _MAX_REPORTED_BYTES))
+    limit = spec.max_bytes
     try:
         text = json.dumps(_context_object(spec, document, path, element), indent=2, default=str)
     except (TypeError, ValueError):
@@ -85,7 +82,7 @@ def _context_text(
     return f"{shown}\n... (truncated at {limit} of {len(encoded)} bytes)"
 
 
-def _matches_filter(element: object, filt: object) -> bool:
+def _matches_filter(element: object, filt: Filter | None) -> bool:
     """Whether a wildcard/count element satisfies the configured filter.
 
     The filter path is resolved WITHIN the element and the resolved scalar is
@@ -95,16 +92,16 @@ def _matches_filter(element: object, filt: object) -> bool:
     ever keeps elements it can positively confirm - including for the negated
     operators, where an element lacking the field is dropped rather than kept.
     """
-    if not isinstance(filt, dict) or not filt.get("path"):
+    if filt is None:
         return True  # no filter configured → keep everything
-    found, value = _resolve_path(element, filt["path"])
+    found, value = _resolve_path(element, filt.path)
     if not found:
         return False
     text = _label_value(value)
     if text is None:
         return False
-    target = filt.get("value", "")
-    match filt.get("op"):
+    target = filt.value
+    match filt.op:
         case "not_equals":
             return text != target
         case "regex":
@@ -119,20 +116,6 @@ def _matches_filter(element: object, filt: object) -> bool:
                 return False
         case _:  # "equals" (the default)
             return text == target
-
-
-def _aggregate_mode(spec: dict) -> str | None:
-    """The configured aggregation ('count'/'sum'/'avg'/'min'/'max'), or None.
-
-    ``count: true`` is the superseded boolean form of ``aggregate: "count"``: a
-    rule saved before the aggregate dropdown still carries it (the ruleset
-    migrates it only when the rule is next opened in Setup), and so may a
-    hand-written '--endpoint' blob. Reading it here keeps both working.
-    """
-    mode = spec.get("aggregate")
-    if isinstance(mode, str) and mode:
-        return mode
-    return "count" if spec.get("count") else None
 
 
 _AGGREGATE_NOT_NUMERIC = (
@@ -180,7 +163,9 @@ def _trim(number: float) -> float | int:
     return int(number) if number.is_integer() else number
 
 
-def _aggregate_container(mode: str, container: object, filt: object) -> tuple[bool, object, str]:
+def _aggregate_container(
+    mode: str, container: object, filt: Filter | None
+) -> tuple[bool, object, str]:
     """Aggregate the elements of the array/object at a wildcard-free path.
 
     'count' is the number of elements (array length or number of object keys);
@@ -193,7 +178,7 @@ def _aggregate_container(mode: str, container: object, filt: object) -> tuple[bo
     if pairs is None:
         return False, None, "value at path is not a list or object (cannot aggregate)"
     elements = [element for _default, element in pairs]
-    if isinstance(filt, dict) and filt.get("path"):
+    if filt is not None:
         # Aggregate only the matching elements (e.g. how many nodes are NOT 'ok').
         elements = [element for element in elements if _matches_filter(element, filt)]
     if mode == "count":
@@ -204,7 +189,7 @@ def _aggregate_container(mode: str, container: object, filt: object) -> tuple[bo
 def _aggregate_leaves(
     mode: str,
     leaves: list[tuple[list[str], bool, object, str, object]],
-    filt: object,
+    filt: Filter | None,
 ) -> tuple[bool, object, str]:
     """Aggregate the leaves of a '[*]' expansion into one value.
 
@@ -225,11 +210,10 @@ def _aggregate_leaves(
     # element, with a real length of 1) is not mistaken for it.
     if len(leaves) == 1 and leaves[0][4] is _NO_ELEMENT:
         return False, None, leaves[0][3]
-    filtering = isinstance(filt, dict) and bool(filt.get("path"))
     kept = [
         (found, value)
         for _labels, found, value, _error, element in leaves
-        if not filtering or _matches_filter(element, filt)
+        if _matches_filter(element, filt)
     ]
     values = [value for found, value in kept if found]
     if kept and not values:
@@ -247,7 +231,7 @@ def _aggregate_leaves(
 _HOST_NAME_INVALID = re.compile(r"[^-0-9A-Za-z_.]")
 
 
-def _piggyback_host(element: object, host_path: object) -> str | None:
+def _piggyback_host(element: object, host_path: str | None) -> str | None:
     """The piggyback host name for one element, or ``None`` when there is none.
 
     The name is read from a field WITHIN the element (the same way a filter or a
@@ -257,7 +241,7 @@ def _piggyback_host(element: object, host_path: object) -> str | None:
     leaves that element's services on the polling host rather than inventing a
     host name for them.
     """
-    if not isinstance(host_path, str) or not host_path.strip():
+    if host_path is None or not host_path.strip():
         return None
     found, value = _resolve_path(element, host_path.strip())
     if not found:
@@ -269,7 +253,7 @@ def _piggyback_host(element: object, host_path: object) -> str | None:
     return cleaned or None
 
 
-def _inventory_spec(spec: dict, row_key: str | None) -> dict | None:
+def _inventory_spec(extraction: Extraction, row_key: str | None) -> dict[str, object] | None:
     """This field's place in the inventory tree, resolved for one result.
 
     The attribute name defaults to the JSON path's last segment - the same rule
@@ -277,25 +261,25 @@ def _inventory_spec(spec: dict, row_key: str | None) -> dict | None:
     is the '[*]' element's label, which becomes the table row's key column;
     without a wildcard the value is a plain attribute of the node.
     """
-    inventory = spec.get("inventory")
-    if not isinstance(inventory, dict) or not inventory.get("node"):
+    inventory = extraction.inventory
+    if inventory is None:
         return None
     return {
-        "node": str(inventory["node"]).strip(),
-        "key": (inventory.get("key") or "").strip() or _label_key_from_path(spec["path"]),
+        "node": inventory.node,
+        "key": inventory.key or _label_key_from_path(extraction.path),
         "row_key": row_key,
-        "keep_service": bool(inventory.get("keep_service")),
+        "keep_service": inventory.keep_service,
     }
 
 
 def _result(
-    spec: dict,
+    extraction: Extraction,
     service: str,
     found: bool,
     value: object,
     error: str,
     url: str,
-    labels: list[dict] | None = None,
+    labels: list[dict[str, str]] | None = None,
     host: str | None = None,
     summary_fields: dict[str, str] | None = None,
     row_key: str | None = None,
@@ -303,7 +287,7 @@ def _result(
     host_labels: dict[str, str] | None = None,
     label: str | None = None,
     context: str | None = None,
-) -> dict:
+) -> dict[str, object]:
     # Values that are not JSON scalars (dict/list) are reported as strings.
     if found and isinstance(value, (dict, list)):
         value = json.dumps(value)
@@ -322,15 +306,15 @@ def _result(
         # internal routing, stripped with 'host': they belong to the host, not to
         # the service, so they are merged per host in _split_by_host.
         "host_labels": host_labels or {},
-        "path": spec["path"],
+        "path": extraction.path,
         "url": url,
         "found": found,
         "value": value if found else None,
         "error": None if found else error,
-        "levels_upper": spec.get("levels_upper"),
-        "levels_lower": spec.get("levels_lower"),
-        "match": spec.get("match"),
-        "calc": spec.get("calc"),
+        "levels_upper": extraction.levels_upper,
+        "levels_lower": extraction.levels_lower,
+        "match": extraction.match,
+        "calc": extraction.calc,
         # The second operand of a two-path transform, already resolved in this
         # result's own scope - only the agent has the document and the current
         # '[*]' element, and 'other' means "this element's total", not the
@@ -338,30 +322,30 @@ def _result(
         # resolve; the check then reports the expression as failed rather than
         # quietly computing with a stand-in.
         "calc_other": calc_other,
-        "unit": spec.get("unit"),
+        "unit": extraction.unit,
         # The metric name the rule states, if any. Untouched here for the same
         # reason as value_range: only the check emits metrics.
-        "metric_name": spec.get("metric_name"),
+        "metric_name": extraction.metric_name,
         # The range this value moves in, when the rule states one. Untouched
         # here: the check turns it into the metric's boundaries, and only the
         # check emits metrics.
-        "value_range": spec.get("value_range"),
+        "value_range": extraction.value_range,
         # Passed through for the check: it derives the per-second rate / the age
         # (it owns the value store and knows "now").
-        "value_as": spec.get("value_as"),
+        "value_as": extraction.value_as,
         # Already applied here; carried along only so the check can say so in the
         # service's Details.
-        "aggregate": _aggregate_mode(spec),
+        "aggregate": extraction.aggregate,
         "labels": labels or [],
         # Extra summary text: the template as configured, plus the values its
         # '{path}' placeholders resolved to in THIS element's scope. Split that
         # way because only the agent can resolve a path and only the check knows
         # how the value itself is rendered.
-        "summary": spec.get("summary") or None,
+        "summary": extraction.summary,
         "summary_fields": summary_fields or {},
         # Where this value goes in the HW/SW inventory tree, if anywhere. None
         # for the ordinary "this is a service" case.
-        "inventory": _inventory_spec(spec, row_key),
+        "inventory": _inventory_spec(extraction, row_key),
         # The JSON this value was read from, for the endpoints that asked for it.
         # It travels WITH the result rather than being looked up from the
         # endpoint record by the check, because a piggybacked result lands in a
@@ -370,7 +354,7 @@ def _result(
     }
 
 
-def _service_prefix(endpoint: dict) -> str:
+def _service_prefix(endpoint: Endpoint | InvalidEndpoint) -> str:
     """The endpoint name to put in front of this endpoint's service names, or ''.
 
     Opt-in per endpoint. Two endpoints extracting the same fields otherwise
@@ -384,10 +368,9 @@ def _service_prefix(endpoint: dict) -> str:
     configured name the option is simply a no-op (the ruleset rejects that
     combination, so it can only reach here from a hand-written rule).
     """
-    if not endpoint.get("service_prefix"):
+    if not endpoint.service_prefix:
         return ""
-    name = endpoint.get("name")
-    return name.strip() if isinstance(name, str) and name.strip() else ""
+    return endpoint.name.strip() if endpoint.name is not None else ""
 
 
 def _prefixed(prefix: str, service: str) -> str:
@@ -395,47 +378,36 @@ def _prefixed(prefix: str, service: str) -> str:
     return f"{prefix} {service}" if prefix else service
 
 
-def _shared_service(spec: dict) -> str | None:
-    """The shared service this field reports into, or None for one of its own.
-
-    A field that names one puts its value into that service as a LINE rather than
-    becoming a service itself: the check yields one result per line and Checkmk's
-    own aggregation makes the service's state the worst of them. The field's own
-    'service' name then names the line instead of the service.
-    """
-    group = spec.get("group")
-    return group.strip() if isinstance(group, str) and group.strip() else None
-
-
 def _extract(
     document: object,
-    extractions: list[dict],
+    extractions: Sequence[Extraction],
     url: str,
     headers: object = None,
     prefix: str = "",
-    context: dict | None = None,
+    context: FieldContext | None = None,
     secret: str | None = None,
-) -> list[dict]:
+) -> list[dict[str, object]]:
     results = []
     for spec in extractions:
-        label_specs = spec.get("labels") or []
+        label_specs = spec.labels
         # Resolved in the same scope as the service labels: the current '[*]'
         # element, or the document root where there is no element.
-        summary = spec.get("summary")
+        summary = spec.summary
         # This field's service name, endpoint prefix included. Every branch below
         # names its service from this, so a prefixed endpoint cannot end up with
         # some of its services prefixed and some not.
         #
         # Naming a shared service moves the names one step along: that service is
-        # what the field reports into, and the field's own name becomes the label
-        # of its line inside it.
-        shared = _shared_service(spec)
-        base = _prefixed(prefix, shared if shared is not None else spec["service"])
-        line = spec["service"] if shared is not None else None
+        # what the field reports into (as a LINE - the check yields one result per
+        # line and Checkmk's own aggregation makes the service's state the worst
+        # of them), and the field's own name becomes the label of its line.
+        shared = spec.group
+        base = _prefixed(prefix, shared if shared is not None else spec.service)
+        line = spec.service if shared is not None else None
         # A header is a single scalar off the response, so none of the body-only
         # machinery (wildcards, aggregation, filters) applies to it.
-        if spec["path"].strip().startswith(_HEADER_PREFIX):
-            found, value = _resolve_header(headers, spec["path"].strip())
+        if spec.path.strip().startswith(_HEADER_PREFIX):
+            found, value = _resolve_header(headers, spec.path.strip())
             results.append(
                 _result(
                     spec,
@@ -447,16 +419,16 @@ def _extract(
                     _resolve_labels(label_specs, document),
                     summary_fields=_resolve_summary(summary, document),
                     label=line,
-                    context=_context_text(context, document, spec["path"], secret=secret),
+                    context=_context_text(context, document, spec.path, secret=secret),
                 )
             )
             continue
 
-        segments = _split_wildcards(spec["path"])
-        aggregate = _aggregate_mode(spec)
-        filt = spec.get("filter")
+        segments = _split_wildcards(spec.path)
+        aggregate = spec.aggregate
+        filt = spec.filter
         if len(segments) == 1:
-            found, value = _resolve_path(document, spec["path"])
+            found, value = _resolve_path(document, spec.path)
             error = "path not found in response"
             # Aggregating a wildcard-free path reduces the array/object it holds.
             if found and aggregate:
@@ -474,12 +446,12 @@ def _extract(
                     summary_fields=_resolve_summary(summary, document),
                     calc_other=_resolve_calc_other(spec, document),
                     label=line,
-                    context=_context_text(context, document, spec["path"], secret=secret),
+                    context=_context_text(context, document, spec.path, secret=secret),
                 )
             )
             continue
 
-        leaves = _expand_wildcards(document, segments, spec.get("label_path"))
+        leaves = _expand_wildcards(document, segments, spec.label_path)
 
         # Aggregating a '[*]' path collapses the expansion into ONE service (the
         # sum/average/... over the elements) instead of fanning it out. Service
@@ -500,7 +472,7 @@ def _extract(
                     summary_fields=_resolve_summary(summary, document),
                     calc_other=_resolve_calc_other(spec, document),
                     label=line,
-                    context=_context_text(context, document, spec["path"], secret=secret),
+                    context=_context_text(context, document, spec.path, secret=secret),
                 )
             )
             continue
@@ -510,14 +482,9 @@ def _extract(
         # An optional filter keeps only the elements whose sub-field matches
         # (e.g. only the nodes that are NOT 'ok'); a not-found leaf is kept so
         # the "array or object not found" error still surfaces.
-        host_path = spec.get("piggyback_host")
+        host_path = spec.piggyback_host
         for index, (label_segments, found, value, error, element) in enumerate(leaves):
-            if (
-                found
-                and isinstance(filt, dict)
-                and filt.get("path")
-                and not _matches_filter(element, filt)
-            ):
+            if found and not _matches_filter(element, filt):
                 continue
             # With a piggyback host field, the element becomes its own Checkmk
             # host, so the host carries the identity and the service keeps its
@@ -530,9 +497,7 @@ def _extract(
             # host they would silently become labels of the polling host, which
             # is emphatically not what "label the host I created" asked for.
             element_host_labels = (
-                _resolve_host_labels(spec.get("piggyback_labels") or [], element)
-                if host is not None
-                else {}
+                _resolve_host_labels(spec.piggyback_labels, element) if host is not None else {}
             )
             label = " / ".join(label_segments)
             # With a shared service the expansion fans out into LINES of that one
@@ -568,7 +533,7 @@ def _extract(
                     # overwrite each other under one key.
                     row_key=label or str(index),
                     label=element_line,
-                    context=_context_text(context, document, spec["path"], element, secret),
+                    context=_context_text(context, document, spec.path, element, secret),
                 )
             )
     return results
@@ -622,7 +587,7 @@ def _summary_value(value: object) -> str:
     return text if text is not None else str(value)
 
 
-def _resolve_calc_other(spec: dict, element: object) -> object:
+def _resolve_calc_other(spec: Extraction, element: object) -> object:
     """Resolve the transform's second path within ``element``, or ``None``.
 
     Resolved in the same scope as the service's labels and summary - the current
@@ -630,14 +595,13 @@ def _resolve_calc_other(spec: dict, element: object) -> object:
     'value / other * 100' over 'disks[*].used' with 'total' compares each disk
     against ITS OWN total rather than against some other element's.
     """
-    path = spec.get("calc_path")
-    if not isinstance(path, str) or not path.strip():
+    if spec.calc_path is None:
         return None
-    found, value = _resolve_path(element, path.strip())
+    found, value = _resolve_path(element, spec.calc_path)
     return value if found else None
 
 
-def _resolve_summary(template: object, element: object) -> dict[str, str]:
+def _resolve_summary(template: str | None, element: object) -> dict[str, str]:
     """Resolve a summary template's '{path}' placeholders against ``element``.
 
     Returns ``{path: rendered}`` for the placeholders that resolved, keyed by the
@@ -645,7 +609,7 @@ def _resolve_summary(template: object, element: object) -> dict[str, str]:
     the check marks them '(n/a)', so a typo stays visible instead of quietly
     rendering as nothing.
     """
-    if not isinstance(template, str) or not template.strip():
+    if template is None or not template.strip():
         return {}
     fields: dict[str, str] = {}
     for match in _SUMMARY_PLACEHOLDER.finditer(template):
@@ -658,7 +622,7 @@ def _resolve_summary(template: object, element: object) -> dict[str, str]:
     return fields
 
 
-def _resolve_labels(label_specs: list[dict], element: object) -> list[dict]:
+def _resolve_labels(label_specs: Sequence[ServiceLabel], element: object) -> list[dict[str, str]]:
     """Resolve SERVICE-label specs relative to ``element`` into ``{key, value}``.
 
     ``element`` is each '[*]' element (or the whole document for a non-wildcard
@@ -668,20 +632,17 @@ def _resolve_labels(label_specs: list[dict], element: object) -> list[dict]:
     """
     resolved = []
     for spec in label_specs:
-        path = spec.get("path")
-        if not path:
-            continue
-        found, value = _resolve_path(element, path)
+        found, value = _resolve_path(element, spec.path)
         if not found:
             continue
         text = _label_value(value)
         if text is None:
             continue
-        resolved.append({"key": spec.get("key") or _label_key_from_path(path), "value": text})
+        resolved.append({"key": spec.key or _label_key_from_path(spec.path), "value": text})
     return resolved
 
 
-def _resolve_host_labels(label_specs: list[dict], document: object) -> dict:
+def _resolve_host_labels(label_specs: Sequence[HostLabel], document: object) -> dict[str, str]:
     """Resolve HOST-label specs from the ``document`` root into ``{key: value}``.
 
     Host labels are host-wide, so they attach to no service and are resolved once
@@ -712,11 +673,10 @@ def _resolve_host_labels(label_specs: list[dict], document: object) -> dict:
     """
     labels: dict[str, str] = {}
     for spec in label_specs:
-        path = spec.get("path")
-        filt = spec.get("filter")
-        raw_literal = spec.get("value")
-        literal = raw_literal if isinstance(raw_literal, str) and raw_literal else None
-        base_key = spec.get("key") or (_label_key_from_path(path) if path else "")
+        path = spec.path
+        filt = spec.filter
+        literal = spec.literal
+        base_key = spec.key or (_label_key_from_path(path) if path else "")
         if not base_key:
             continue  # nothing to key the label by (a path-less spec without a key)
         if not path:
@@ -725,7 +685,7 @@ def _resolve_host_labels(label_specs: list[dict], document: object) -> dict:
             if literal is not None and _matches_filter(document, filt):
                 labels[base_key] = literal
             continue
-        value_field = spec.get("value_field") or ""
+        value_field = spec.value_field
         segments = _split_wildcards(path)
         if len(segments) == 1:
             found, value = _resolve_path(document, path)

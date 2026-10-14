@@ -9,9 +9,11 @@ from urllib.parse import quote_plus, unquote_plus, urljoin, urlsplit, urlunsplit
 
 import requests
 
-from .paths import _HEADER_PREFIX, _resolve_header, _resolve_path, _strip_root
+from .models import CountedPages, Endpoint, Pagination
+from .paths import _HEADER_PREFIX, _resolve_header, _resolve_path
 from .transport import (
     _MAX_RESPONSE_BYTES,
+    RequestMeta,
     _debug,
     _read_capped,
     _ResponseTooLarge,
@@ -23,102 +25,8 @@ from .transport import (
 # FIRST page and nothing else. 'count' over a queue that pages at 25 reports 25
 # however long the queue is: an answer that is wrong without saying so, which is
 # worse than an error. Following the pages is opt-in per endpoint because it
-# costs requests, but it is the only way that answer becomes true.
-#
-# However the rule is written, the agent never makes more than this many
-# requests for one endpoint. A check that walks a thousand pages is an outage of
-# its own - Checkmk kills a special agent that overruns - and a hand-written
-# rule (or a blob built by something other than the ruleset) is not bound by the
-# ruleset's own range.
-_MAX_PAGES = 100
-
-
-_DEFAULT_MAX_PAGES = 10
-
-
-def _pagination_spec(endpoint: dict) -> dict | None:
-    """The endpoint's 'follow pagination' settings, or None when off."""
-    spec = endpoint.get("pagination")
-    return spec if isinstance(spec, dict) else None
-
-
-def _next_source(spec: dict) -> tuple[str, str] | None:
-    """Where the next page's URL comes from: ``("body", <path>)`` or ``("link_header", "")``.
-
-    The CascadingSingleChoice value as the rule stores it (a list once it has
-    been through JSON). Anything else - a missing choice, an empty body path -
-    means pagination cannot be followed at all, which is reported as None rather
-    than guessed at. The two modes in which the agent BUILDS the next URL itself
-    are not a link source and answer None here; see ``_counted_source``.
-    """
-    raw = spec.get("next")
-    if not isinstance(raw, (list, tuple)) or len(raw) != 2:
-        return None
-    mode, value = raw
-    if mode == "body" and isinstance(value, str) and value.strip():
-        return "body", _strip_root(value)
-    if mode == "link_header":
-        return "link_header", ""
-    return None
-
-
-def _positive_int(raw: object) -> int | None:
-    """A whole number of at least 1, or None - a bool is not a number here."""
-    if isinstance(raw, (int, float)) and not isinstance(raw, bool) and raw >= 1:
-        return int(raw)
-    return None
-
-
-def _counted_source(spec: dict) -> dict | None:
-    """The page-number / offset settings, normalized, or None for a link source.
-
-    Not every API offers a next-page link. Many only take the position as a
-    query parameter - '?page=3', or '?offset=50&limit=25' - and leave counting
-    to the client. For those the agent does the counting: ``page_number`` adds
-    one per page from ``start``; ``offset`` advances by the number of elements
-    the previous page actually carried (not by the page size it asked for, which
-    an API is free to lower).
-
-    What ends it, since there is no absent link to say so: a page whose
-    collection is empty, a page shorter than ``page_size`` AND than a page before
-    it (see ``_counted_done``), or the elements read reaching the number at
-    ``total`` (when the rule names a path to one). Without those, the last page
-    is only known by the request after it - which an API may also answer with a
-    404, or with the last page once more (see ``_follow_pagination``). One extra
-    request, but never a wrong answer.
-    """
-    raw = spec.get("next")
-    if not isinstance(raw, (list, tuple)) or len(raw) != 2:
-        return None
-    mode, value = raw
-    if mode not in ("page_number", "offset") or not isinstance(value, dict):
-        return None
-    parameter = value.get("parameter")
-    if not (isinstance(parameter, str) and parameter.strip()):
-        return None
-    start = value.get("start")
-    size_parameter = value.get("size_parameter")
-    total = value.get("total")
-    return {
-        "mode": mode,
-        "parameter": parameter.strip(),
-        # Both count from where the API does. A page number from 1 almost
-        # everywhere (0 for the zero-based ones); an offset from 0, except for the
-        # APIs that number the elements from 1 (SCIM's 'startIndex') - where
-        # starting at 0 reads one element twice on every page.
-        "start": (
-            int(start)
-            if isinstance(start, (int, float)) and not isinstance(start, bool) and start >= 0
-            else (1 if mode == "page_number" else 0)
-        ),
-        "page_size": _positive_int(value.get("page_size")),
-        "size_parameter": (
-            size_parameter.strip()
-            if isinstance(size_parameter, str) and size_parameter.strip()
-            else None
-        ),
-        "total": _strip_root(total) if isinstance(total, str) and total.strip() else None,
-    }
+# costs requests, but it is the only way that answer becomes true. What the rule
+# asks for is read in ``models`` (``Pagination``), the page cap included.
 
 
 def _with_query(url: str, values: dict[str, str], drop: Iterable[str] = ()) -> str:
@@ -165,15 +73,15 @@ def _no_further_page(found: bool, addition: object, container: object) -> bool:
     )
 
 
-def _counted_params(counted: dict, position: int) -> dict[str, str]:
+def _counted_params(counted: CountedPages, position: int) -> dict[str, str]:
     """The query parameters that request the page at ``position``."""
-    params = {counted["parameter"]: str(position)}
-    if counted["size_parameter"] is not None and counted["page_size"] is not None:
-        params[counted["size_parameter"]] = str(counted["page_size"])
+    params = {counted.parameter: str(position)}
+    if counted.size_parameter is not None and counted.page_size is not None:
+        params[counted.size_parameter] = str(counted.page_size)
     return params
 
 
-def _first_page_url(endpoint: dict) -> str:
+def _first_page_url(endpoint: Endpoint) -> str:
     """The URL the first request goes to.
 
     The rule's own URL - except where the agent counts the pages, and then the
@@ -182,17 +90,14 @@ def _first_page_url(endpoint: dict) -> str:
     default size while the following ones are asked for at another, so offsets
     and the short-page test would disagree about what a page is.
     """
-    # A missing URL fails here exactly as the request itself would have.
-    url = endpoint["url"]
-    spec = _pagination_spec(endpoint)
-    counted = _counted_source(spec) if spec is not None else None
+    counted = endpoint.pagination.counted if endpoint.pagination is not None else None
     if counted is None:
-        return url
-    return _with_query(url, _counted_params(counted, counted["start"]))
+        return endpoint.url
+    return _with_query(endpoint.url, _counted_params(counted, counted.start))
 
 
 def _counted_done(
-    counted: dict, document: object, received: int, read: int, largest_before: int
+    counted: CountedPages, document: object, received: int, read: int, largest_before: int
 ) -> bool:
     """Whether the page just read was the last one.
 
@@ -210,14 +115,10 @@ def _counted_done(
     """
     if received == 0:
         return True
-    if (
-        counted["page_size"] is not None
-        and received < counted["page_size"]
-        and received < largest_before
-    ):
+    if counted.page_size is not None and received < counted.page_size and received < largest_before:
         return True
-    if counted["total"] is not None:
-        found, total = _resolve_path(document, counted["total"])
+    if counted.total is not None:
+        found, total = _resolve_path(document, counted.total)
         if (
             found
             and isinstance(total, (int, float))
@@ -226,23 +127,6 @@ def _counted_done(
         ):
             return True
     return False
-
-
-def _items_path(spec: dict) -> str | None:
-    """The path to the collection each page carries, '' for the response root.
-
-    '$' (or '$.') is how a response that IS the array says so; ``_strip_root``
-    turns it into the empty path, which ``_resolve_path`` resolves to the whole
-    document.
-    """
-    raw = spec.get("items")
-    return _strip_root(raw) if isinstance(raw, str) else None
-
-
-def _pagination_limits(spec: dict) -> tuple[int, int | None]:
-    """``(max pages, max elements)``, the page count clamped to ``_MAX_PAGES``."""
-    pages = _positive_int(spec.get("max_pages")) or _DEFAULT_MAX_PAGES
-    return min(pages, _MAX_PAGES), _positive_int(spec.get("max_elements"))
 
 
 def _container_len(container: object) -> int:
@@ -270,8 +154,9 @@ def _next_candidate(source: tuple[str, str], document: object, headers: object) 
     if not found or not isinstance(header, str):
         return None
     for link in requests.utils.parse_header_links(header):
-        if link.get("rel") == "next" and (url := link.get("url", "").strip()):
-            return url
+        url = link.get("url")
+        if link.get("rel") == "next" and isinstance(url, str) and url.strip():
+            return url.strip()
     return None
 
 
@@ -332,12 +217,12 @@ def _merge_page(container: object, addition: object) -> str | None:
 def _follow_pagination(
     session: requests.Session,
     method: str,
-    request_kwargs: dict,
-    accepted: set[int],
-    endpoint: dict,
-    spec: dict,
+    request_kwargs: dict[str, object],
+    accepted: frozenset[int],
+    endpoint: Endpoint,
+    spec: Pagination,
     document: object,
-    meta: dict,
+    meta: RequestMeta,
     headers: object,
     read_bytes: int,
     scrub: Callable[[str], str],
@@ -364,9 +249,9 @@ def _follow_pagination(
     after any redirects), which is what relative links resolve against and what
     decides which host the following pages may come from.
     """
-    source = _next_source(spec)
-    counted = _counted_source(spec)
-    items = _items_path(spec)
+    source = spec.source
+    counted = spec.counted
+    items = spec.items
     if (source is None and counted is None) or items is None:
         # The rule asked for pagination without saying where the next page or the
         # collection is. Reported rather than ignored: the services would
@@ -381,7 +266,7 @@ def _follow_pagination(
             "not a collection that pages can be appended to"
         ), False
 
-    max_pages, max_elements = _pagination_limits(spec)
+    max_pages, max_elements = spec.max_pages, spec.max_elements
     # Where the FIRST PAGE CAME FROM, not what the rule asked for. They differ
     # when the endpoint redirects, and then the configured URL is the wrong
     # answer to both questions this needs one for: a relative next link
@@ -393,7 +278,7 @@ def _follow_pagination(
     #
     # It relaxes nothing: requests only followed that redirect because the rule
     # allows redirects, and it is the same hop the credentials already travelled.
-    url = endpoint.get("url", "")
+    url = endpoint.url
     served = served_url or url
     origin = urlsplit(served).netloc.lower()
     # Both, so an API linking back to the URL the rule names is still recognised
@@ -414,19 +299,20 @@ def _follow_pagination(
     previous: object = copy.copy(container)
     received = read = _container_len(container)
     largest_before = 0
-    position = counted["start"] if counted is not None else 0
+    position = counted.start if counted is not None else 0
     # How the end was recognised, where that is worth saying: an API answering
     # the request after its last page with a 404, no collection, or the last page
     # once more. The collection is complete - this is not 'pagination_stopped' -
     # but it is an inference the operator should be able to see.
     ended: str | None = None
-    auth_names = tuple(request_kwargs.get("params") or ())
+    params = request_kwargs.get("params")
+    auth_names = tuple(params) if isinstance(params, dict) else ()
 
     while True:
         if counted is not None:
             if _counted_done(counted, page_document, received, read, largest_before):
                 break
-            position += 1 if counted["mode"] == "page_number" else received
+            position += 1 if counted.mode == "page_number" else received
             candidate = _with_query(served, _counted_params(counted, position), auth_names)
         else:
             link = None if source is None else _next_candidate(source, page_document, page_headers)
@@ -525,7 +411,7 @@ def _follow_pagination(
                 # be told.
                 stopped = (
                     f"page {page} repeated page {pages} - the API does not seem to "
-                    f"read the '{counted['parameter']}' parameter"
+                    f"read the '{counted.parameter}' parameter"
                 )
             else:
                 # Page 2 differed from page 1, so the parameter IS read. A repeat

@@ -4,9 +4,42 @@
 
 import ssl
 import sys
+from typing import TypedDict
 from urllib.parse import quote, quote_plus
 
 import requests
+
+from .models import Endpoint, Proxy, ResponseReport
+
+
+class RequestMeta(TypedDict, total=False):
+    """What one endpoint's request did, as its own service reports it.
+
+    Filled in on every exit path of a fetch (a failed request still took time)
+    and serialized into the endpoint record and, minus the per-request facts,
+    into the response cache.
+    """
+
+    status: int | None
+    elapsed: float | None
+    size: int | None
+    final_url: str | None
+    cert_expiry: float | None
+    from_cache: bool
+    cache_age: float | None
+    attempts: int
+    # The response headers, so an extraction can read one ('@header.<name>').
+    headers: dict[str, str]
+    pages: int
+    elements: int | None
+    pagination_stopped: str | None
+    pagination_end: str | None
+    # The raw response, for an endpoint that asked for it.
+    body: str
+    body_truncated: bool
+    body_size: int | None
+    headers_reported: dict[str, str]
+
 
 # Cap the response body we buffer and parse, so a monitored endpoint returning
 # a huge (or endless) body cannot exhaust memory on the Checkmk server.
@@ -48,19 +81,7 @@ def _read_reportable(response: requests.Response, limit: int) -> tuple[bytes, bo
     return b"".join(chunks)[:limit], total > limit
 
 
-def _effective_body(endpoint: dict) -> object | None:
-    """The request body actually sent with this endpoint's request.
-
-    A request body only makes sense for POST; never smuggle one onto a GET. Both
-    the Content-Type defaulting in ``_build_session`` and the request itself in
-    ``_fetch`` route through here, so the two can never disagree about whether a
-    body is present (e.g. defaulting Content-Type for a body that is then never
-    sent).
-    """
-    return endpoint.get("body") if endpoint.get("method", "GET") == "POST" else None
-
-
-def _apply_proxy(session: requests.Session, endpoint: dict) -> None:
+def _apply_proxy(session: requests.Session, endpoint: Endpoint) -> None:
     """Configure the session's HTTP proxy from the endpoint's 'proxy' spec.
 
     The server-side call resolves the rule's Proxy choice into one of:
@@ -71,33 +92,32 @@ def _apply_proxy(session: requests.Session, endpoint: dict) -> None:
     An explicit proxy URL takes precedence over the environment; 'no_proxy'
     turns off requests' env-based proxy lookup for this request.
     """
-    proxy = endpoint.get("proxy")
-    if not isinstance(proxy, dict):
-        return
-    match proxy.get("mode"):
-        case "url" if proxy.get("url"):
-            session.proxies = {"http": proxy["url"], "https": proxy["url"]}
-        case "no_proxy":
+    match endpoint.proxy:
+        case None:
+            return
+        case Proxy(mode="url", url=str(url)):
+            session.proxies = {"http": url, "https": url}
+        case Proxy(mode="no_proxy"):
             session.trust_env = False
 
 
-def _auth_header_name(endpoint: dict) -> str | None:
+def _auth_header_name(endpoint: Endpoint) -> str | None:
     """The header an 'API key in a header' endpoint puts its key into."""
-    if endpoint.get("auth") != "auth_header":
+    if endpoint.auth != "auth_header":
         return None
-    name = endpoint.get("auth_header")
-    return name if isinstance(name, str) and name.strip() else "X-API-Key"
+    name = endpoint.auth_header
+    return name if name is not None and name.strip() else "X-API-Key"
 
 
-def _auth_query_name(endpoint: dict) -> str | None:
+def _auth_query_name(endpoint: Endpoint) -> str | None:
     """The query parameter an 'API key in a query parameter' endpoint uses."""
-    if endpoint.get("auth") != "auth_query":
+    if endpoint.auth != "auth_query":
         return None
-    name = endpoint.get("auth_query")
-    return name if isinstance(name, str) and name.strip() else "api_key"
+    name = endpoint.auth_query
+    return name if name is not None and name.strip() else "api_key"
 
 
-def _auth_params(endpoint: dict, secret: str | None) -> dict[str, str] | None:
+def _auth_params(endpoint: Endpoint, secret: str | None) -> dict[str, str] | None:
     """Query parameters carrying the API key, or ``None``.
 
     Kept out of ``_build_session`` (and out of the endpoint's URL) so the key is
@@ -139,14 +159,14 @@ class _Session(requests.Session):
 
 
 def _build_session(
-    endpoint: dict, secret: str | None, access_token: str | None = None
+    endpoint: Endpoint, secret: str | None, access_token: str | None = None
 ) -> tuple[requests.Session, dict[str, str]]:
     session = _Session(_auth_header_name(endpoint))
     _apply_proxy(session, endpoint)
-    headers = dict(endpoint.get("headers", []))
-    match endpoint.get("auth"):
+    headers = dict(endpoint.headers)
+    match endpoint.auth:
         case "auth_login":
-            session.auth = (endpoint["username"], secret or "")
+            session.auth = (endpoint.username or "", secret or "")
         case "auth_token":
             headers["Authorization"] = "Bearer " + (secret or "")
         case "auth_oauth2":
@@ -158,7 +178,7 @@ def _build_session(
             # The API names the header ('X-API-Key', 'PRIVATE-TOKEN', ...); the
             # value comes from the password store, never from the config.
             headers[_auth_header_name(endpoint) or "X-API-Key"] = secret or ""
-    if _effective_body(endpoint) is not None and not any(
+    if endpoint.effective_body is not None and not any(
         h.lower() == "content-type" for h in headers
     ):
         headers["Content-Type"] = "application/json"
@@ -228,28 +248,6 @@ _SENSITIVE_RESPONSE_HEADERS = frozenset(
 )
 
 
-# Hard ceiling for the reported body, whatever the rule asks for. The text ends
-# up in the endpoint service's details, which are stored with every check result
-# and shipped in notifications - this is not the place for a megabyte of JSON.
-_MAX_REPORTED_BYTES = 65536
-
-
-_DEFAULT_REPORTED_BYTES = 2048
-
-
-def _report_spec(endpoint: dict) -> dict | None:
-    """The endpoint's 'report the raw response' settings, or None when off."""
-    spec = endpoint.get("show_response")
-    return spec if isinstance(spec, dict) else None
-
-
-def _reported_limit(spec: dict) -> int:
-    """How many bytes of the body to report, clamped to the hard ceiling."""
-    raw = spec.get("max_bytes")
-    limit = int(raw) if isinstance(raw, (int, float)) and not isinstance(raw, bool) else 0
-    return max(1, min(limit or _DEFAULT_REPORTED_BYTES, _MAX_REPORTED_BYTES))
-
-
 def _reported_headers(headers: object, secret: str | None) -> dict[str, str]:
     """The response headers as reported: credential-bearing ones masked.
 
@@ -270,7 +268,7 @@ def _reported_headers(headers: object, secret: str | None) -> dict[str, str]:
 
 
 def _store_report(
-    endpoint: dict, meta: dict, raw: bytes, secret: str | None, complete: bool = True
+    endpoint: Endpoint, meta: RequestMeta, raw: bytes, secret: str | None, complete: bool = True
 ) -> None:
     """Put the reported body (and headers) for ``raw`` into ``meta``, if asked.
 
@@ -289,29 +287,18 @@ def _store_report(
     against the settings in force now rather than the ones a previous check ran
     with.
     """
-    spec = _report_spec(endpoint)
+    spec: ResponseReport | None = endpoint.show_response
     if spec is None:
         return
-    limit = _reported_limit(spec)
+    limit = spec.max_bytes
     meta["body"] = _redact_secret(raw[:limit].decode("utf-8", "replace"), secret)
     meta["body_truncated"] = len(raw) > limit or not complete
     meta["body_size"] = len(raw) if complete else None
-    if spec.get("headers", True):
+    if spec.headers:
         meta["headers_reported"] = _reported_headers(meta.get("headers"), secret)
 
 
-def _accepted_statuses(endpoint: dict) -> set[int]:
-    """Extra HTTP status codes to accept beyond 2xx, from the endpoint config.
-
-    Some APIs signal state through the status code - e.g. a '/health' endpoint
-    that answers 503 with a JSON body describing what is down. Listing those
-    codes here lets the agent read and extract that body instead of failing the
-    whole endpoint. 2xx is always accepted; this only widens the set.
-    """
-    return {code for code in endpoint.get("accept_status") or [] if isinstance(code, int)}
-
-
-def _verify_arg(endpoint: dict) -> bool | str:
+def _verify_arg(endpoint: Endpoint) -> bool | str:
     """The ``verify`` value for requests: the configured flag, or a CA-bundle path.
 
     ``verify_cert`` is the operator's explicit on/off toggle (off is the
@@ -321,21 +308,18 @@ def _verify_arg(endpoint: dict) -> bool | str:
     straight from the config rather than as a literal, so this stays a single
     source of truth for the toggle.
     """
-    verify = endpoint.get("verify_cert", True)
-    ca_bundle = endpoint.get("ca_bundle")
-    if verify and ca_bundle:
-        return ca_bundle
-    return verify
+    if endpoint.verify_cert and endpoint.ca_bundle:
+        return endpoint.ca_bundle
+    return endpoint.verify_cert
 
 
-def _client_cert(endpoint: dict) -> str | tuple[str, str] | None:
+def _client_cert(endpoint: Endpoint) -> str | tuple[str, str] | None:
     """The ``cert`` value for requests (mutual TLS): None, certfile, or
     (certfile, keyfile) when the key lives in a separate file."""
-    cert = endpoint.get("client_cert")
-    if not isinstance(cert, dict) or not cert.get("cert"):
+    cert = endpoint.client_cert
+    if cert is None:
         return None
-    key = cert.get("key")
-    return (cert["cert"], key) if key else cert["cert"]
+    return (cert.cert, cert.key) if cert.key else cert.cert
 
 
 def _peer_cert_expiry(response: requests.Response) -> float | None:

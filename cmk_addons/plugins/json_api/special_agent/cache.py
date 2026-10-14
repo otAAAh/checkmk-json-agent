@@ -8,9 +8,12 @@ import os
 import tempfile
 import time
 from contextlib import suppress
+from dataclasses import asdict
 from pathlib import Path
+from typing import cast
 
-from .transport import _effective_body
+from .models import Endpoint
+from .transport import RequestMeta
 
 # Per-endpoint response cache. Opt-in: no TTL configured means "always fetch",
 # which is the right default for monitoring. It exists for rate-limited,
@@ -66,7 +69,7 @@ def _write_private(path: Path, text: str) -> None:
         raise
 
 
-def _cache_key(endpoint: dict, secret: str | None = None) -> str:
+def _cache_key(endpoint: Endpoint, secret: str | None = None) -> str:
     """A stable hash over everything that changes this endpoint's response.
 
     The credential is part of the identity, because for the API-key modes it is
@@ -81,25 +84,25 @@ def _cache_key(endpoint: dict, secret: str | None = None) -> str:
     """
     identity = json.dumps(
         [
-            endpoint.get("url"),
-            endpoint.get("method", "GET"),
-            _effective_body(endpoint),
-            endpoint.get("headers"),
-            endpoint.get("auth"),
+            endpoint.url,
+            endpoint.method,
+            endpoint.effective_body,
+            endpoint.headers,
+            endpoint.auth,
             # The header / query parameter an API key goes into - a name, not a
             # credential.
-            endpoint.get("auth_header"),
-            endpoint.get("auth_query"),
+            endpoint.auth_header,
+            endpoint.auth_query,
             hashlib.sha256(secret.encode("utf-8")).hexdigest() if secret else None,
-            endpoint.get("verify_cert", True),
-            endpoint.get("ca_bundle"),
-            endpoint.get("client_cert"),
-            endpoint.get("accept_status"),
-            endpoint.get("proxy"),
+            endpoint.verify_cert,
+            endpoint.ca_bundle,
+            asdict(endpoint.client_cert) if endpoint.client_cert else None,
+            sorted(endpoint.accept_status),
+            asdict(endpoint.proxy) if endpoint.proxy else None,
             # The cached body is the MERGED one, so how the pages were followed
             # is part of what it is: a changed collection path or page limit must
             # not be answered from a cache built under the old settings.
-            endpoint.get("pagination"),
+            asdict(endpoint.pagination) if endpoint.pagination else None,
         ],
         sort_keys=True,
         default=str,
@@ -107,15 +110,9 @@ def _cache_key(endpoint: dict, secret: str | None = None) -> str:
     return hashlib.sha256(identity.encode("utf-8")).hexdigest()
 
 
-def _cache_ttl(endpoint: dict) -> float | None:
-    """The configured cache TTL in seconds, or ``None`` for "always fetch"."""
-    ttl = endpoint.get("cache_ttl")
-    if isinstance(ttl, bool) or not isinstance(ttl, (int, float)):
-        return None
-    return float(ttl) if ttl > 0 else None
-
-
-def _cache_read(endpoint: dict, ttl: float, secret: str | None = None) -> tuple[bytes, dict] | None:
+def _cache_read(
+    endpoint: Endpoint, ttl: float, secret: str | None = None
+) -> tuple[bytes, RequestMeta] | None:
     """A cached ``(body, meta)`` younger than ``ttl``, else ``None``.
 
     Anything unreadable or malformed counts as a miss, so a broken cache file
@@ -146,10 +143,15 @@ def _cache_read(endpoint: dict, ttl: float, secret: str | None = None) -> tuple[
     # configured for "a retry was needed" across checks that made no request at
     # all. Status, size and the final URL DO still describe the body being
     # served, so they are kept.
-    return body, {**meta, "elapsed": None, "attempts": 1, "from_cache": True, "cache_age": age}
+    # Written by _cache_write from a RequestMeta; a file that is not one at all
+    # was caught above.
+    replayed = cast(RequestMeta, meta)
+    return body, {**replayed, "elapsed": None, "attempts": 1, "from_cache": True, "cache_age": age}
 
 
-def _cache_write(endpoint: dict, body: bytes, meta: dict, secret: str | None = None) -> None:
+def _cache_write(
+    endpoint: Endpoint, body: bytes, meta: RequestMeta, secret: str | None = None
+) -> None:
     """Store a fresh response. Best effort: a failure must not fail the fetch."""
     directory = _cache_dir()
     if directory is None:

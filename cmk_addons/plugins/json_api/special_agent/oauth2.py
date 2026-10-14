@@ -12,6 +12,7 @@ import requests
 
 from . import cache
 from .cache import _prune_cache, _write_private
+from .models import Endpoint, OAuth2
 from .paths import _as_float
 from .transport import _apply_proxy, _client_cert, _debug, _verify_arg
 
@@ -32,15 +33,7 @@ class _TokenError(Exception):
     """The token could not be obtained; the endpoint fails with this message."""
 
 
-def _oauth2_spec(endpoint: dict) -> dict | None:
-    """The endpoint's OAuth2 config, or ``None`` when it uses another auth mode."""
-    if endpoint.get("auth") != "auth_oauth2":
-        return None
-    spec = endpoint.get("oauth2")
-    return spec if isinstance(spec, dict) and spec.get("token_url") else None
-
-
-def _token_cache_key(spec: dict, secret: str | None) -> str:
+def _token_cache_key(spec: OAuth2, secret: str | None) -> str:
     """A hash over everything that decides WHICH token this is.
 
     Deliberately not the response cache's key: a token is shared by every request
@@ -53,11 +46,11 @@ def _token_cache_key(spec: dict, secret: str | None) -> str:
     """
     identity = json.dumps(
         [
-            spec.get("token_url"),
-            spec.get("client_id"),
-            spec.get("scope"),
-            spec.get("audience"),
-            spec.get("client_auth", "basic"),
+            spec.token_url,
+            spec.client_id,
+            spec.scope,
+            spec.audience,
+            spec.client_auth,
             hashlib.sha256(secret.encode("utf-8")).hexdigest() if secret else None,
         ],
         sort_keys=True,
@@ -66,7 +59,7 @@ def _token_cache_key(spec: dict, secret: str | None) -> str:
     return hashlib.sha256(identity.encode("utf-8")).hexdigest()
 
 
-def _token_cache_path(spec: dict, secret: str | None) -> Path | None:
+def _token_cache_path(spec: OAuth2, secret: str | None) -> Path | None:
     # Through the module, so the token cache always lives wherever the response
     # cache does (one place to point both at, e.g. a test's tmp_path).
     directory = cache._cache_dir(_TOKEN_CACHE_DIR_NAME)
@@ -75,7 +68,7 @@ def _token_cache_path(spec: dict, secret: str | None) -> Path | None:
     return directory / f"{_token_cache_key(spec, secret)}.json"
 
 
-def _cached_token(spec: dict, secret: str | None) -> str | None:
+def _cached_token(spec: OAuth2, secret: str | None) -> str | None:
     """A cached access token that is still valid, else ``None``."""
     path = _token_cache_path(spec, secret)
     if path is None:
@@ -98,7 +91,7 @@ def _cached_token(spec: dict, secret: str | None) -> str | None:
     return None
 
 
-def _store_token(spec: dict, secret: str | None, token: str, ttl: float) -> None:
+def _store_token(spec: OAuth2, secret: str | None, token: str, ttl: float) -> None:
     """Cache a fresh token. Best effort: failing to cache must not fail the fetch."""
     path = _token_cache_path(spec, secret)
     if path is None:
@@ -121,7 +114,7 @@ def _store_token(spec: dict, secret: str | None, token: str, ttl: float) -> None
         return
 
 
-def _forget_token(spec: dict, secret: str | None) -> None:
+def _forget_token(spec: OAuth2, secret: str | None) -> None:
     """Drop the cached token, so the next attempt fetches a fresh one."""
     path = _token_cache_path(spec, secret)
     if path is None:
@@ -133,7 +126,7 @@ def _forget_token(spec: dict, secret: str | None) -> None:
 
 
 def _request_token(
-    endpoint: dict, spec: dict, secret: str | None, debug: bool
+    endpoint: Endpoint, spec: OAuth2, secret: str | None, debug: bool
 ) -> tuple[str, float]:
     """Exchange the client credentials for an access token: ``(token, ttl)``.
 
@@ -142,24 +135,24 @@ def _request_token(
     back, so the body is not reported.
     """
     data: dict[str, str] = {"grant_type": "client_credentials"}
-    if scope := spec.get("scope"):
-        data["scope"] = str(scope)
-    if audience := spec.get("audience"):
-        data["audience"] = str(audience)
+    if spec.scope:
+        data["scope"] = spec.scope
+    if spec.audience:
+        data["audience"] = spec.audience
 
     session = requests.Session()
     _apply_proxy(session, endpoint)
-    if spec.get("client_auth") == "post":
-        data["client_id"] = str(spec.get("client_id", ""))
+    if spec.client_auth == "post":
+        data["client_id"] = spec.client_id
         data["client_secret"] = secret or ""
     else:
-        session.auth = (str(spec.get("client_id", "")), secret or "")
+        session.auth = (spec.client_id, secret or "")
 
-    timeout = endpoint.get("timeout")
-    _debug(debug, f"  fetching an access token from {spec['token_url']}")
+    timeout = endpoint.timeout
+    _debug(debug, f"  fetching an access token from {spec.token_url}")
     try:
         response = session.post(
-            spec["token_url"],
+            spec.token_url,
             data=data,
             # The token endpoint is part of the trust chain: verification follows
             # the endpoint's own TLS settings rather than being relaxed here.
@@ -174,7 +167,7 @@ def _request_token(
         # it afterwards is a weaker guarantee than never assembling it. The
         # token URL is configuration, not a credential.
         raise _TokenError(
-            f"Token request to {spec['token_url']} failed ({type(exc).__name__})"
+            f"Token request to {spec.token_url} failed ({type(exc).__name__})"
         ) from exc
     with response:
         if not 200 <= response.status_code < 300:
@@ -198,7 +191,7 @@ def _request_token(
     return token, ttl if ttl is not None and ttl > 0 else _TOKEN_DEFAULT_TTL
 
 
-def _access_token(endpoint: dict, spec: dict, secret: str | None, debug: bool) -> str:
+def _access_token(endpoint: Endpoint, spec: OAuth2, secret: str | None, debug: bool) -> str:
     """A valid access token, from the cache when there is one."""
     if (cached := _cached_token(spec, secret)) is not None:
         _debug(debug, "  using the cached access token")

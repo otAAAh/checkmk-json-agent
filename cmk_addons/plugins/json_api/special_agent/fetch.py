@@ -7,27 +7,25 @@ import time
 
 import requests
 
-from .cache import _cache_read, _cache_ttl, _cache_write
-from .oauth2 import _access_token, _cached_token, _forget_token, _oauth2_spec, _TokenError
-from .pagination import _first_page_url, _follow_pagination, _pagination_spec
+from .cache import _cache_read, _cache_write
+from .models import Endpoint
+from .oauth2 import _access_token, _cached_token, _forget_token, _TokenError
+from .pagination import _first_page_url, _follow_pagination
 from .transport import (
     _DEBUG_BODY_PREVIEW,
     _MAX_RESPONSE_BYTES,
     _REDACTED,
-    _accepted_statuses,
+    RequestMeta,
     _auth_header_name,
     _auth_params,
     _build_session,
     _client_cert,
     _debug,
-    _effective_body,
     _peer_cert_expiry,
     _read_capped,
     _read_reportable,
     _redact_secret,
     _redacted_headers,
-    _report_spec,
-    _reported_limit,
     _ResponseTooLarge,
     _retryable_status,
     _store_report,
@@ -40,23 +38,9 @@ from .transport import (
 _MAX_RETRY_SLEEP = 30.0
 
 
-def _retry_policy(endpoint: dict) -> tuple[int, float]:
-    """``(retries, backoff)`` for this endpoint; ``(0, 0.0)`` when off."""
-    retry = endpoint.get("retry")
-    if not isinstance(retry, dict):
-        return 0, 0.0
-    attempts = retry.get("attempts")
-    if isinstance(attempts, bool) or not isinstance(attempts, int) or attempts < 1:
-        return 0, 0.0
-    backoff = retry.get("backoff")
-    if isinstance(backoff, bool) or not isinstance(backoff, (int, float)) or backoff < 0:
-        backoff = 0.0
-    return attempts, float(backoff)
-
-
 def _fetch(
-    endpoint: dict, secret: str | None, debug: bool = False
-) -> tuple[object | None, str | None, dict]:
+    endpoint: Endpoint, secret: str | None, debug: bool = False
+) -> tuple[object | None, str | None, RequestMeta]:
     """Fetch one endpoint, retrying a transient failure: ``(document, error, meta)``.
 
     ``meta`` describes the request itself - HTTP status, wall-clock duration,
@@ -71,7 +55,7 @@ def _fetch(
     smoothed over - and the response time stays the successful attempt's, not
     the sum, so the metric keeps meaning what it says.
     """
-    meta: dict[str, object] = {
+    meta: RequestMeta = {
         "status": None,
         "elapsed": None,
         "size": None,
@@ -88,7 +72,7 @@ def _fetch(
     # A cached body younger than the endpoint's TTL is served without touching the
     # network at all - that is the whole point, for an API with a request quota.
     # No request is made, so there is nothing to retry either.
-    if (ttl := _cache_ttl(endpoint)) is not None and (hit := _cache_read(endpoint, ttl, secret)):
+    if (ttl := endpoint.cache_ttl) is not None and (hit := _cache_read(endpoint, ttl, secret)):
         cached_body, cached_meta = hit
         _debug(debug, f"  served from cache ({cached_meta['cache_age']:.0f}s old)")
         try:
@@ -103,7 +87,7 @@ def _fetch(
             _store_report(endpoint, cached_meta, cached_body, secret)
             return document, None, cached_meta
 
-    retries, backoff = _retry_policy(endpoint)
+    retries, backoff = endpoint.retry.attempts, endpoint.retry.backoff
     slept = 0.0
     for attempt in range(retries + 1):
         meta["attempts"] = attempt + 1
@@ -123,7 +107,7 @@ def _fetch(
 
 
 def _attempt_with_token_refresh(
-    endpoint: dict, secret: str | None, meta: dict, ttl: float | None, debug: bool
+    endpoint: Endpoint, secret: str | None, meta: RequestMeta, ttl: float | None, debug: bool
 ) -> tuple[object | None, str | None, bool]:
     """One request, redone once with a fresh token if a cached one was rejected.
 
@@ -135,7 +119,7 @@ def _attempt_with_token_refresh(
     minted seconds ago and rejected means the credentials or the scope are
     wrong, and asking again would just double every check's requests forever.
     """
-    oauth2 = _oauth2_spec(endpoint)
+    oauth2 = endpoint.oauth2
     used_cached_token = oauth2 is not None and _cached_token(oauth2, secret) is not None
     document, error, retryable = _attempt(endpoint, secret, meta, ttl, debug)
     if error is None or not used_cached_token or meta.get("status") != 401:
@@ -145,9 +129,9 @@ def _attempt_with_token_refresh(
 
 
 def _attempt(
-    endpoint: dict,
+    endpoint: Endpoint,
     secret: str | None,
-    meta: dict,
+    meta: RequestMeta,
     ttl: float | None,
     debug: bool,
     force_new_token: bool = False,
@@ -160,12 +144,12 @@ def _attempt(
     """
     started = time.monotonic()
 
-    def _timed() -> dict:
+    def _timed() -> RequestMeta:
         meta["elapsed"] = time.monotonic() - started
         return meta
 
     access_token = None
-    if (oauth2 := _oauth2_spec(endpoint)) is not None:
+    if (oauth2 := endpoint.oauth2) is not None:
         if force_new_token:
             _forget_token(oauth2, secret)
         try:
@@ -182,13 +166,13 @@ def _attempt(
     # Only the query-parameter mode can carry the key into a URL, so that is the
     # only mode whose reported text needs scrubbing.
     scrub = (lambda text: _redact_secret(text, secret)) if params else (lambda text: text)
-    timeout = endpoint.get("timeout")
-    method = endpoint.get("method", "GET")
-    allow_redirects = endpoint.get("follow_redirects", True)
-    accepted = _accepted_statuses(endpoint)
-    body = _effective_body(endpoint)
+    timeout = endpoint.timeout
+    method = endpoint.method
+    allow_redirects = endpoint.follow_redirects
+    accepted = endpoint.accept_status
+    body = endpoint.effective_body
     if debug:
-        _debug(debug, f"{method} {endpoint.get('url', '?')}")
+        _debug(debug, f"{method} {endpoint.url}")
         for name, value in _redacted_headers(headers, _auth_header_name(endpoint)).items():
             _debug(debug, f"  header {name}: {value}")
         if session.auth is not None:
@@ -246,9 +230,9 @@ def _attempt(
                 # itself, and this is the case an operator most needs to see -
                 # so read it, but only when the rule asked for it (otherwise the
                 # status alone is the answer and the body is never touched).
-                if (report := _report_spec(endpoint)) is not None:
+                if (report := endpoint.show_response) is not None:
                     try:
-                        partial, more = _read_reportable(response, _reported_limit(report))
+                        partial, more = _read_reportable(response, report.max_bytes)
                     except requests.exceptions.RequestException as exc:
                         # Reporting the body is a diagnostic nicety; failing to
                         # read it must not change what the endpoint reports.
@@ -294,7 +278,7 @@ def _attempt(
         _timed()
         return None, f"Response is not valid JSON: {exc}", False
     cacheable = raw
-    if (pagination := _pagination_spec(endpoint)) is not None:
+    if (pagination := endpoint.pagination) is not None:
         error, retryable = _follow_pagination(
             session,
             method,
