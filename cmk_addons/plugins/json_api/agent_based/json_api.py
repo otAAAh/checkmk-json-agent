@@ -11,18 +11,19 @@ Two plugins read the one ``json_api`` section:
   rate) or as a timestamp (monitor its age).
 * ``json_api_endpoint`` - one service per configured endpoint, reporting the
   outcome of the request itself: HTTP status, response time and body size.
+
+This module holds the plugins and what decides a service's state. The parts
+that do not - the section's model and parsing, units and their rendering,
+timestamp parsing, the transform's evaluator - live in ``../check_lib/``:
+Checkmk imports every module of ``agent_based/`` as a plugin file, so helpers
+cannot sit next to this one.
 """
 
-import ast
-import email.utils
-import json
 import math
 import re
 import time
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass, field
-from datetime import UTC, datetime
-from typing import ClassVar, Final, Literal
+from typing import Final
 
 from cmk.agent_based.v2 import (
     AgentSection,
@@ -41,7 +42,6 @@ from cmk.agent_based.v2 import (
     Service,
     ServiceLabel,
     State,
-    StringTable,
     TableRow,
     check_levels,
     get_rate,
@@ -49,249 +49,35 @@ from cmk.agent_based.v2 import (
     render,
 )
 
+from ..check_lib.calc import _apply_calc
+from ..check_lib.section import (
+    EndpointStatus,
+    Item,
+    Levels,
+    Match,
+    MustMatch,
+    ReadAsCounter,
+    Section,
+    StateMap,
+    ValueAs,
+    _coerce_levels,
+    _coerce_match,
+    _coerce_state,
+    parse_json_api,
+)
+from ..check_lib.timestamps import _parse_timestamp
+from ..check_lib.units import (
+    _AGE_METRIC,
+    _fmt_number,
+    _rate_metric_name,
+    _rate_render_func,
+    _render_days,
+)
+from ..check_lib.values import _as_number, _render_value
+
 # Checkmk label keys we create are namespaced so they never collide with the
 # built-in ``cmk/...`` labels or another plugin's.
 _LABEL_NS = "json_api/"
-
-# Level tuples come straight from the SimpleLevels form spec, JSON-encoded by
-# the agent: ("fixed", (warn, crit)) or ("no_levels", None) or absent. Only the
-# first means anything to check_levels, so _coerce_levels reads the other two
-# as None and this is all that is left.
-# Plain alias (not a PEP 695 `type` statement) to stay portable to Checkmk 2.4.
-_Levels = tuple[Literal["fixed"], tuple[float, float]] | None
-
-
-# The string-matching config from the CascadingSingleChoice form spec, JSON-encoded
-# by the agent as ("must_match", {...}) or ("state_map", {...}). It is read into
-# one of the two classes below once, by _coerce_match, so that matching and the
-# details line work on checked values instead of re-checking a dict each time.
-@dataclass(frozen=True)
-class MustMatch:
-    """The value has to match ``pattern`` in full, else ``state_no_match``."""
-
-    pattern: str
-    state_no_match: int = 2
-
-
-@dataclass(frozen=True)
-class StateMap:
-    """The first of the OK, WARN, CRIT patterns to match in full sets the state.
-
-    A pattern left out (or empty) is ``None``; ``state_no_match`` applies when
-    none of them matches.
-    """
-
-    ok: str | None = None
-    warn: str | None = None
-    crit: str | None = None
-    state_no_match: int = 0
-
-
-_Match = MustMatch | StateMap | None
-
-
-# How to read the extracted value, from the 'Interpret the value as'
-# CascadingSingleChoice (JSON-encoded by the agent as ("counter", None) or
-# ("timestamp", {"format": ..., "pattern": ...})). Read into one of these by
-# _coerce_value_as; ``None`` monitors the value as it stands.
-@dataclass(frozen=True)
-class ReadAsCounter:
-    """Monitor the value's per-second rate."""
-
-    kind: ClassVar[str] = "counter"
-
-
-@dataclass(frozen=True)
-class ReadAsTimestamp:
-    """Monitor the value's age in seconds.
-
-    ``format`` is one of the formats _parse_timestamp knows ('auto' when the
-    rule names none); ``pattern`` is the strptime pattern of the 'custom' one.
-    """
-
-    kind: ClassVar[str] = "timestamp"
-    format: str = "auto"
-    pattern: str | None = None
-
-
-_ValueAs = ReadAsCounter | ReadAsTimestamp | None
-
-
-# Maps the unit chosen in the rule to the metric defined in graphing/json_api.py.
-# ``None`` (no unit chosen, incl. rules from before units existed) keeps the
-# original unit-less "json_api_value" so existing metric history is preserved.
-#
-# A value the API already reports per second (a throughput, a request rate) is
-# the same quantity as the rate the check computes from a counter, so it shares
-# that metric: 'bytes_per_second' graphs exactly like a counter of bytes does.
-#
-# The value is never scaled: levels, the value range and the summary all speak
-# the unit the API reports in. That is why there is no 'milliseconds' here - a
-# latency in ms is the 'seconds' unit behind the transform 'value / 1000'.
-_UNIT_METRIC: Final[Mapping[str | None, str]] = {
-    None: "json_api_value",
-    "count": "json_api_count",
-    "bytes": "json_api_bytes",
-    "seconds": "json_api_seconds",
-    "percent": "json_api_percent",
-    "per_second": "json_api_count_rate",
-    "bytes_per_second": "json_api_bytes_rate",
-    "bits_per_second": "json_api_bits_per_second",
-    "celsius": "json_api_celsius",
-    "volts": "json_api_volts",
-    "amperes": "json_api_amperes",
-    "watts": "json_api_watts",
-    "hertz": "json_api_hertz",
-}
-
-# A per-second rate is a different quantity from the counter it came from, so it
-# gets its own metric per unit (bytes -> B/s, ...) rather than polluting the
-# absolute value's history with a rate.
-#
-# Only the units something can be COUNTED in are here. A counter of a rate or of
-# a temperature is not a thing, and the ruleset refuses the combination; a rule
-# written by hand that asks for it gets the plain, unit-less rate.
-_UNIT_RATE_METRIC: Final[Mapping[str | None, str]] = {
-    None: "json_api_rate",
-    "count": "json_api_count_rate",
-    "bytes": "json_api_bytes_rate",
-    "seconds": "json_api_seconds_rate",
-    "percent": "json_api_percent_rate",
-}
-
-# The age of a timestamp is a duration in seconds; it gets a metric of its own so
-# it graphs as a duration without the rule having to choose a unit.
-_AGE_METRIC = "json_api_age"
-
-
-def _boundaries(value_range: object) -> tuple[float | None, float | None] | None:
-    """The rule's value range as the ``boundaries`` a Metric takes.
-
-    ``None`` for an absent or unusable range, and for a range with neither end -
-    the ruleset rejects that, but a hand-written rule is not bound by the form.
-    An end that is present but not a number is dropped on its own rather than
-    voiding the other: half a range still fixes half the scale.
-    """
-    if not isinstance(value_range, dict):
-        return None
-
-    def _end(key: str) -> float | None:
-        value = value_range.get(key)
-        return (
-            float(value)
-            if isinstance(value, (int, float)) and not isinstance(value, bool)
-            else None
-        )
-
-    low, high = _end("min"), _end("max")
-    return None if low is None and high is None else (low, high)
-
-
-def _metric_name(unit: str | None) -> str:
-    return _UNIT_METRIC.get(unit, "json_api_value")
-
-
-def _rate_metric_name(unit: str | None) -> str:
-    return _UNIT_RATE_METRIC.get(unit, "json_api_rate")
-
-
-def _render_days(days: float) -> str:
-    """A number of days, negative (already expired) included.
-
-    Whole days read as '42 days'; a fraction keeps one decimal so the last day
-    before expiry does not render as '0 days'.
-    """
-    rounded = round(days, 1)
-    shown = int(rounded) if rounded.is_integer() else rounded
-    return f"{shown} days"
-
-
-# The unit chosen in the rule also decides how the value is *rendered* in the
-# summary/details (and the levels line), so "1572864" with unit=bytes reads as
-# "1.50 MiB" like the graph does - not just as a bare number. Units without a
-# dedicated renderer ("count", or none) fall back to the plain number.
-_SI_PREFIXES = (
-    (1e12, "T"),
-    (1e9, "G"),
-    (1e6, "M"),
-    (1e3, "k"),
-    (1.0, ""),
-    (1e-3, "m"),
-    (1e-6, "µ"),
-)
-
-
-def _render_si(symbol: str) -> Callable[[float], str]:
-    """Render with an SI prefix, the way the graph's SINotation does: '1.50 kW'.
-
-    Small values too - a current of 0.02 A reads as '20.00 mA' rather than
-    rounding to nothing.
-    """
-
-    def _render(number: float) -> str:
-        # NaN matches no prefix and infinity every one: neither has a scale, so
-        # print what it is rather than 'nan µW'.
-        if not math.isfinite(number):
-            return f"{number} {symbol}"
-        magnitude = abs(number)
-        if magnitude == 0:
-            return f"{number:.2f} {symbol}"
-        index = next(
-            (i for i, (candidate, _) in enumerate(_SI_PREFIXES) if magnitude >= candidate),
-            len(_SI_PREFIXES) - 1,
-        )
-        # The prefix is chosen before rounding, so 999.996 W would print as
-        # '1000.00 W' where the graph says 1 kW: step up when the rounding does.
-        if index > 0 and round(magnitude / _SI_PREFIXES[index][0], 2) >= 1000:
-            index -= 1
-        factor, prefix = _SI_PREFIXES[index]
-        return f"{number / factor:.2f} {prefix}{symbol}"
-
-    return _render
-
-
-def _render_celsius(number: float) -> str:
-    return f"{number:.1f} °C"
-
-
-_UNIT_RENDER: Final[Mapping[str, Callable[[float], str]]] = {
-    "bytes": render.bytes,
-    # time_offset, not timespan: timespan raises on a negative value, and a
-    # negative duration is ordinary here (the age of a timestamp in the future).
-    "seconds": render.time_offset,
-    "percent": render.percent,
-    "per_second": lambda number: f"{_fmt_rate(number)}/s",
-    "bytes_per_second": lambda number: f"{render.bytes(number)}/s",
-    "bits_per_second": _render_si("bit/s"),
-    "celsius": _render_celsius,
-    "volts": _render_si("V"),
-    "amperes": _render_si("A"),
-    "watts": _render_si("W"),
-    "hertz": render.frequency,
-}
-
-
-def _render_func(unit: str | None) -> Callable[[float], str] | None:
-    return _UNIT_RENDER.get(unit) if unit is not None else None
-
-
-def _rate_render_func(unit: str | None) -> Callable[[float], str]:
-    """Render a per-second rate: the unit's own rendering plus '/s'.
-
-    A rate is almost never a round number (it is a difference divided by an
-    elapsed time), so the unit-less fallback rounds to a few significant digits
-    instead of printing the full float repr - '20/s' rather than
-    '19.999451493365736/s' - while staying accurate for tiny rates.
-    """
-    # Only a unit with a rate of its own lends it its rendering: a counter 'in
-    # bytes per second' would otherwise read '1.00 KiB/s/s'.
-    countable = unit is not None and unit in _UNIT_RATE_METRIC
-    base = (_render_func(unit) if countable else None) or _fmt_rate
-    return lambda number: f"{base(number)}/s"
-
-
-def _fmt_rate(number: float) -> str:
-    return _fmt_number(number) if number.is_integer() else f"{number:.6g}"
 
 
 # The column a '[*]' wildcard's inventory table is keyed by. Checkmk merges the
@@ -305,466 +91,6 @@ def _fmt_rate(number: float) -> str:
 # a field could ask for ('nodes[*].name'), so it is now 'element' - a name that
 # describes what the column holds and that Setup reserves.
 _INVENTORY_ROW_KEY = "element"
-
-
-@dataclass(frozen=True)
-class InventoryTarget:
-    """Where one field's value goes in the HW/SW inventory tree."""
-
-    path: tuple[str, ...]
-    key: str
-    # The '[*]' element's label. Set means "one table row per element, keyed by
-    # this"; None means a plain attribute of the node.
-    row_key: str | None = None
-    # Whether the field ALSO gets a service. Off is the point of the feature.
-    keep_service: bool = False
-
-
-@dataclass(frozen=True)
-class Item:
-    found: bool
-    # The JSON value itself. Its type is the data, not configuration: the agent
-    # sends a scalar (an object or array arrives as its JSON text), and what the
-    # check does with it - a number, a string to match, a timestamp - is decided
-    # by looking at it on every run.
-    value: object
-    error: str | None
-    levels_upper: _Levels
-    levels_lower: _Levels
-    match: _Match
-    calc: str | None
-    # The unit named in the rule. Any string is kept, an unknown one too: an
-    # empty or unknown unit still counts as "the rule chose one" for a
-    # timestamp's age (see _derive), which keeps the plain metric then.
-    unit: str | None
-    # The metric name derived from the unit - what this field emits unless the
-    # rule overrode it (metric_override) or it shares a service.
-    metric_name: str
-    render_func: Callable[[float], str] | None
-    path: str
-    url: str
-    # The metric name stated in the rule, used verbatim when set. The escape
-    # hatch for a name that has to be known in advance: the Gauge / Single
-    # metric / Bar chart dashboard widgets are bound to one metric BY NAME, and
-    # a shared service's generated names are neither obvious nor offered by the
-    # widget's dropdown until it is filtered to a host and a service.
-    metric_override: str | None = None
-    # The value's configured range as ``(min, max)``, either end possibly None -
-    # the metric's boundaries. Presentation only: it fixes the scale of the
-    # graph, the dial of a gauge dashboard widget and the fill of the service
-    # list's bar, and never touches the state.
-    boundaries: tuple[float | None, float | None] | None = None
-    # How to read the value: as it stands, as a counter, or as a timestamp.
-    value_as: _ValueAs = None
-    # The transform's second operand, resolved by the agent in this service's own
-    # scope. None means "no second path, or it did not resolve to anything".
-    calc_other: float | None = None
-    # The aggregation the agent already applied ('count'/'sum'/...), for Details.
-    aggregate: str | None = None
-    # Service labels (key, value) the agent resolved for this service, sans the
-    # json_api/ namespace prefix (added when the ServiceLabel is emitted).
-    service_labels: tuple[tuple[str, str], ...] = ()
-    # Extra summary text: the configured template ('{path}' placeholders) and the
-    # values those paths resolved to for THIS service's element. Rendering is
-    # left here because only the check knows what the summary already says.
-    summary: str | None = None
-    summary_fields: Mapping[str, str] = field(default_factory=dict)
-    # This value's name WITHIN its service, when several fields share one. None
-    # for the ordinary case, where the field IS the service and the generic
-    # 'Value' label is right.
-    label: str | None = None
-    # Set when this field belongs in the inventory tree rather than (or as well
-    # as) in a service.
-    inventory: "InventoryTarget | None" = None
-    # The JSON this value was read from - the '[*]' element, the object holding
-    # it, or the whole response - already pretty-printed, capped and stripped of
-    # the endpoint's secret by the agent. None means the rule did not ask for it,
-    # which is the default.
-    context: str | None = None
-
-
-@dataclass(frozen=True)
-class EndpointStatus:
-    """The outcome of one endpoint's request, for the endpoint's own service."""
-
-    name: str
-    url: str
-    ok: bool
-    error: str | None
-    status: int | None
-    elapsed: float | None
-    size: int | None
-    final_url: str | None
-    # The peer certificate's notAfter as a Unix epoch, when the agent could read
-    # it (HTTPS, verification on, socket still exposed). None means "no
-    # certificate info", never "expired".
-    cert_expiry: float | None = None
-    # Served from the agent's per-endpoint cache instead of a live request, and
-    # how old that cached body was. A cached serve has no response time.
-    from_cache: bool = False
-    cache_age: float | None = None
-    # How many attempts the request took. 1 means it worked first time; more
-    # means a retry policy absorbed a failure, which the service reports rather
-    # than hides.
-    attempts: int = 1
-    # Pagination: how many pages the agent read and merged (1 = one page, which
-    # is also what an endpoint that does not follow pagination reports), how many
-    # elements the merged collection ended up with, and why following stopped
-    # while a further page still existed. The last one is the important half: it
-    # means the collection - and therefore every count, aggregation and wildcard
-    # built from it - is INCOMPLETE, which unfollowed pagination never says.
-    pages: int = 1
-    elements: int | None = None
-    pagination_stopped: str | None = None
-    # Where the agent counted the pages, how it recognised the end when that
-    # took an inference - a 404, or the last page once more, in answer to the
-    # request after it. The collection is complete; this says why it is taken
-    # to be.
-    pagination_end: str | None = None
-    # The raw response, for an endpoint configured to report it: the body as it
-    # came off the wire (already capped and secret-stripped by the agent), how
-    # long it really was, and whether what is here is only its beginning. None
-    # means the rule did not ask for it, which is the default.
-    body: str | None = None
-    body_truncated: bool = False
-    body_size: int | None = None
-    # The response headers, credential-bearing ones already masked by the agent.
-    # None means they were not requested.
-    headers: Mapping[str, str] | None = None
-    # Whether this endpoint prefixes its field service names. It decides which of
-    # the two endpoint check plugins discovers this record, and therefore how the
-    # endpoint's own service is named - see check_plugin_json_api_endpoint.
-    prefixed: bool = False
-
-
-@dataclass(frozen=True)
-class Section:
-    error: str | None
-    # Service name -> its entries, in configuration order. Exactly one for the
-    # ordinary one-field-one-service case; several where fields were configured
-    # to share a service, which is what lets the check yield one result per field
-    # and leave the worst-state aggregation to Checkmk.
-    items: Mapping[str, tuple[Item, ...]]
-    # Host labels (key -> value) aggregated across all results on this host,
-    # last value wins per key. Emitted by the section's host_label_function.
-    host_labels: Mapping[str, str] = field(default_factory=dict)
-    # One entry per configured endpoint, keyed by its name (the service item).
-    # Empty for a section written by an agent from before endpoint records.
-    endpoints: Mapping[str, EndpointStatus] = field(default_factory=dict)
-
-
-def _coerce_levels(raw: object) -> _Levels:
-    match raw:
-        case ["fixed", [(int() | float()) as warn, (int() | float()) as crit]]:
-            return ("fixed", (float(warn), float(crit)))
-        case ["no_levels", _] | None:
-            return None
-    return None
-
-
-def _coerce_state(raw: object, default: int) -> int:
-    """A ServiceState value (0=OK, 1=WARN, 2=CRIT, 3=UNKNOWN), else ``default``."""
-    if not isinstance(raw, bool) and isinstance(raw, int) and 0 <= raw <= 3:
-        return raw
-    return default
-
-
-def _coerce_match(raw: object, legacy_expected: object = None) -> _Match:
-    """Read the string-match config (a list from JSON) into MustMatch / StateMap.
-
-    ``must_match`` carries ``{"pattern", "state_no_match"}`` (a bare string is
-    also accepted for a hand-written rule/CLI). ``state_map`` carries the
-    OK/WARN/CRIT patterns plus a ``state_no_match`` fallback. ``legacy_expected``
-    is the old flat ``expected`` regex; a section from a pre-'match' agent is
-    read as the equivalent ``must_match`` (CRIT on mismatch) so old spool data
-    keeps working alongside the migrated ruleset.
-    """
-    match raw:
-        case ["must_match", dict() as cfg]:
-            pattern = cfg.get("pattern")
-            if isinstance(pattern, str):
-                return MustMatch(pattern, _coerce_state(cfg.get("state_no_match"), 2))
-        case ["must_match", str() as pattern]:
-            return MustMatch(pattern)
-        case ["state_map", dict() as cfg]:
-            return StateMap(
-                ok=_optional_str(cfg.get("ok")),
-                warn=_optional_str(cfg.get("warn")),
-                crit=_optional_str(cfg.get("crit")),
-                state_no_match=_coerce_state(cfg.get("state_no_match"), 0),
-            )
-    if isinstance(legacy_expected, str):
-        return MustMatch(legacy_expected)
-    return None
-
-
-def _coerce_calc(raw: object) -> str | None:
-    """The arithmetic transform expression, or ``None`` for "no transform".
-
-    A blank/whitespace-only value means no transform (the ruleset validator
-    accepts it as such): normalize it to ``None`` so it never reaches
-    ``ast.parse``, which would raise an uncaught ``SyntaxError`` on it.
-    """
-    if isinstance(raw, str) and raw.strip():
-        return raw
-    return None
-
-
-def _coerce_value_as(raw: object) -> _ValueAs:
-    """Read the 'Interpret the value as' config (a list from JSON).
-
-    Anything unrecognized falls back to ``None`` ("monitor the value as it
-    stands"), so an unknown future choice degrades to the plain behaviour instead
-    of failing the service.
-    """
-    match raw:
-        case ["counter", _] | "counter":
-            return ReadAsCounter()
-        case ["timestamp", dict() as cfg]:
-            return ReadAsTimestamp(
-                format=_optional_str(cfg.get("format")) or "auto",
-                pattern=_optional_str(cfg.get("pattern")),
-            )
-        case ["timestamp", _] | "timestamp":
-            return ReadAsTimestamp()
-    return None
-
-
-def _coerce_unit(raw: object) -> str | None:
-    """The unit named in the rule: any string as it stands, else None.
-
-    Not ``_optional_str``: an empty string is a unit the rule set (if not one
-    the check knows), and it is kept apart from no unit at all - see
-    ``Item.unit``.
-    """
-    return raw if isinstance(raw, str) else None
-
-
-def _coerce_aggregate(raw: object) -> str | None:
-    return raw if isinstance(raw, str) and raw else None
-
-
-def _service_labels(raw: object) -> tuple[tuple[str, str], ...]:
-    """The (key, value) service labels the agent resolved for one result.
-
-    Each entry is ``{"key", "value"}`` with string key/value; anything else is
-    ignored defensively.
-    """
-    out: list[tuple[str, str]] = []
-    for label in raw if isinstance(raw, list) else []:
-        if not isinstance(label, dict):
-            continue
-        key, value = label.get("key"), label.get("value")
-        if isinstance(key, str) and key and isinstance(value, str):
-            out.append((key, value))
-    return tuple(out)
-
-
-def _summary_fields(raw: object) -> dict[str, str]:
-    """The ``{path: rendered}`` values the agent resolved for a summary template."""
-    if not isinstance(raw, dict):
-        return {}
-    return {k: v for k, v in raw.items() if isinstance(k, str) and k and isinstance(v, str)}
-
-
-def _inventory_target(raw: object) -> InventoryTarget | None:
-    """The agent's inventory placement for one result, string-validated."""
-    if not isinstance(raw, dict):
-        return None
-    node, key = raw.get("node"), raw.get("key")
-    if not isinstance(node, str) or not isinstance(key, str) or not node or not key:
-        return None
-    row_key = raw.get("row_key")
-    return InventoryTarget(
-        # Stripped to match the ruleset validator, which strips before checking:
-        # otherwise 'software . applications' passes Setup and then writes to a
-        # node distinct from 'software.applications' - invisible in the views and
-        # awkward to clean up per host.
-        path=tuple(stripped for segment in node.split(".") if (stripped := segment.strip())),
-        key=key,
-        row_key=row_key if isinstance(row_key, str) and row_key else None,
-        keep_service=bool(raw.get("keep_service")),
-    )
-
-
-def _coerce_host_labels(raw: object) -> dict[str, str]:
-    """The endpoint-level ``{key: value}`` host labels, string-validated."""
-    if not isinstance(raw, dict):
-        return {}
-    return {k: v for k, v in raw.items() if isinstance(k, str) and k and isinstance(v, str)}
-
-
-def _optional_number(raw: object) -> float | None:
-    if isinstance(raw, bool) or not isinstance(raw, (int, float)):
-        return None
-    return float(raw) if math.isfinite(raw) else None
-
-
-def _optional_int(raw: object) -> int | None:
-    number = _optional_number(raw)
-    return int(number) if number is not None else None
-
-
-def _optional_str(raw: object) -> str | None:
-    return raw if isinstance(raw, str) and raw else None
-
-
-def _text(raw: object) -> str:
-    """A field the agent writes as text, as text: '' for anything falsy.
-
-    Every reader of these fields treats an empty one as absent and writes a
-    present one into an f-string, so this is how they have always read - only
-    now the type says so.
-    """
-    return str(raw) if raw else ""
-
-
-def _unique_name(name: str, taken: Mapping[str, object]) -> str:
-    """``name``, suffixed ' (2)', ' (3)', ... until it is not already in ``taken``.
-
-    Two endpoints (or two services) configured with the same name would
-    otherwise collapse into one, silently dropping the second.
-    """
-    if name not in taken:
-        return name
-    suffix = 2
-    while f"{name} ({suffix})" in taken:
-        suffix += 1
-    return f"{name} ({suffix})"
-
-
-def _response_headers(raw: object) -> dict[str, str] | None:
-    """The reported response headers, or None when the endpoint reports none.
-
-    An empty map is a real answer ("asked for, and there were none"), so it is
-    kept distinct from None - the check says so rather than staying silent.
-    """
-    if not isinstance(raw, dict):
-        return None
-    return {str(name): str(value) for name, value in raw.items()}
-
-
-def _endpoint_statuses(raw: object) -> dict[str, EndpointStatus]:
-    """The agent's ``endpoints`` list, keyed by the service item.
-
-    A duplicated name (two endpoints configured with the same one) is
-    disambiguated the same way a duplicated service name is, so no endpoint can
-    silently disappear from the service list.
-
-    The key is the SERVICE ITEM, which is the endpoint name - or, for an endpoint
-    that prefixes its field services, that name followed by ' API'. The two
-    endpoint check plugins render their item into different service names, so
-    each record has exactly one item and one plugin that discovers it.
-    """
-    statuses: dict[str, EndpointStatus] = {}
-    for record in raw if isinstance(raw, list) else []:
-        if not isinstance(record, dict):
-            continue
-        url = _optional_str(record.get("url")) or "?"
-        name = _optional_str(record.get("name")) or url
-        prefixed = bool(record.get("prefixed"))
-        item = _unique_name(f"{name} API" if prefixed else name, statuses)
-        statuses[item] = EndpointStatus(
-            name=name,
-            prefixed=prefixed,
-            url=url,
-            ok=bool(record.get("ok")),
-            error=_optional_str(record.get("error")),
-            status=_optional_int(record.get("status")),
-            elapsed=_optional_number(record.get("elapsed")),
-            size=_optional_int(record.get("size")),
-            final_url=_optional_str(record.get("final_url")),
-            cert_expiry=_optional_number(record.get("cert_expiry")),
-            attempts=_optional_int(record.get("attempts")) or 1,
-            from_cache=bool(record.get("from_cache")),
-            cache_age=_optional_number(record.get("cache_age")),
-            pages=_optional_int(record.get("pages")) or 1,
-            elements=_optional_int(record.get("elements")),
-            pagination_stopped=_optional_str(record.get("pagination_stopped")),
-            pagination_end=_optional_str(record.get("pagination_end")),
-            body=_optional_str(record.get("body")),
-            body_truncated=bool(record.get("body_truncated")),
-            body_size=_optional_int(record.get("body_size")),
-            headers=_response_headers(record.get("headers")),
-        )
-    return statuses
-
-
-def _endpoint_service_names(endpoints: Mapping[str, EndpointStatus]) -> set[str]:
-    """The endpoint services' names, as the item a FIELD service would need to get them.
-
-    Field services are 'JSON <item>'. An endpoint's own service is 'JSON API
-    <item>' - or 'JSON <item>' with an item ending in ' API' when it prefixes -
-    so a field named 'API frontend', or 'API' on a prefixing endpoint, would be
-    rendered into the very same service name. Checkmk then drops one of the two
-    as a duplicate.
-    """
-    return {item if endpoint.prefixed else f"API {item}" for item, endpoint in endpoints.items()}
-
-
-def parse_json_api(string_table: StringTable) -> Section | None:
-    if not string_table:
-        return None
-    payload = json.loads(string_table[0][0])
-    endpoints = _endpoint_statuses(payload.get("endpoints"))
-    # A field whose service name is an endpoint service's name is moved aside the
-    # same way a duplicated field is, so neither service disappears.
-    endpoint_names: dict[str, object] = dict.fromkeys(_endpoint_service_names(endpoints))
-    shared_names: dict[str, str] = {}
-    items: dict[str, list[Item]] = {}
-    for result in payload["results"]:
-        # A field reported into a shared service carries the name of its line;
-        # it JOINS that service rather than becoming one, so it is appended
-        # instead of being disambiguated.
-        #
-        # A field of its own still gets the defensive uniqueness backstop (the
-        # agent already makes wildcard labels unique), so a duplicate service
-        # name can never silently drop a service - and so an accidental
-        # duplicate is never quietly merged into a combined service, which is
-        # something the rule has to ask for.
-        label = _optional_str(result.get("label"))
-        service = result["service"]
-        if label is not None:
-            # Every line of a shared service must land in the same (possibly
-            # moved) service, so the name is decided once per service.
-            if service not in shared_names:
-                shared_names[service] = _unique_name(service, endpoint_names)
-            name = shared_names[service]
-        else:
-            name = _unique_name(service, {**endpoint_names, **items})
-        unit = _coerce_unit(result.get("unit"))
-        entry = Item(
-            found=bool(result["found"]),
-            value=result["value"],
-            error=_text(result["error"]) or None,
-            levels_upper=_coerce_levels(result.get("levels_upper")),
-            levels_lower=_coerce_levels(result.get("levels_lower")),
-            match=_coerce_match(result.get("match"), result.get("expected")),
-            calc=_coerce_calc(result.get("calc")),
-            calc_other=_optional_number(result.get("calc_other")),
-            unit=unit,
-            boundaries=_boundaries(result.get("value_range")),
-            metric_name=_metric_name(unit),
-            metric_override=_optional_str(result.get("metric_name")),
-            render_func=_render_func(unit),
-            path=_text(result.get("path")),
-            url=_text(result.get("url")),
-            value_as=_coerce_value_as(result.get("value_as")),
-            aggregate=_coerce_aggregate(result.get("aggregate")),
-            service_labels=_service_labels(result.get("labels")),
-            summary=_optional_str(result.get("summary")),
-            summary_fields=_summary_fields(result.get("summary_fields")),
-            inventory=_inventory_target(result.get("inventory")),
-            label=label,
-            context=_optional_str(result.get("context")),
-        )
-        items.setdefault(name, []).append(entry)
-    return Section(
-        error=_text(payload.get("error")) or None,
-        items={name: tuple(entries) for name, entries in items.items()},
-        host_labels=_coerce_host_labels(payload.get("host_labels")),
-        endpoints=endpoints,
-    )
 
 
 def host_label_json_api(section: Section) -> HostLabelGenerator:
@@ -811,33 +137,6 @@ def discover_json_api(section: Section) -> DiscoveryResult:
         )
 
 
-def _render_value(value: object) -> str:
-    """Render a value the way it appears in JSON, so 'expected' matches what
-    users see (true/false/null, not Python's True/False/None)."""
-    if isinstance(value, bool):
-        return "true" if value else "false"
-    if value is None:
-        return "null"
-    return str(value)
-
-
-def _as_number(value: object) -> float | None:
-    if isinstance(value, bool):
-        return None
-    if isinstance(value, (int, float)):
-        number = float(value)
-    elif isinstance(value, str):
-        try:
-            number = float(value)
-        except ValueError:
-            return None
-    else:
-        return None
-    # Reject inf/nan: float("inf")/"nan" parse but make no sense as a metric or
-    # a levels comparison, and would render confusingly.
-    return number if math.isfinite(number) else None
-
-
 _AGGREGATE_LABEL: Final[Mapping[str, str]] = {
     "count": "number of elements",
     "sum": "sum of the elements",
@@ -852,7 +151,7 @@ _VALUE_AS_LABEL: Final[Mapping[str, str]] = {
 }
 
 
-def _context(entry: Item, match: _Match) -> CheckResult:
+def _context(entry: Item, match: Match) -> CheckResult:
     """Details-only lines describing where the value came from.
 
     Emitted as an OK result with ``notice``, so it never touches the summary
@@ -926,187 +225,6 @@ def _evaluate_match(match: MustMatch | StateMap, text: str) -> tuple[State, str]
             return state, f"matched {key.upper()}"
     no_match = match.state_no_match
     return State(no_match), ("no pattern matched" if no_match != 0 else "")
-
-
-def _apply_calc(value: float, expr: str, other: float | None = None) -> float:
-    """Evaluate a small arithmetic expression over ``value`` (and ``other``).
-
-    Only numeric literals, the names ``value`` and ``other``, parentheses and
-    + - * / (incl. unary +/-) are supported; anything else raises
-    ``ValueError``. This walks the AST and never uses ``eval``, so a rule cannot
-    smuggle in code execution. Operators are dispatched with explicit
-    ``isinstance`` branches (rather than a lookup table of ``operator``
-    callables) so the arithmetic stays statically typed.
-
-    ``other`` is the second path's value, resolved by the agent. An expression
-    naming it when it did not resolve is an error rather than a default: silently
-    substituting 0 or 1 would turn a missing field into a plausible-looking
-    ratio.
-    """
-
-    def _eval(node: ast.AST) -> float:
-        if isinstance(node, ast.Expression):
-            return _eval(node.body)
-        if isinstance(node, ast.BinOp):
-            left, right = _eval(node.left), _eval(node.right)
-            if isinstance(node.op, ast.Add):
-                return left + right
-            if isinstance(node.op, ast.Sub):
-                return left - right
-            if isinstance(node.op, ast.Mult):
-                return left * right
-            if isinstance(node.op, ast.Div):
-                return left / right
-            raise ValueError("unsupported operator")
-        if isinstance(node, ast.UnaryOp):
-            operand = _eval(node.operand)
-            if isinstance(node.op, ast.UAdd):
-                return +operand
-            if isinstance(node.op, ast.USub):
-                return -operand
-            raise ValueError("unsupported operator")
-        if (
-            isinstance(node, ast.Constant)
-            and not isinstance(node.value, bool)
-            and isinstance(node.value, (int, float))
-        ):
-            return float(node.value)
-        if isinstance(node, ast.Name):
-            if node.id == "value":
-                return value
-            if node.id == "other":
-                if other is None:
-                    raise ValueError("the second path did not resolve to a number")
-                return other
-        raise ValueError("unsupported expression")
-
-    return float(_eval(ast.parse(expr, mode="eval")))
-
-
-def _fmt_number(number: float) -> str:
-    """Render a (calculated) number without a spurious trailing ``.0``."""
-    return str(int(number)) if number.is_integer() else str(number)
-
-
-# Above this, an epoch value can only be milliseconds: 1e11 seconds is the year
-# 5138, while 1e11 milliseconds is 1973 - so any plausible timestamp beyond it is
-# a millisecond value. Used only by the 'auto' format.
-_EPOCH_MS_THRESHOLD = 1e11
-
-# Fractional seconds with more than microsecond precision (Go/Java emit
-# nanoseconds) are not accepted by datetime.fromisoformat; trim the extra digits.
-_ISO_SUBSECOND = re.compile(r"(\.\d{6})\d+")
-
-
-def _parse_iso_timestamp(text: str) -> float | None:
-    """An ISO 8601 / RFC 3339 timestamp as a Unix epoch float, or None.
-
-    A trailing 'Z' is normalized for older ``fromisoformat`` implementations, and
-    sub-microsecond precision is trimmed. A timestamp without a time zone is read
-    as UTC - the alternative, the monitoring server's local zone, would make the
-    same JSON mean different things on different servers.
-    """
-    cleaned = _ISO_SUBSECOND.sub(r"\1", text.strip())
-    if cleaned.endswith(("Z", "z")):
-        cleaned = f"{cleaned[:-1]}+00:00"
-    try:
-        parsed = datetime.fromisoformat(cleaned)
-    except ValueError:
-        return None
-    if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=UTC)
-    return parsed.timestamp()
-
-
-def _parse_http_date(text: str) -> float | None:
-    """An HTTP-date (RFC 9110) as a Unix epoch float, or None.
-
-    The format 'Last-Modified', 'Expires' and a date-form 'Retry-After' are
-    written in - 'Wed, 21 Oct 2015 07:28:00 GMT' - which is neither a number nor
-    ISO 8601, so reading a header as a timestamp needs it. An HTTP-date is
-    always GMT; a parser that nonetheless returns a naive datetime is read as
-    UTC rather than as the monitoring server's local zone.
-    """
-    try:
-        parsed = email.utils.parsedate_to_datetime(text.strip())
-    except (TypeError, ValueError):
-        return None
-    if parsed is None:
-        return None
-    if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=UTC)
-    return parsed.timestamp()
-
-
-# Go's default time layout, what ``time.Time.String()`` (and so ``fmt.Print``)
-# emits: '2006-01-02 15:04:05.999999999 -0700 MST'. APIs written in Go leak it
-# into their JSON (Cloudflare's origin certificate 'expires_on'). The zone name
-# is an abbreviation, or the offset again when the zone has none; a time read
-# from the monotonic clock carries an ' m=+0.000000001' suffix.
-_GO_TIME = re.compile(
-    r"(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}(?:\.\d+)?) ([+-]\d{4}) \S+(?: m=[+-]\d+(?:\.\d+)?)?"
-)
-
-
-def _parse_go_time(text: str) -> float | None:
-    """A timestamp in Go's default layout as a Unix epoch float, or None.
-
-    Only the numeric offset is read: a zone abbreviation is ambiguous ('IST' is
-    three different zones), and Go always writes the offset next to it.
-    """
-    match = _GO_TIME.fullmatch(text.strip())
-    if match is None:
-        return None
-    return _parse_iso_timestamp(f"{match[1]}{match[2]}")
-
-
-def _parse_custom_timestamp(text: str, pattern: str) -> float | None:
-    """The text read with a strptime pattern as a Unix epoch float, or None.
-
-    Without '%z' in the pattern the result is naive and read as UTC, like an ISO
-    8601 timestamp without a zone. A pattern strptime rejects (the ruleset
-    validates it, but a rule imported over the REST API is not) is a value that
-    cannot be read, not a crashed check.
-    """
-    try:
-        parsed = datetime.strptime(text.strip(), pattern)
-    except ValueError:
-        return None
-    if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=UTC)
-    return parsed.timestamp()
-
-
-def _parse_timestamp(value: object, fmt: str, pattern: str | None = None) -> float | None:
-    """The value as a Unix epoch float, per the configured format, or None."""
-    number = _as_number(value)
-    match fmt:
-        case "custom":
-            # A number is read as text: a pattern such as '%Y%m%d' is for exactly
-            # the digits an API may send as a JSON number.
-            if pattern is None or isinstance(value, bool) or value is None:
-                return None
-            return _parse_custom_timestamp(str(value), pattern)
-        case "epoch":
-            return number
-        case "epoch_ms":
-            return number / 1000.0 if number is not None else None
-        case "iso":
-            return _parse_iso_timestamp(value) if isinstance(value, str) else None
-    # "auto" (and anything unknown): a number is an epoch, in milliseconds when
-    # it is far too large to be seconds; a string is tried as ISO 8601, then as
-    # an HTTP-date, so a 'Last-Modified' header read via '@header.' resolves
-    # without the rule having to name a format, and then in Go's default layout.
-    if number is not None:
-        return number / 1000.0 if abs(number) > _EPOCH_MS_THRESHOLD else number
-    if not isinstance(value, str):
-        return None
-    # Not `iso or http_date or ...`: a timestamp of exactly epoch 0 is a real
-    # value and would be discarded as falsy.
-    for parse in (_parse_iso_timestamp, _parse_http_date, _parse_go_time):
-        if (stamp := parse(value)) is not None:
-            return stamp
-    return None
 
 
 def _counter_key(entry: Item) -> str:
@@ -1201,7 +319,7 @@ def _derive(entry: Item) -> tuple[float | None, str, Callable[[float], str] | No
 _VALUE_LABEL: Final[Mapping[str, str]] = {"counter": "Rate", "timestamp": "Age"}
 
 
-def _value_label(value_as: _ValueAs, line: str | None = None) -> str:
+def _value_label(value_as: ValueAs, line: str | None = None) -> str:
     """What this value is called in the summary.
 
     A field of its own is just 'Value' (or 'Rate'/'Age' once derived) - the
@@ -1304,9 +422,9 @@ def _service_metric_names(entries: Sequence[Item]) -> list[str]:
 
 def _value_results(
     entry: Item,
-    levels_upper: _Levels,
-    levels_lower: _Levels,
-    match: _Match,
+    levels_upper: Levels,
+    levels_lower: Levels,
+    match: Match,
     metric_name: str,
 ) -> CheckResult:
     # The metric's name is allocated for the whole service at once (see

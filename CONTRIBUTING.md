@@ -111,7 +111,9 @@ cmk_addons/plugins/json_api/
   special_agent/       the special agent: agent_json_api.py (entry point) on top of
                        paths, transport, cache, oauth2, pagination, fetch, extract
   libexec/             its entry point, which Checkmk executes
-  agent_based/         section parsing + check
+  agent_based/         the check plugins (section, check, inventory)
+  check_lib/           what the check builds on: the section's model and parsing,
+                       units, timestamps, the transform
   graphing/            metric definition
   checkman/            man page
 explorer/              standalone, dependency-free config Explorer

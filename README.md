@@ -1272,7 +1272,8 @@ cmk_addons/plugins/json_api/
   rulesets/            the Setup form
   special_agent/       the special agent
   libexec/             its entry point, which Checkmk executes
-  agent_based/         section parsing + check
+  agent_based/         the check plugins
+  check_lib/           section parsing and the check's helpers
   graphing/            metric definition
   checkman/            man page
 ```

@@ -20,6 +20,8 @@ import pytest
 from cmk.graphing.v1 import metrics
 from cmk.graphing.v1 import perfometers as perfometers_api
 
+from cmk_addons.plugins.json_api.check_lib import units as check_units
+
 
 def _definitions(perfometers_module):
     """The perfometers in DEFINITION order, which is registration order."""
@@ -167,14 +169,14 @@ def test_every_bar_is_drawn_from_a_defined_metric(perfometers, graphing):
         assert _required_metrics(perfometer) <= defined
 
 
-def test_every_field_metric_has_a_bar(perfometers, check, graphing):
+def test_every_field_metric_has_a_bar(perfometers, graphing):
     """A unit that gains a metric but no perfometer would quietly go back to
     showing nothing — the state this change exists to end."""
     covered = {metric for p in _definitions(perfometers) for metric in _required_metrics(p)}
-    emitted = set(check._UNIT_METRIC.values()) | set(check._UNIT_RATE_METRIC.values())
+    emitted = set(check_units._UNIT_METRIC.values()) | set(check_units._UNIT_RATE_METRIC.values())
 
     assert emitted <= covered
-    assert check._AGE_METRIC in covered
+    assert check_units._AGE_METRIC in covered
     # The endpoint's other two metrics are deliberately uncovered: they share a
     # service with the response time, which already has the bar.
     assert {"json_api_response_size", "json_api_cert_expiry"} & covered == set()

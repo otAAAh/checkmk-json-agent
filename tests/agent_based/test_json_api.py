@@ -8,6 +8,12 @@ from types import SimpleNamespace
 import pytest
 from cmk.agent_based.v2 import IgnoreResults, Metric, Result, State
 
+from cmk_addons.plugins.json_api.check_lib import calc as check_calc
+from cmk_addons.plugins.json_api.check_lib import section as check_section
+from cmk_addons.plugins.json_api.check_lib import timestamps as check_timestamps
+from cmk_addons.plugins.json_api.check_lib import units as check_units
+from cmk_addons.plugins.json_api.check_lib import values as check_values
+
 
 def _section(check, results, host_labels=None, endpoints=None):
     payload = {
@@ -35,10 +41,10 @@ def _entry(service, **kw):
     return base
 
 
-def test_coerce_levels(check):
-    assert check._coerce_levels(["fixed", [5.0, 10.0]]) == ("fixed", (5.0, 10.0))
-    assert check._coerce_levels(["no_levels", None]) is None
-    assert check._coerce_levels(None) is None
+def test_coerce_levels():
+    assert check_section._coerce_levels(["fixed", [5.0, 10.0]]) == ("fixed", (5.0, 10.0))
+    assert check_section._coerce_levels(["no_levels", None]) is None
+    assert check_section._coerce_levels(None) is None
 
 
 def test_discovery_lists_every_service(check):
@@ -156,14 +162,14 @@ def test_a_partly_usable_range_keeps_the_end_that_works(check):
     assert metric.boundaries == (0.0, None)
 
 
-def test_metric_name_maps_unit_to_metric(check):
-    assert check._metric_name(None) == "json_api_value"
-    assert check._metric_name("count") == "json_api_count"
-    assert check._metric_name("bytes") == "json_api_bytes"
-    assert check._metric_name("seconds") == "json_api_seconds"
-    assert check._metric_name("percent") == "json_api_percent"
+def test_metric_name_maps_unit_to_metric():
+    assert check_units._metric_name(None) == "json_api_value"
+    assert check_units._metric_name("count") == "json_api_count"
+    assert check_units._metric_name("bytes") == "json_api_bytes"
+    assert check_units._metric_name("seconds") == "json_api_seconds"
+    assert check_units._metric_name("percent") == "json_api_percent"
     # Unknown/garbage units fall back to the default metric.
-    assert check._metric_name("nonsense") == "json_api_value"
+    assert check_units._metric_name("nonsense") == "json_api_value"
 
 
 def test_check_unit_names_the_metric_with_levels(check):
@@ -236,8 +242,8 @@ def test_the_further_units_name_and_render_the_value(check, unit, value, metric_
     assert _value_summary(check, "F", section) == rendered
 
 
-def test_an_si_unit_renders_zero_and_negatives(check):
-    render = check._render_si("W")
+def test_an_si_unit_renders_zero_and_negatives():
+    render = check_units._render_si("W")
     assert render(0) == "0.00 W"
     assert render(-1500) == "-1.50 kW"
     # Below the smallest prefix the value is still shown, not rounded away.
@@ -258,16 +264,16 @@ def test_an_si_unit_renders_zero_and_negatives(check):
         (1e15, "1000.00 TW"),
     ],
 )
-def test_an_si_unit_picks_the_prefix_after_rounding(check, value, rendered):
-    assert check._render_si("W")(value) == rendered
+def test_an_si_unit_picks_the_prefix_after_rounding(value, rendered):
+    assert check_units._render_si("W")(value) == rendered
 
 
 @pytest.mark.parametrize(
     "value, rendered",
     [(float("nan"), "nan W"), (float("inf"), "inf W"), (float("-inf"), "-inf W")],
 )
-def test_an_si_unit_prints_a_value_without_a_scale_as_it_is(check, value, rendered):
-    assert check._render_si("W")(value) == rendered
+def test_an_si_unit_prints_a_value_without_a_scale_as_it_is(value, rendered):
+    assert check_units._render_si("W")(value) == rendered
 
 
 def test_a_counter_in_a_unit_that_is_not_counted_gets_the_plain_rate(check, monkeypatch):
@@ -411,12 +417,12 @@ def test_check_failed_match_still_surfaces_misconfigured_levels(check):
     assert "not numeric" in result.summary
 
 
-def test_as_number_rejects_non_finite(check):
-    assert check._as_number("inf") is None
-    assert check._as_number("nan") is None
-    assert check._as_number("-inf") is None
-    assert check._as_number(3) == 3.0
-    assert check._as_number("2.5") == 2.5
+def test_as_number_rejects_non_finite():
+    assert check_values._as_number("inf") is None
+    assert check_values._as_number("nan") is None
+    assert check_values._as_number("-inf") is None
+    assert check_values._as_number(3) == 3.0
+    assert check_values._as_number("2.5") == 2.5
 
 
 def test_check_non_finite_value_is_not_treated_as_metric(check):
@@ -503,24 +509,26 @@ def test_parse_duplicate_service_names_kept_distinct(check):
     assert "Dup (2)" in section.items
 
 
-def test_coerce_match_normalizes_shapes(check):
+def test_coerce_match_normalizes_shapes():
     # Canonical must_match: dict with pattern + no-match state (defaults CRIT=2).
-    assert check._coerce_match(["must_match", {"pattern": "UP"}]) == check.MustMatch("UP", 2)
-    assert check._coerce_match(
+    assert check_section._coerce_match(
+        ["must_match", {"pattern": "UP"}]
+    ) == check_section.MustMatch("UP", 2)
+    assert check_section._coerce_match(
         ["must_match", {"pattern": "UP", "state_no_match": 1}]
-    ) == check.MustMatch("UP", 1)
+    ) == check_section.MustMatch("UP", 1)
     # A bare string is accepted for hand-written rules/CLI.
-    assert check._coerce_match(["must_match", "UP"]) == check.MustMatch("UP", 2)
+    assert check_section._coerce_match(["must_match", "UP"]) == check_section.MustMatch("UP", 2)
     # state_map keeps only real patterns and always carries a no-match state.
-    assert check._coerce_match(["state_map", {"ok": "UP", "crit": "DOWN"}]) == check.StateMap(
-        ok="UP", crit="DOWN", state_no_match=0
-    )
-    assert check._coerce_match(["state_map", {"ok": "", "warn": "W", "x": "y"}]) == check.StateMap(
-        warn="W", state_no_match=0
-    )
-    assert check._coerce_match(None) is None
+    assert check_section._coerce_match(
+        ["state_map", {"ok": "UP", "crit": "DOWN"}]
+    ) == check_section.StateMap(ok="UP", crit="DOWN", state_no_match=0)
+    assert check_section._coerce_match(
+        ["state_map", {"ok": "", "warn": "W", "x": "y"}]
+    ) == check_section.StateMap(warn="W", state_no_match=0)
+    assert check_section._coerce_match(None) is None
     # Back-compat: an old section with only the flat 'expected' regex -> CRIT.
-    assert check._coerce_match(None, "UP|ok") == check.MustMatch("UP|ok", 2)
+    assert check_section._coerce_match(None, "UP|ok") == check_section.MustMatch("UP|ok", 2)
 
 
 def test_check_must_match_explicit_shape(check):
@@ -607,20 +615,20 @@ def test_check_legacy_expected_section_still_evaluated(check):
     assert "expected to match 'UP'" in result.summary
 
 
-def test_apply_calc_arithmetic(check):
-    assert check._apply_calc(1048576.0, "value / 1024 / 1024") == 1.0
-    assert check._apply_calc(0.5, "value * 1000") == 500.0
-    assert check._apply_calc(212.0, "(value - 32) * 5 / 9") == 100.0
-    assert check._apply_calc(3.0, "-value") == -3.0
+def test_apply_calc_arithmetic():
+    assert check_calc._apply_calc(1048576.0, "value / 1024 / 1024") == 1.0
+    assert check_calc._apply_calc(0.5, "value * 1000") == 500.0
+    assert check_calc._apply_calc(212.0, "(value - 32) * 5 / 9") == 100.0
+    assert check_calc._apply_calc(3.0, "-value") == -3.0
 
 
-def test_apply_calc_rejects_non_arithmetic(check):
+def test_apply_calc_rejects_non_arithmetic():
     # No names other than 'value', no calls, no attribute access, no power op.
     import pytest
 
     for expr in ("foo", "__import__('os')", "value.bit_length()", "value ** 2", "abs(value)"):
         with pytest.raises((ValueError, ZeroDivisionError)):
-            check._apply_calc(2.0, expr)
+            check_calc._apply_calc(2.0, expr)
 
 
 def test_check_calc_transforms_value_and_metric(check):
@@ -708,7 +716,7 @@ def test_check_blank_calc_is_no_transform_not_crash(check):
 def test_check_api_error_is_crit(check):
     # A section-level error surfaces as CRIT on any discovered item.
     items = _section(check, [_entry("X", value="1")]).items
-    section = check.Section(error="boom", items=items)
+    section = check_section.Section(error="boom", items=items)
     (result,) = list(check.check_json_api("X", {}, section))
     assert result.state == State.CRIT
     assert "boom" in result.summary
@@ -818,21 +826,25 @@ def _counter_store(check, monkeypatch, store):
     monkeypatch.setattr(check, "get_value_store", lambda: store)
 
 
-def test_coerce_value_as(check):
-    assert check._coerce_value_as(["counter", None]) == check.ReadAsCounter()
-    assert check._coerce_value_as(["timestamp", {"format": "iso"}]) == check.ReadAsTimestamp("iso")
+def test_coerce_value_as():
+    assert check_section._coerce_value_as(["counter", None]) == check_section.ReadAsCounter()
+    assert check_section._coerce_value_as(
+        ["timestamp", {"format": "iso"}]
+    ) == check_section.ReadAsTimestamp("iso")
     # A timestamp without a format falls back to auto-detection.
-    assert check._coerce_value_as(["timestamp", {}]) == check.ReadAsTimestamp("auto")
+    assert check_section._coerce_value_as(["timestamp", {}]) == check_section.ReadAsTimestamp(
+        "auto"
+    )
     # A custom pattern is carried along; an empty or non-string one is dropped.
-    assert check._coerce_value_as(
+    assert check_section._coerce_value_as(
         ["timestamp", {"format": "custom", "pattern": "%Y"}]
-    ) == check.ReadAsTimestamp("custom", "%Y")
-    assert check._coerce_value_as(
+    ) == check_section.ReadAsTimestamp("custom", "%Y")
+    assert check_section._coerce_value_as(
         ["timestamp", {"format": "custom", "pattern": ""}]
-    ) == check.ReadAsTimestamp("custom", None)
+    ) == check_section.ReadAsTimestamp("custom", None)
     # Absent / unknown: monitor the value as it stands.
-    assert check._coerce_value_as(None) is None
-    assert check._coerce_value_as(["something_new", {}]) is None
+    assert check_section._coerce_value_as(None) is None
+    assert check_section._coerce_value_as(["something_new", {}]) is None
 
 
 def test_counter_first_run_cannot_compute_a_rate(check, monkeypatch):
@@ -996,101 +1008,116 @@ def test_wildcard_counters_in_one_shared_service_each_keep_a_reading(check, monk
 # --- Timestamp -> age ---------------------------------------------------------
 
 
-def test_apply_calc_binds_the_second_operand(check):
-    assert check._apply_calc(25.0, "value / other * 100", 100.0) == 25.0
-    assert check._apply_calc(3.0, "(value + other) * 2", 1.0) == 8.0
+def test_apply_calc_binds_the_second_operand():
+    assert check_calc._apply_calc(25.0, "value / other * 100", 100.0) == 25.0
+    assert check_calc._apply_calc(3.0, "(value + other) * 2", 1.0) == 8.0
     # 'value' alone still works with no second operand at all.
-    assert check._apply_calc(1024.0, "value / 1024") == 1.0
+    assert check_calc._apply_calc(1024.0, "value / 1024") == 1.0
 
 
-def test_apply_calc_rejects_other_when_it_did_not_resolve(check):
+def test_apply_calc_rejects_other_when_it_did_not_resolve():
     """Substituting 0 or 1 would turn a missing field into a plausible-looking
     ratio, so an unresolved 'other' fails the expression instead."""
     with pytest.raises(ValueError, match="second path"):
-        check._apply_calc(25.0, "value / other * 100", None)
+        check_calc._apply_calc(25.0, "value / other * 100", None)
 
 
-def test_apply_calc_still_rejects_unknown_names(check):
+def test_apply_calc_still_rejects_unknown_names():
     with pytest.raises(ValueError):
-        check._apply_calc(1.0, "value + elsewhere", 2.0)
+        check_calc._apply_calc(1.0, "value + elsewhere", 2.0)
 
 
-def test_parse_timestamp_formats(check):
-    assert check._parse_timestamp(1700000000, "epoch") == 1700000000.0
-    assert check._parse_timestamp(1700000000000, "epoch_ms") == 1700000000.0
-    assert check._parse_timestamp("1700000000", "epoch") == 1700000000.0
+def test_parse_timestamp_formats():
+    assert check_timestamps._parse_timestamp(1700000000, "epoch") == 1700000000.0
+    assert check_timestamps._parse_timestamp(1700000000000, "epoch_ms") == 1700000000.0
+    assert check_timestamps._parse_timestamp("1700000000", "epoch") == 1700000000.0
     # ISO 8601 with an explicit zone, with 'Z', and with nanosecond precision.
-    assert check._parse_timestamp("2023-11-14T22:13:20+00:00", "iso") == 1700000000.0
-    assert check._parse_timestamp("2023-11-14T22:13:20Z", "iso") == 1700000000.0
-    assert check._parse_timestamp("2023-11-14T22:13:20.123456789Z", "iso") == 1700000000.123456
+    assert check_timestamps._parse_timestamp("2023-11-14T22:13:20+00:00", "iso") == 1700000000.0
+    assert check_timestamps._parse_timestamp("2023-11-14T22:13:20Z", "iso") == 1700000000.0
+    assert (
+        check_timestamps._parse_timestamp("2023-11-14T22:13:20.123456789Z", "iso")
+        == 1700000000.123456
+    )
     # No zone at all: read as UTC, not as the monitoring server's local time.
-    assert check._parse_timestamp("2023-11-14T22:13:20", "iso") == 1700000000.0
+    assert check_timestamps._parse_timestamp("2023-11-14T22:13:20", "iso") == 1700000000.0
     # Auto-detection: seconds, milliseconds, ISO.
-    assert check._parse_timestamp(1700000000, "auto") == 1700000000.0
-    assert check._parse_timestamp(1700000000000, "auto") == 1700000000.0
-    assert check._parse_timestamp("2023-11-14T22:13:20Z", "auto") == 1700000000.0
+    assert check_timestamps._parse_timestamp(1700000000, "auto") == 1700000000.0
+    assert check_timestamps._parse_timestamp(1700000000000, "auto") == 1700000000.0
+    assert check_timestamps._parse_timestamp("2023-11-14T22:13:20Z", "auto") == 1700000000.0
     # Unparseable / wrong type.
-    assert check._parse_timestamp("yesterday", "auto") is None
-    assert check._parse_timestamp("2023-11-14T22:13:20Z", "epoch") is None
-    assert check._parse_timestamp(None, "auto") is None
+    assert check_timestamps._parse_timestamp("yesterday", "auto") is None
+    assert check_timestamps._parse_timestamp("2023-11-14T22:13:20Z", "epoch") is None
+    assert check_timestamps._parse_timestamp(None, "auto") is None
 
 
-def test_parse_timestamp_auto_reads_an_http_date(check):
+def test_parse_timestamp_auto_reads_an_http_date():
     """'auto' also accepts an HTTP-date, which is what a 'Last-Modified' or
     'Expires' header read via a '@header.' path actually contains."""
-    assert check._parse_timestamp("Wed, 21 Oct 2015 07:28:00 GMT", "auto") == 1445412480.0
+    assert (
+        check_timestamps._parse_timestamp("Wed, 21 Oct 2015 07:28:00 GMT", "auto") == 1445412480.0
+    )
     # An HTTP-date is always GMT; a parser returning a naive datetime must not be
     # read as the monitoring server's local zone.
-    assert check._parse_timestamp("Wed, 21 Oct 2015 07:28:00 -0000", "auto") == 1445412480.0
+    assert (
+        check_timestamps._parse_timestamp("Wed, 21 Oct 2015 07:28:00 -0000", "auto") == 1445412480.0
+    )
     # The explicit formats stay strict - 'iso' means ISO 8601, not "any date".
-    assert check._parse_timestamp("Wed, 21 Oct 2015 07:28:00 GMT", "iso") is None
+    assert check_timestamps._parse_timestamp("Wed, 21 Oct 2015 07:28:00 GMT", "iso") is None
 
 
-def test_parse_timestamp_auto_reads_go_time(check):
+def test_parse_timestamp_auto_reads_go_time():
     """'auto' also accepts Go's default time layout, which APIs written in Go
     leak into their JSON - Cloudflare's origin certificate 'expires_on' (#246)."""
-    assert check._parse_timestamp("2023-11-14 22:13:20 +0000 UTC", "auto") == 1700000000.0
+    assert (
+        check_timestamps._parse_timestamp("2023-11-14 22:13:20 +0000 UTC", "auto") == 1700000000.0
+    )
     # The offset decides, not the zone name - which may be an abbreviation or,
     # for a zone without one, the offset again.
-    assert check._parse_timestamp("2023-11-14 23:13:20 +0100 CET", "auto") == 1700000000.0
-    assert check._parse_timestamp("2023-11-14 17:43:20 -0430 -0430", "auto") == 1700000000.0
+    assert (
+        check_timestamps._parse_timestamp("2023-11-14 23:13:20 +0100 CET", "auto") == 1700000000.0
+    )
+    assert (
+        check_timestamps._parse_timestamp("2023-11-14 17:43:20 -0430 -0430", "auto") == 1700000000.0
+    )
     # Nanoseconds, and the monotonic-clock reading of a time.Now() value.
     assert (
-        check._parse_timestamp("2023-11-14 22:13:20.123456789 +0000 UTC", "auto")
+        check_timestamps._parse_timestamp("2023-11-14 22:13:20.123456789 +0000 UTC", "auto")
         == 1700000000.123456
     )
     assert (
-        check._parse_timestamp("2023-11-14 22:13:20 +0000 UTC m=+0.000012345", "auto")
+        check_timestamps._parse_timestamp("2023-11-14 22:13:20 +0000 UTC m=+0.000012345", "auto")
         == 1700000000.0
     )
     # Not a prefix match: trailing garbage is still not a timestamp.
-    assert check._parse_timestamp("2023-11-14 22:13:20 +0000 UTC tomorrow", "auto") is None
+    assert (
+        check_timestamps._parse_timestamp("2023-11-14 22:13:20 +0000 UTC tomorrow", "auto") is None
+    )
     # The explicit formats stay strict.
-    assert check._parse_timestamp("2023-11-14 22:13:20 +0000 UTC", "iso") is None
+    assert check_timestamps._parse_timestamp("2023-11-14 22:13:20 +0000 UTC", "iso") is None
 
 
-def test_parse_timestamp_custom_pattern(check):
+def test_parse_timestamp_custom_pattern():
     """'custom' reads the value with the rule's strptime pattern - the escape
     hatch for the formats 'auto' cannot guess, such as a locale's."""
-    assert check._parse_timestamp("14.11.2023 22:13:20", "custom", "%d.%m.%Y %H:%M:%S") == (
-        1700000000.0
-    )
-    assert check._parse_timestamp("11/14/2023 10:13 PM", "custom", "%m/%d/%Y %I:%M %p") == (
-        1699999980.0
-    )
+    assert check_timestamps._parse_timestamp(
+        "14.11.2023 22:13:20", "custom", "%d.%m.%Y %H:%M:%S"
+    ) == (1700000000.0)
+    assert check_timestamps._parse_timestamp(
+        "11/14/2023 10:13 PM", "custom", "%m/%d/%Y %I:%M %p"
+    ) == (1699999980.0)
     # Without %z the time is UTC; with it, the offset decides.
-    assert check._parse_timestamp(
+    assert check_timestamps._parse_timestamp(
         "14/Nov/2023:23:13:20 +0100", "custom", "%d/%b/%Y:%H:%M:%S %z"
     ) == (1700000000.0)
     # A JSON number is read as its digits, for patterns like '%Y%m%d'.
-    assert check._parse_timestamp(20231114, "custom", "%Y%m%d") == 1699920000.0
+    assert check_timestamps._parse_timestamp(20231114, "custom", "%Y%m%d") == 1699920000.0
     # Not matching, no pattern, or a pattern strptime refuses: not a timestamp,
     # and never an exception.
-    assert check._parse_timestamp("2023-11-14", "custom", "%d.%m.%Y") is None
-    assert check._parse_timestamp("14.11.2023", "custom") is None
-    assert check._parse_timestamp("14.11.2023", "custom", "%Q") is None
-    assert check._parse_timestamp(None, "custom", "%Y") is None
-    assert check._parse_timestamp(True, "custom", "%Y") is None
+    assert check_timestamps._parse_timestamp("2023-11-14", "custom", "%d.%m.%Y") is None
+    assert check_timestamps._parse_timestamp("14.11.2023", "custom") is None
+    assert check_timestamps._parse_timestamp("14.11.2023", "custom", "%Q") is None
+    assert check_timestamps._parse_timestamp(None, "custom", "%Y") is None
+    assert check_timestamps._parse_timestamp(True, "custom", "%Y") is None
 
 
 def test_timestamp_age_with_a_custom_pattern(check, monkeypatch):
@@ -1110,11 +1137,11 @@ def test_timestamp_age_with_a_custom_pattern(check, monkeypatch):
     assert metric.value == 3600.0
 
 
-def test_parse_timestamp_keeps_epoch_zero(check):
+def test_parse_timestamp_keeps_epoch_zero():
     """1970-01-01 is a real timestamp, not a parse failure: the ISO result must
     not be discarded as falsy before the HTTP-date fallback is tried."""
-    assert check._parse_timestamp("1970-01-01T00:00:00Z", "auto") == 0.0
-    assert check._parse_timestamp(0, "auto") == 0.0
+    assert check_timestamps._parse_timestamp("1970-01-01T00:00:00Z", "auto") == 0.0
+    assert check_timestamps._parse_timestamp(0, "auto") == 0.0
 
 
 def test_timestamp_age_metric_and_summary(check, monkeypatch):
@@ -1416,8 +1443,8 @@ def test_rate_summary_is_not_a_full_float_repr(check, monkeypatch):
     assert result.summary == "Rate: 20/s"
     # A rate that is not round is cut to a few significant digits (the raw float
     # would read '19.999451493365736'), and a tiny rate keeps enough of them.
-    assert check._fmt_rate(19.999451493365736) == "19.9995"
-    assert check._fmt_rate(0.000123456789) == "0.000123457"
+    assert check_units._fmt_rate(19.999451493365736) == "19.9995"
+    assert check_units._fmt_rate(0.000123456789) == "0.000123457"
 
 
 def test_a_piggybacked_section_parses_as_an_ordinary_one(agent, check, monkeypatch, capsys):
@@ -1516,11 +1543,11 @@ def test_expired_certificate_renders_a_negative_number_of_days(check, monkeypatc
     assert "Certificate expires in: -3 days" in _details(results)
 
 
-def test_render_days_keeps_one_decimal_for_a_partial_day(check):
+def test_render_days_keeps_one_decimal_for_a_partial_day():
     # The last day before expiry must not read as '0 days'.
-    assert check._render_days(42.0) == "42 days"
-    assert check._render_days(0.4) == "0.4 days"
-    assert check._render_days(-3.0) == "-3 days"
+    assert check_units._render_days(42.0) == "42 days"
+    assert check_units._render_days(0.4) == "0.4 days"
+    assert check_units._render_days(-3.0) == "-3 days"
 
 
 def _cache_endpoint(**kw):
@@ -1639,7 +1666,7 @@ def test_summary_template_applies_to_a_missing_value(check):
 def test_summary_template_is_forced_onto_one_line(check):
     # A summary carrying a newline would split into summary + details and break
     # the service output; an API returning a stack trace must not do that.
-    entry = check.Item(
+    entry = check_section.Item(
         found=True,
         value="x",
         error=None,
@@ -1659,7 +1686,7 @@ def test_summary_template_is_forced_onto_one_line(check):
 
 
 def test_summary_template_is_truncated(check):
-    entry = check.Item(
+    entry = check_section.Item(
         found=True,
         value="x",
         error=None,
@@ -1914,11 +1941,11 @@ def test_a_section_without_inventory_config_writes_nothing(check):
     assert list(check.inventory_json_api(section)) == []
 
 
-def test_inventory_node_segments_are_stripped(check):
+def test_inventory_node_segments_are_stripped():
     # The ruleset validator strips each segment before checking, so
     # 'software . applications' passes Setup - it must not then land on a node
     # distinct from 'software.applications', invisible in the standard views.
-    target = check._inventory_target(
+    target = check_section._inventory_target(
         {"node": "software . applications . json_api", "key": "version"}
     )
     assert target.path == ("software", "applications", "json_api")
@@ -2002,11 +2029,11 @@ def test_a_section_from_an_older_agent_reports_no_raw_response(check):
     assert endpoint.body_truncated is False
 
 
-def test_reported_headers_are_only_read_from_a_map(check):
-    assert check._response_headers(None) is None
-    assert check._response_headers("Content-Type: text/plain") is None
-    assert check._response_headers({}) == {}
-    assert check._response_headers({"X-Req": 42}) == {"X-Req": "42"}
+def test_reported_headers_are_only_read_from_a_map():
+    assert check_section._response_headers(None) is None
+    assert check_section._response_headers("Content-Type: text/plain") is None
+    assert check_section._response_headers({}) == {}
+    assert check_section._response_headers({"X-Req": 42}) == {"X-Req": "42"}
 
 
 def test_endpoint_details_do_not_claim_a_size_they_never_measured(check):
