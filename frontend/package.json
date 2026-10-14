@@ -10,19 +10,26 @@
     "dev": "vite",
     "test": "vitest run",
     "typecheck": "tsc -p tsconfig.check.json",
-    "lint:style": "stylelint \"src/**/*.{vue,css}\""
+    "lint:style": "stylelint \"src/**/*.{vue,css}\"",
+    "lint": "eslint src"
   },
   "dependencies": {
     "vue": "^3.5.43"
   },
   "devDependencies": {
+    "@eslint/js": "^9.39.5",
     "@types/node": "^22.20.1",
     "@vitejs/plugin-vue": "^5.2.1",
+    "@vue/eslint-config-prettier": "^10.2.0",
+    "@vue/eslint-config-typescript": "^14.9.0",
+    "eslint": "^9.39.5",
+    "eslint-plugin-vue": "^10.11.1",
     "postcss-html": "^1.8.0",
     "sass-embedded": "^1.100.0",
     "stylelint": "^17.8.0",
     "stylelint-config-standard": "^40.0.0",
     "typescript": "^5.7.2",
+    "typescript-eslint": "^8.71.2",
     "vite": "^6.0.7",
     "vitest": "^5.0.1",
     "vue-tsc": "^2.2.0"

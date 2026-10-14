@@ -155,6 +155,8 @@ jobs:
       - run: npm ci
       - name: Type check (the modules that need no cmk bridge)
         run: npm run typecheck
+      - name: Lint (Checkmk's ESLint rules, see frontend/eslint.config.mjs)
+        run: npm run lint
       - name: Unit tests
         run: npm test
 
