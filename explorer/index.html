@@ -874,7 +874,7 @@ function renderFields() {
 // numbers. Anything unparseable is dropped rather than written into the rule -
 // the ruleset would reject it, and a range is presentation only anyway.
 // What Checkmk accepts as a metric name, and what the ruleset reserves. Both
-// mirror cmk_addons/plugins/json_api/rulesets/special_agent.py — this Explorer
+// mirror cmk_addons/plugins/json_api/forms/metrics.py — this Explorer
 // is standalone and dependency-free, so it cannot import them. Its whole job is
 // to hand you a rule you can paste, and a rule Setup refuses is not that.
 const METRIC_NAME_RE = /^[a-zA-Z0-9][a-zA-Z0-9_]*$/;

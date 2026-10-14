@@ -108,6 +108,9 @@ time.
 cmk_addons/plugins/json_api/
   server_side_calls/   rule -> agent command line
   rulesets/            the Setup form
+  forms/               the special-agent rule's sections (endpoint, extraction,
+                       pagination, labels, ...), kept out of rulesets/ so the
+                       plugin loader does not import them as rules
   special_agent/       the special agent: agent_json_api.py (entry point) on top of
                        paths, transport, cache, oauth2, pagination, fetch, extract
   libexec/             its entry point, which Checkmk executes

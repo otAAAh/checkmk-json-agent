@@ -12,14 +12,29 @@ package they guard can be imported.
 import ast
 from pathlib import Path
 
-RULESET = (
-    Path(__file__).resolve().parent.parent
-    / "cmk_addons"
-    / "plugins"
-    / "json_api"
-    / "rulesets"
-    / "special_agent.py"
-)
+_FAMILY = Path(__file__).resolve().parent.parent / "cmk_addons" / "plugins" / "json_api"
+RULESET = _FAMILY / "rulesets" / "special_agent.py"
+# The rule's sections are built in forms/ (one module per section), so a guard
+# looking for a builder or a constant has to search those modules as well.
+RULESET_FILES = (RULESET, *sorted((_FAMILY / "forms").glob("*.py")))
+
+
+def ruleset_source() -> str:
+    """The text of the rule and of every module its sections are built in."""
+    return "\n".join(path.read_text() for path in RULESET_FILES)
+
+
+def ruleset_definition(name: str) -> ast.stmt:
+    """The module-level ``def name`` or ``name = ...`` of the rule, wherever it lives."""
+    for path in RULESET_FILES:
+        for node in ast.parse(path.read_text()).body:
+            if isinstance(node, ast.FunctionDef) and node.name == name:
+                return node
+            if isinstance(node, ast.Assign) and any(
+                isinstance(target, ast.Name) and target.id == name for target in node.targets
+            ):
+                return node
+    raise AssertionError(f"the ruleset no longer defines {name}")
 
 
 def dictionary_elements(func_name: str) -> dict[str, ast.expr]:
@@ -29,10 +44,8 @@ def dictionary_elements(func_name: str) -> dict[str, ast.expr]:
     ``_parameter_form``; ``ast.walk`` reaches the outer Dictionary first, which
     is the form the builder is named for.
     """
-    tree = ast.parse(RULESET.read_text())
-    func = next(
-        node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == func_name
-    )
+    func = ruleset_definition(func_name)
+    assert isinstance(func, ast.FunctionDef), func_name
     elements = next(
         keyword.value
         for call in ast.walk(func)

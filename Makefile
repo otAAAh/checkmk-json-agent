@@ -53,6 +53,8 @@ mkp:
 
 # Regenerate the translation template from the localizable Setup/graphing strings.
 # The .po files are then updated with `msgmerge`; see README (Translations).
+# The special-agent rule's sections live in forms/ and are globbed, so a section
+# module added there cannot ship with its strings missing from the template.
 pot:
 	$(XGETTEXT) -L Python --from-code=UTF-8 \
 		-k -kTitle:1 -kHelp:1 -kLabel:1 -kMessage:1 \
@@ -60,6 +62,7 @@ pot:
 		--msgid-bugs-address="https://github.com/otAAAh/checkmk-json-agent/issues" \
 		-o locales/json_api.pot \
 		cmk_addons/plugins/json_api/lib.py \
+		$(sort $(wildcard cmk_addons/plugins/json_api/forms/*.py)) \
 		cmk_addons/plugins/json_api/rulesets/special_agent.py \
 		cmk_addons/plugins/json_api/rulesets/check_parameters.py \
 		cmk_addons/plugins/json_api/graphing/json_api.py
