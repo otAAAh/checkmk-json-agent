@@ -44,8 +44,6 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
 
-from cmk.utils import password_store as _legacy_pwstore
-
 from .extract import (
     _context_spec,
     _extract,
@@ -59,13 +57,24 @@ from .fetch import _fetch
 from .transport import _debug
 
 try:
-    # Checkmk 2.5+: public convenience API for secret options.
-    from cmk.password_store.v1_unstable import parser_add_secret_option, resolve_secret_option
+    # Checkmk 3.0+: the public password store API, declared stable.
+    from cmk.password_store.v1 import parser_add_secret_option, resolve_secret_option
 
     _HAVE_PWSTORE_V1 = True
 except ImportError:
-    # Checkmk 2.4: fall back to the internal password store (same on-disk format).
-    _HAVE_PWSTORE_V1 = False
+    try:
+        # Checkmk 2.5: the same API before it was declared stable (an alias of
+        # v1 in 3.0, removed in 3.1).
+        from cmk.password_store.v1_unstable import (
+            parser_add_secret_option,
+            resolve_secret_option,
+        )
+
+        _HAVE_PWSTORE_V1 = True
+    except ImportError:
+        # Checkmk 2.4: no public API yet; _reveal_secret falls back to the
+        # internal password store (same on-disk format).
+        _HAVE_PWSTORE_V1 = False
 
 
 def _add_secret_option(
@@ -86,8 +95,15 @@ def _reveal_secret(args: argparse.Namespace, name: str) -> str:
     """Resolve a secret from the parsed args, across Checkmk 2.4 and 2.5+."""
     if _HAVE_PWSTORE_V1:
         return resolve_secret_option(args, name).reveal()
-    secret_id, store_file = getattr(args, f"{name}_id").split(":", 1)
-    return _legacy_pwstore.lookup(Path(store_file), secret_id)
+    # Imported only here: an internal module, so a Checkmk release that moves it
+    # must not break the import of the agent on the versions that never need it.
+    from cmk.utils import password_store
+
+    reference = getattr(args, f"{name}_id", None)
+    if not reference:
+        raise ValueError(f"no --{name}-id given")
+    secret_id, store_file = reference.split(":", 1)
+    return password_store.lookup(Path(store_file), secret_id)
 
 
 def parse_arguments(argv: Sequence[str]) -> argparse.Namespace:

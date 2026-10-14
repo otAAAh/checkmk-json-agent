@@ -7,6 +7,7 @@ import json
 import os
 import tempfile
 import time
+from contextlib import suppress
 from pathlib import Path
 
 from .transport import _effective_body
@@ -42,10 +43,29 @@ def _cache_dir(name: str = _CACHE_DIR_NAME) -> Path | None:
     elif omd_root := os.environ.get("OMD_ROOT"):
         directory = Path(omd_root) / "tmp" / name
     try:
-        directory.mkdir(parents=True, exist_ok=True)
+        directory.mkdir(mode=0o700, parents=True, exist_ok=True)
     except OSError:
         return None
     return directory
+
+
+def _write_private(path: Path, text: str) -> None:
+    """Replace ``path`` with ``text`` atomically, readable by its owner only.
+
+    The temporary file comes from ``mkstemp``: created 0600, so the content is
+    never readable by anyone else, and uniquely named, so endpoints written by
+    the agent's threads at the same time (one process, one pid) never share one.
+    It is removed again if the write fails. Raises ``OSError``.
+    """
+    handle, temporary = tempfile.mkstemp(dir=path.parent, prefix=f".{path.stem}.", suffix=".tmp")
+    try:
+        with os.fdopen(handle, "w", encoding="utf-8") as stream:
+            stream.write(text)
+        os.replace(temporary, path)
+    except BaseException:
+        with suppress(OSError):
+            os.unlink(temporary)
+        raise
 
 
 def _cache_key(endpoint: dict, secret: str | None = None) -> str:
@@ -161,11 +181,8 @@ def _cache_write(endpoint: dict, body: bytes, meta: dict, secret: str | None = N
     }
     try:
         # Write-then-rename so a concurrent read never sees a half-written file,
-        # and 0600 because a response body can hold anything the API returns.
-        temporary = path.with_suffix(f".{os.getpid()}.tmp")
-        temporary.write_text(json.dumps(entry), encoding="utf-8")
-        temporary.chmod(0o600)
-        temporary.replace(path)
+        # and private because a response body can hold anything the API returns.
+        _write_private(path, json.dumps(entry))
         _prune_cache(directory)
     except OSError:
         return
