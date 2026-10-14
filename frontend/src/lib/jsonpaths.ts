@@ -25,12 +25,12 @@ export interface TreeNode {
 // reads it as one segment; pick the quote style the key doesn't contain.
 export function segFor(key: string): string {
   if (!/[.[\]]/.test(key) && key !== '') {
-    return '.' + key
+    return `.${key}`
   }
   if (!key.includes("'")) {
-    return "['" + key + "']"
+    return `['${key}']`
   }
-  return '["' + key + '"]'
+  return `["${key}"]`
 }
 
 export function joinKey(parent: string, key: string): string {
@@ -113,7 +113,7 @@ function objectMapNode(key: string, obj: { [k: string]: Json }, path: string): T
   if (!keys.length || !keys.every((k) => isRecord(obj[k]!))) {
     return null
   }
-  const wpath = path + '[*]'
+  const wpath = `${path}[*]`
   const first = obj[keys[0]!] as { [k: string]: Json }
   return {
     key: `${key}[*]`,
@@ -129,7 +129,7 @@ function objectMapNode(key: string, obj: { [k: string]: Json }, path: string): T
 
 export function buildNode(key: string, value: Json, path: string): TreeNode {
   if (Array.isArray(value)) {
-    const wpath = path + '[*]'
+    const wpath = `${path}[*]`
     const first = value[0]
     const children =
       value.length === 0

@@ -14,11 +14,13 @@
     "skipLibCheck": true,
     "types": ["vite/client", "node"],
     "baseUrl": ".",
+    // For the editor and vue-tsc only (the build resolves `@/` through the
+    // aliases in vite.config.ts). `.cmk` is a gitignored link to your Checkmk
+    // checkout: `ln -s "$CMK_REPO" frontend/.cmk`. Without it `@/` imports stay
+    // unresolved, which the CI jobs that use this file do not need.
     "paths": {
-      "@/*": ["/home/benjaminknapp/git/checkmk/packages/cmk-frontend-vue/src/*"],
-      "cmk-shared-typing/*": [
-        "/home/benjaminknapp/git/checkmk/packages/cmk-frontend-vue/node_modules/cmk-shared-typing/*"
-      ]
+      "@/*": ["./.cmk/packages/cmk-frontend-vue/src/*"],
+      "cmk-shared-typing/*": ["./.cmk/packages/cmk-frontend-vue/node_modules/cmk-shared-typing/*"]
     }
   },
   "include": ["src/**/*.ts", "src/**/*.vue", "vite.config.ts"]

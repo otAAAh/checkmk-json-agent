@@ -41,8 +41,8 @@ const recap = computed(() => {
     <template #content>
       <FormSpecEdit
         v-if="placementSpec"
-        :spec="placementSpec.spec"
         v-model:data="placementData"
+        :spec="placementSpec.spec"
       />
       <p v-else class="je-step-host__unavailable">
         {{ _t('Conditions form unavailable on this site.') }}

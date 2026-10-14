@@ -51,9 +51,9 @@ const recap = computed(() => {
     <template #content>
       <FormSpecEdit
         v-if="connectionSpec"
+        v-model:data="state.connections"
         :spec="connectionSpec.spec"
         :validation="connectionValidation"
-        v-model:data="state.connections"
       />
       <p v-else class="je-step-connection__unavailable">
         {{ _t('Connection form unavailable on this site.') }}

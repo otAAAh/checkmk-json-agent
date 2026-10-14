@@ -110,8 +110,8 @@ const recap = computed(() => {
                 <CmkCollapsible :open="isOpen(servicesOpen, ei)">
                   <CmkIndent v-if="extractionsSpec">
                     <FormSpecEdit
-                      :spec="extractionsSpec.spec"
                       v-model:data="state.services[ei]!.extractions"
+                      :spec="extractionsSpec.spec"
                     />
                   </CmkIndent>
                 </CmkCollapsible>
@@ -123,8 +123,8 @@ const recap = computed(() => {
                 <CmkCollapsible :open="isOpen(hostLabelsOpen, ei)">
                   <CmkIndent v-if="hostLabelsSpec">
                     <FormSpecEdit
-                      :spec="hostLabelsSpec.spec"
                       v-model:data="state.services[ei]!.hostLabels"
+                      :spec="hostLabelsSpec.spec"
                     />
                   </CmkIndent>
                 </CmkCollapsible>
