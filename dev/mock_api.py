@@ -570,6 +570,7 @@ def tls_server(host: str, port: int, files: dict[str, Path]) -> ThreadingHTTPSer
     context.load_cert_chain(files["server.pem"], files["server.key"])
     context.load_verify_locations(files["ca.pem"])
     context.verify_mode = ssl.CERT_OPTIONAL
+    context.minimum_version = ssl.TLSVersion.TLSv1_2
     server = ThreadingHTTPServer((host, port), Handler)
     # The handshake runs on the first read, in the request's own thread, so one
     # stalled client cannot block the accept loop.
@@ -582,8 +583,11 @@ def tls_server(host: str, port: int, files: dict[str, Path]) -> ThreadingHTTPSer
 # --- proxy --------------------------------------------------------------------
 
 # The proxy only forwards to these hosts: it is for testing the agent's proxy
-# setting against this mock, never a way out of the machine.
+# setting against this mock, never a way out of the machine. Both are this
+# machine, so it always connects to _PROXY_UPSTREAM: once the target is
+# accepted, nothing from the request decides where the connection goes.
 _PROXY_TARGETS = {"localhost", "127.0.0.1"}
+_PROXY_UPSTREAM = "127.0.0.1"
 _HOP_BY_HOP = {
     "connection", "keep-alive", "proxy-authenticate", "proxy-authorization",
     "te", "trailers", "transfer-encoding", "upgrade", "proxy-connection",
@@ -615,7 +619,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
         body = self.rfile.read(length) if length else None
         headers = {k: v for k, v in self.headers.items() if k.lower() not in _HOP_BY_HOP}
         headers["Via"] = "1.1 json_api-mock-proxy"
-        connection = http.client.HTTPConnection(target.hostname, target.port or 80, timeout=30)
+        connection = http.client.HTTPConnection(_PROXY_UPSTREAM, target.port or 80, timeout=30)
         try:
             path = target.path + (f"?{target.query}" if target.query else "")
             connection.request(self.command, path or "/", body=body, headers=headers)
@@ -644,7 +648,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
             self._refuse(403, "the mock proxy only tunnels to localhost and 127.0.0.1")
             return
         try:
-            upstream = socket.create_connection((host, int(port)), timeout=30)
+            upstream = socket.create_connection((_PROXY_UPSTREAM, int(port)), timeout=30)
         except (OSError, ValueError) as exc:
             self._refuse(502, f"upstream failed: {exc}")
             return
