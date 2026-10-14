@@ -12,8 +12,8 @@ visitor (server-side validation included) and return the Python-literal
 
 Input  (POST var ``payload``): {"endpoints": [{"connection": <FormEdit value>,
         "extractions": [{"service","path","luW","luC"}]}]}
-Output: {"ok": true, "value_raw": "<python literal>"}  or a 400 with the
-        FormSpec validation message.
+Output: {"ok": true, "value_raw": "<python literal>"}, or the FormSpec
+        validation messages as an error (``result_code`` 1).
 
 Internal/unversioned form_specs APIs — lives only in the json_api_explorer pkg.
 """
@@ -23,7 +23,9 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from cmk.gui.exceptions import MKUserError
 from cmk.gui.http import request
+from cmk.gui.i18n import _
 from cmk.gui.pages import AjaxPage, PageContext, PageResult
 
 from .guards import check_csrf
@@ -31,8 +33,8 @@ from .guards import check_csrf
 
 class JsonExplorerCreatePage(AjaxPage):
     def page(self, ctx: PageContext) -> PageResult:
-        from cmk.gui.form_specs import RawFrontendData
-        from cmk.gui.form_specs._utils import (
+        from cmk.gui.form_specs import (
+            RawFrontendData,
             parse_and_validate_frontend_data,
             validate_value_from_frontend,
         )
@@ -46,13 +48,24 @@ class JsonExplorerCreatePage(AjaxPage):
         )
 
         user.need_permission("wato.use")
+        user.need_permission("wato.rulesets")
         check_csrf(ctx)
 
         connection_spec = connection_form_spec()
         extractions_spec = extractions_form_spec()
         host_labels_spec = host_labels_form_spec()
         placement_spec = placement_form_spec()
-        payload = json.loads(request.get_str_input_mandatory("payload"))
+        try:
+            payload = json.loads(request.get_str_input_mandatory("payload"))
+        except ValueError as exc:
+            raise MKUserError("payload", _("The wizard state is not valid JSON: %s") % exc) from exc
+        if not isinstance(payload, dict):
+            raise MKUserError("payload", _("The wizard state is not a dictionary"))
+        entries = payload.get("endpoints", [])
+        if not isinstance(entries, list) or not all(
+            isinstance(entry, dict) and "connection" in entry for entry in entries
+        ):
+            raise MKUserError("payload", _("Every endpoint needs a connection"))
 
         # Validate everything FIRST and collect messages WITH their field
         # locations. parse_and_validate_frontend_data raises a fieldless
@@ -65,20 +78,20 @@ class JsonExplorerCreatePage(AjaxPage):
                 loc = " / ".join(str(part) for part in msg.location) or where
                 problems.append(f"{where} — {loc}: {msg.message}")
 
-        for i, entry in enumerate(payload.get("endpoints", []), start=1):
-            _check(connection_spec, entry["connection"], f"Endpoint {i}")
-            _check(extractions_spec, entry.get("extractions", []), f"Endpoint {i} services")
-            _check(host_labels_spec, entry.get("host_labels", []), f"Endpoint {i} host labels")
+        for i, entry in enumerate(entries, start=1):
+            _check(connection_spec, entry["connection"], _("Endpoint %d") % i)
+            _check(extractions_spec, entry.get("extractions", []), _("Endpoint %d services") % i)
+            _check(host_labels_spec, entry.get("host_labels", []), _("Endpoint %d host labels") % i)
         placement_raw = payload.get("placement")
         if placement_raw is not None:
-            _check(placement_spec, placement_raw, "Conditions")
+            _check(placement_spec, placement_raw, _("Conditions"))
 
         if problems:
-            return {"ok": False, "error": "; ".join(problems)}
+            raise MKUserError(None, "; ".join(problems))
 
         # Clean — convert via the visitors (no validation error can occur now).
         endpoints: list[dict[str, Any]] = []
-        for entry in payload.get("endpoints", []):
+        for entry in entries:
             connection = parse_and_validate_frontend_data(
                 connection_spec, RawFrontendData(entry["connection"])
             )

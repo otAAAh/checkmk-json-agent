@@ -258,7 +258,7 @@ def _serialize(spec: object, field_id: str) -> dict[str, Any] | None:
     serializer's ``field_size`` tokens match the components' ``inputSizes`` keys.
     """
     try:
-        from cmk.gui.form_specs._utils import serialize_data_for_frontend
+        from cmk.gui.form_specs import serialize_data_for_frontend
 
         config = serialize_data_for_frontend(spec, field_id, do_validate=False)
         return dataclasses.asdict(config)
@@ -301,7 +301,9 @@ class ModeJsonExplorer(WatoMode):
 
     @staticmethod
     def static_permissions() -> list[str]:
-        return []
+        # The wizard ends in a new rule, and its preview may use the password
+        # store and reach any URL - so it is for users who may edit rules.
+        return ["rulesets"]
 
     def title(self) -> str:
         return _("Generic JSON API")

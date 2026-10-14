@@ -33,6 +33,8 @@ from cmk.rulesets.v1.form_specs import (
     LevelDirection,
     ServiceState,
     SimpleLevels,
+    TimeMagnitude,
+    TimeSpan,
 )
 from cmk.rulesets.v1.rule_specs import CheckParameters, HostAndItemCondition, Topic
 
@@ -66,12 +68,14 @@ def _endpoint_parameter_form() -> Dictionary:
                 parameter_form=SimpleLevels(
                     title=Title("Upper levels for the response time"),
                     help_text=Help(
-                        "How long the request to this endpoint may take, in seconds. "
+                        "How long the request to this endpoint may take. "
                         "Measured from sending the request to having read the whole "
                         "response body. Without levels the response time is only "
                         "recorded as a metric."
                     ),
-                    form_spec_template=Float(),
+                    form_spec_template=TimeSpan(
+                        displayed_magnitudes=[TimeMagnitude.SECOND, TimeMagnitude.MILLISECOND]
+                    ),
                     level_direction=LevelDirection.UPPER,
                     prefill_fixed_levels=InputHint((2.0, 5.0)),
                 ),

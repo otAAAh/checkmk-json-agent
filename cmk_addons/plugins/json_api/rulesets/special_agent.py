@@ -34,6 +34,8 @@ from cmk.rulesets.v1.form_specs import (
     SingleChoice,
     SingleChoiceElement,
     String,
+    TimeMagnitude,
+    TimeSpan,
     migrate_to_password,
     migrate_to_proxy,
     validators,
@@ -803,6 +805,7 @@ def _inventory() -> Dictionary:
             "keep_service": DictElement(
                 required=True,
                 parameter_form=BooleanChoice(
+                    title=Title("Service"),
                     label=Label("Also create a service for this field"),
                     help_text=Help(
                         "Off by default: an inventory field creates NO service, "
@@ -882,6 +885,7 @@ def _authentication() -> CascadingSingleChoice:
                             parameter_form=String(
                                 title=Title("Token URL"),
                                 field_size=FieldSize.LARGE,
+                                macro_support=True,
                                 help_text=Help(
                                     "The identity provider's token endpoint, e.g. "
                                     "'https://login.example.com/oauth2/v2.0/token'. "
@@ -1683,6 +1687,7 @@ def endpoint_form() -> Dictionary:
                 required=False,
                 parameter_form=String(
                     title=Title("Endpoint name"),
+                    macro_support=True,
                     help_text=Help(
                         "Optional short name for this endpoint, e.g. 'frontend'. It "
                         "names the endpoint's own service - 'JSON API <name>', which "
@@ -1697,6 +1702,7 @@ def endpoint_form() -> Dictionary:
             "service_prefix": DictElement(
                 required=True,
                 parameter_form=BooleanChoice(
+                    title=Title("Field service names"),
                     label=Label("Prefix the field service names with the endpoint name"),
                     help_text=Help(
                         "Off by default. Two endpoints extracting the same fields "
@@ -1723,6 +1729,7 @@ def endpoint_form() -> Dictionary:
                 parameter_form=String(
                     title=Title("URL"),
                     field_size=FieldSize.LARGE,
+                    macro_support=True,
                     help_text=Help(
                         "Full URL of the JSON endpoint, including scheme, "
                         "e.g. 'https://app.example.com/actuator/health'."
@@ -1746,6 +1753,7 @@ def endpoint_form() -> Dictionary:
                 parameter_form=String(
                     title=Title("Request body (for POST)"),
                     field_size=FieldSize.LARGE,
+                    macro_support=True,
                 ),
             ),
             "headers": DictElement(
@@ -1768,6 +1776,7 @@ def endpoint_form() -> Dictionary:
                                 parameter_form=String(
                                     title=Title("Header value"),
                                     field_size=FieldSize.LARGE,
+                                    macro_support=True,
                                 ),
                             ),
                         }
@@ -1781,6 +1790,7 @@ def endpoint_form() -> Dictionary:
             "verify_cert": DictElement(
                 required=True,
                 parameter_form=BooleanChoice(
+                    title=Title("TLS certificate verification"),
                     label=Label("Verify the TLS certificate"),
                     help_text=Help("Disabling certificate verification is insecure."),
                     prefill=DefaultValue(True),
@@ -1841,6 +1851,7 @@ def endpoint_form() -> Dictionary:
             "follow_redirects": DictElement(
                 required=True,
                 parameter_form=BooleanChoice(
+                    title=Title("HTTP redirects"),
                     label=Label("Follow HTTP redirects"),
                     help_text=Help(
                         "On by default. Disable in locked-down environments to "
@@ -1853,8 +1864,9 @@ def endpoint_form() -> Dictionary:
             ),
             "timeout": DictElement(
                 required=False,
-                parameter_form=Float(
-                    title=Title("Request timeout (seconds)"),
+                parameter_form=TimeSpan(
+                    title=Title("Request timeout"),
+                    displayed_magnitudes=[TimeMagnitude.SECOND, TimeMagnitude.MILLISECOND],
                     help_text=Help("Per-request timeout. Defaults to 30 seconds."),
                     prefill=DefaultValue(30.0),
                     custom_validate=(validators.NumberInRange(min_value=0.1),),
@@ -1862,8 +1874,13 @@ def endpoint_form() -> Dictionary:
             ),
             "cache_ttl": DictElement(
                 required=False,
-                parameter_form=Float(
-                    title=Title("Re-read at most every (seconds)"),
+                parameter_form=TimeSpan(
+                    title=Title("Re-read at most every"),
+                    displayed_magnitudes=[
+                        TimeMagnitude.HOUR,
+                        TimeMagnitude.MINUTE,
+                        TimeMagnitude.SECOND,
+                    ],
                     help_text=Help(
                         "Reuse the last response for this endpoint instead of "
                         "requesting it again, as long as it is younger than this. "
@@ -1916,8 +1933,12 @@ def endpoint_form() -> Dictionary:
                         ),
                         "backoff": DictElement(
                             required=True,
-                            parameter_form=Float(
-                                title=Title("Wait before retrying (seconds)"),
+                            parameter_form=TimeSpan(
+                                title=Title("Wait before retrying"),
+                                displayed_magnitudes=[
+                                    TimeMagnitude.SECOND,
+                                    TimeMagnitude.MILLISECOND,
+                                ],
                                 help_text=Help(
                                     "Waiting time before the first retry, doubled "
                                     "for each further one. The total waiting time "
@@ -1995,6 +2016,7 @@ def endpoint_form() -> Dictionary:
                         "headers": DictElement(
                             required=True,
                             parameter_form=BooleanChoice(
+                                title=Title("Response headers"),
                                 label=Label("Report the response headers as well"),
                                 help_text=Help(
                                     "On by default. The headers are what a rate "
