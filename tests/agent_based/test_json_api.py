@@ -2620,3 +2620,45 @@ def test_a_section_from_an_older_agent_reports_one_page(check):
     section = _section(check, [], endpoints=[{"name": "api", "url": "https://x/h", "ok": True}])
     endpoint = section.endpoints["api"]
     assert (endpoint.pages, endpoint.elements, endpoint.pagination_stopped) == (1, None, None)
+
+
+# --- field services never share a name with an endpoint service --------------
+
+
+def test_a_field_named_like_an_endpoint_service_is_moved_aside(check):
+    # 'JSON API frontend' is the endpoint's own service; a field service named
+    # 'API frontend' would render to the same name and Checkmk drops one.
+    section = _section(
+        check, [_entry("API frontend", value=1)], endpoints=[_endpoint_record(name="frontend")]
+    )
+    assert set(section.items) == {"API frontend (2)"}
+    assert set(section.endpoints) == {"frontend"}
+
+
+def test_a_field_named_api_on_a_prefixing_endpoint_is_moved_aside(check):
+    # With prefixing, the field 'API' becomes 'JSON app1 API' - the endpoint's
+    # own service name.
+    section = _section(
+        check,
+        [_entry("app1 API", value=1)],
+        endpoints=[_endpoint_record(name="app1", prefixed=True)],
+    )
+    assert set(section.items) == {"app1 API (2)"}
+    assert set(section.endpoints) == {"app1 API"}
+
+
+def test_every_line_of_a_shared_service_moves_together(check):
+    section = _section(
+        check,
+        [_grouped("API frontend", "A", value=1), _grouped("API frontend", "B", value=2)],
+        endpoints=[_endpoint_record(name="frontend")],
+    )
+    assert [len(entries) for entries in section.items.values()] == [2]
+    assert set(section.items) == {"API frontend (2)"}
+
+
+def test_a_field_with_an_unrelated_name_keeps_it(check):
+    section = _section(
+        check, [_entry("frontend", value=1)], endpoints=[_endpoint_record(name="frontend")]
+    )
+    assert set(section.items) == {"frontend"}

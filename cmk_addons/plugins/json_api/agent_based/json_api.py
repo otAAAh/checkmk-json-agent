@@ -162,18 +162,6 @@ def _render_days(days: float) -> str:
     return f"{shown} days"
 
 
-def _render_seconds(seconds: float) -> str:
-    """Render a number of seconds as a duration, including a negative one.
-
-    ``render.timespan`` raises on a negative value, but a negative duration is an
-    ordinary thing to monitor here: the age of a timestamp in the future (a
-    certificate expiry, a scheduled run), or simply a negative number the API
-    reported for a field whose unit is seconds. Both render as a duration with a
-    leading '-' instead of crashing the service.
-    """
-    return render.timespan(seconds) if seconds >= 0 else f"-{render.timespan(-seconds)}"
-
-
 # The unit chosen in the rule also decides how the value is *rendered* in the
 # summary/details (and the levels line), so "1572864" with unit=bytes reads as
 # "1.50 MiB" like the graph does - not just as a bare number. Units without a
@@ -224,7 +212,9 @@ def _render_celsius(number: float) -> str:
 
 _UNIT_RENDER: dict[str, Callable[[float], str]] = {
     "bytes": render.bytes,
-    "seconds": _render_seconds,
+    # time_offset, not timespan: timespan raises on a negative value, and a
+    # negative duration is ordinary here (the age of a timestamp in the future).
+    "seconds": render.time_offset,
     "percent": render.percent,
     "per_second": lambda number: f"{_fmt_rate(number)}/s",
     "bytes_per_second": lambda number: f"{render.bytes(number)}/s",
@@ -233,7 +223,7 @@ _UNIT_RENDER: dict[str, Callable[[float], str]] = {
     "volts": _render_si("V"),
     "amperes": _render_si("A"),
     "watts": _render_si("W"),
-    "hertz": _render_si("Hz"),
+    "hertz": render.frequency,
 }
 
 
@@ -637,10 +627,27 @@ def _endpoint_statuses(raw: object) -> dict[str, EndpointStatus]:
     return statuses
 
 
+def _endpoint_service_names(endpoints: Mapping[str, EndpointStatus]) -> set[str]:
+    """The endpoint services' names, as the item a FIELD service would need to get them.
+
+    Field services are 'JSON <item>'. An endpoint's own service is 'JSON API
+    <item>' - or 'JSON <item>' with an item ending in ' API' when it prefixes -
+    so a field named 'API frontend', or 'API' on a prefixing endpoint, would be
+    rendered into the very same service name. Checkmk then drops one of the two
+    as a duplicate.
+    """
+    return {item if endpoint.prefixed else f"API {item}" for item, endpoint in endpoints.items()}
+
+
 def parse_json_api(string_table: StringTable) -> Section | None:
     if not string_table:
         return None
     payload = json.loads(string_table[0][0])
+    endpoints = _endpoint_statuses(payload.get("endpoints"))
+    # A field whose service name is an endpoint service's name is moved aside the
+    # same way a duplicated field is, so neither service disappears.
+    endpoint_names: dict[str, object] = dict.fromkeys(_endpoint_service_names(endpoints))
+    shared_names: dict[str, str] = {}
     items: dict[str, list[Item]] = {}
     for result in payload["results"]:
         # A field reported into a shared service carries the name of its line;
@@ -653,7 +660,15 @@ def parse_json_api(string_table: StringTable) -> Section | None:
         # duplicate is never quietly merged into a combined service, which is
         # something the rule has to ask for.
         label = _optional_str(result.get("label"))
-        name = result["service"] if label is not None else _unique_name(result["service"], items)
+        service = result["service"]
+        if label is not None:
+            # Every line of a shared service must land in the same (possibly
+            # moved) service, so the name is decided once per service.
+            if service not in shared_names:
+                shared_names[service] = _unique_name(service, endpoint_names)
+            name = shared_names[service]
+        else:
+            name = _unique_name(service, {**endpoint_names, **items})
         entry = Item(
             found=result["found"],
             value=result["value"],
@@ -684,7 +699,7 @@ def parse_json_api(string_table: StringTable) -> Section | None:
         error=payload.get("error"),
         items={name: tuple(entries) for name, entries in items.items()},
         host_labels=_coerce_host_labels(payload.get("host_labels")),
-        endpoints=_endpoint_statuses(payload.get("endpoints")),
+        endpoints=endpoints,
     )
 
 
@@ -1121,7 +1136,7 @@ def _derive(entry: Item) -> tuple[float | None, str, Callable[[float], str] | No
     # rule explicitly chose a unit (e.g. after a transform into hours).
     if isinstance(entry.unit, str):
         return time.time() - stamp, entry.metric_name, entry.render_func, [reading]
-    return time.time() - stamp, _AGE_METRIC, _render_seconds, [reading]
+    return time.time() - stamp, _AGE_METRIC, render.time_offset, [reading]
 
 
 # What the derived number is called in the summary and the levels line.
@@ -1573,7 +1588,7 @@ def check_json_api_endpoint(
     if endpoint.from_cache:
         # Say so in the SUMMARY, not just the details: "HTTP 200" on its own would
         # claim the API answered just now, when nothing was asked.
-        age = f" ({_render_seconds(endpoint.cache_age)} old)" if endpoint.cache_age else ""
+        age = f" ({render.time_offset(endpoint.cache_age)} old)" if endpoint.cache_age else ""
         status = f"{status}, from cache{age}"
     yield Result(
         state=State.OK,

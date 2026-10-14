@@ -1,6 +1,6 @@
 title: Generic JSON API: monitor fields from any HTTP/JSON endpoint
 agents: json_api
-catalog: app
+catalog: app/json_api
 license: GPLv2
 distribution: https://github.com/otAAAh/checkmk-json-agent
 description:
