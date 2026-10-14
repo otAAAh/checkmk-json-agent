@@ -62,7 +62,7 @@ metric_json_api_rate = metrics.Metric(
 
 metric_json_api_count_rate = metrics.Metric(
     name="json_api_count_rate",
-    title=Title("Rate"),
+    title=Title("Count per second"),
     unit=metrics.Unit(metrics.DecimalNotation("/s")),
     color=metrics.Color.CYAN,
 )

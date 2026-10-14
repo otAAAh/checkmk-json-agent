@@ -6,7 +6,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: checkmk-json-agent 0.2.0\n"
 "Report-Msgid-Bugs-To: https://github.com/otAAAh/checkmk-json-agent/issues\n"
-"POT-Creation-Date: 2026-10-14 12:24+0200\n"
+"POT-Creation-Date: 2026-10-14 13:17+0200\n"
 "PO-Revision-Date: 2026-07-03 10:30+0200\n"
 "Last-Translator: Benjamin Knapp\n"
 "Language-Team: German\n"
@@ -2269,9 +2269,12 @@ msgid "Percentage"
 msgstr "Prozentsatz"
 
 #: cmk_addons/plugins/json_api/graphing/json_api.py:58
-#: cmk_addons/plugins/json_api/graphing/json_api.py:65
 msgid "Rate"
 msgstr "Rate"
+
+#: cmk_addons/plugins/json_api/graphing/json_api.py:65
+msgid "Count per second"
+msgstr "Anzahl pro Sekunde"
 
 #: cmk_addons/plugins/json_api/graphing/json_api.py:72
 msgid "Throughput"
