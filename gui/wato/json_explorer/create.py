@@ -21,7 +21,7 @@ Internal/unversioned form_specs APIs — lives only in the json_api_explorer pkg
 from __future__ import annotations
 
 import json
-from typing import Any
+from typing import TYPE_CHECKING
 
 from cmk.gui.exceptions import MKUserError
 from cmk.gui.http import request
@@ -29,6 +29,9 @@ from cmk.gui.i18n import _
 from cmk.gui.pages import AjaxPage, PageContext, PageResult
 
 from .guards import check_csrf
+
+if TYPE_CHECKING:
+    from cmk.rulesets.v1.form_specs import FormSpec
 
 
 class JsonExplorerCreatePage(AjaxPage):
@@ -73,7 +76,7 @@ class JsonExplorerCreatePage(AjaxPage):
         # so instead we gather the messages and report which field is wrong.
         problems: list[str] = []
 
-        def _check(spec: object, value: object, where: str) -> None:
+        def _check[T](spec: FormSpec[T], value: object, where: str) -> None:
             for msg in validate_value_from_frontend(spec, RawFrontendData(value)):
                 loc = " / ".join(str(part) for part in msg.location) or where
                 problems.append(f"{where} — {loc}: {msg.message}")
@@ -90,11 +93,13 @@ class JsonExplorerCreatePage(AjaxPage):
             raise MKUserError(None, "; ".join(problems))
 
         # Clean — convert via the visitors (no validation error can occur now).
-        endpoints: list[dict[str, Any]] = []
+        endpoints: list[dict[str, object]] = []
         for entry in entries:
             connection = parse_and_validate_frontend_data(
                 connection_spec, RawFrontendData(entry["connection"])
             )
+            if not isinstance(connection, dict):  # a Dictionary's visitor yields one
+                raise MKUserError(None, _("The connection is not a dictionary"))
             extractions = parse_and_validate_frontend_data(
                 extractions_spec, RawFrontendData(entry.get("extractions", []))
             )
@@ -103,7 +108,7 @@ class JsonExplorerCreatePage(AjaxPage):
             )
             endpoints.append({**connection, "extractions": extractions, "host_labels": host_labels})
 
-        result: dict[str, Any] = {"ok": True, "value_raw": repr({"endpoints": endpoints})}
+        result: dict[str, object] = {"ok": True, "value_raw": repr({"endpoints": endpoints})}
         if placement_raw is not None:
             # SingleChoice fields (folder/site) are hashed on the wire; the visitor
             # yields the real folder path / site id / host name for the REST API.

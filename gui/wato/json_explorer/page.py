@@ -23,10 +23,11 @@ from __future__ import annotations
 
 import dataclasses
 import json
+from collections.abc import Mapping, Sequence
 from functools import lru_cache
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any
+from typing import TYPE_CHECKING, Protocol, cast
 
 import cmk.utils.paths
 from cmk.gui.breadcrumb import Breadcrumb
@@ -36,6 +37,10 @@ from cmk.gui.i18n import _
 from cmk.gui.page_menu import PageMenu, make_simple_form_page_menu
 from cmk.gui.page_menu_entry import enable_page_menu_entry
 from cmk.gui.watolib.mode import WatoMode
+
+if TYPE_CHECKING:
+    # Types only: at runtime the builders import their FormSpecs on use.
+    from cmk.rulesets.v1.form_specs import Dictionary, FormSpec, List
 
 # Where the `web` part installs the built wizard, and how it is referenced from
 # a page served under check_mk/.
@@ -75,7 +80,19 @@ def _vue_theme_stylesheets() -> list[str]:
     return [f"cmk-frontend-vue/{sheet}" for sheet in main.get("css", [])]
 
 
-def _ruleset() -> Any:
+class _Ruleset(Protocol):
+    """The two builders the wizard takes from the agent package's ruleset."""
+
+    def endpoint_form(self) -> Dictionary: ...
+
+    def validate_unique_endpoints(self, value: object) -> None: ...
+
+
+# An endpoint's ``extractions`` / ``host_labels`` value: a List of Dictionaries.
+type _ListOfDicts = Sequence[Mapping[str, object]]
+
+
+def _ruleset() -> _Ruleset:
     """The agent package's special-agent ruleset, which the wizard's forms reuse.
 
     It ships in the OTHER package, and the two can be updated independently: an
@@ -86,14 +103,18 @@ def _ruleset() -> Any:
     from cmk_addons.plugins.json_api.rulesets import special_agent as ruleset
 
     if not hasattr(ruleset, "endpoint_form"):  # an older agent package
-        return SimpleNamespace(
-            endpoint_form=ruleset._endpoint,
-            validate_unique_endpoints=ruleset._validate_unique_endpoints,
+        # A namespace is not a module, so say which builders it carries.
+        return cast(
+            "_Ruleset",
+            SimpleNamespace(
+                endpoint_form=ruleset._endpoint,
+                validate_unique_endpoints=ruleset._validate_unique_endpoints,
+            ),
         )
     return ruleset
 
 
-def connection_form_spec() -> object:
+def connection_form_spec() -> Dictionary:
     """The ruleset's endpoint Dictionary WITHOUT the extractions / host_labels.
 
     One endpoint's connection (URL, method, TLS/redirect, auth incl. the
@@ -112,7 +133,7 @@ def connection_form_spec() -> object:
     return Dictionary(elements=elements, custom_validate=endpoint.custom_validate)
 
 
-def connection_list_form_spec() -> object:
+def connection_list_form_spec() -> List[Mapping[str, object]]:
     """A ``List`` of connection Dictionaries — the whole endpoints list.
 
     Step 1 renders THIS via a single FormEdit, so add/remove of endpoints is
@@ -133,7 +154,7 @@ def connection_list_form_spec() -> object:
     )
 
 
-def extractions_form_spec() -> object:
+def extractions_form_spec() -> FormSpec[_ListOfDicts]:
     """The ruleset's ``extractions`` element on its own (a ``List`` of the field
     Dictionary). Step 2 renders one of these per endpoint via FormEdit — so unit,
     thresholds, expected-string and label-path are all native FormSpec fields —
@@ -142,7 +163,7 @@ def extractions_form_spec() -> object:
     return _ruleset().endpoint_form().elements["extractions"].parameter_form
 
 
-def host_labels_form_spec() -> object:
+def host_labels_form_spec() -> FormSpec[_ListOfDicts]:
     """The ruleset's endpoint ``host_labels`` element on its own (a ``List``).
 
     Step 2's picker "+ host label" button appends entries into this value; the
@@ -152,7 +173,7 @@ def host_labels_form_spec() -> object:
     return _ruleset().endpoint_form().elements["host_labels"].parameter_form
 
 
-def placement_form_spec() -> object:
+def placement_form_spec() -> Dictionary:
     """Where the rule lands: target folder + the host it binds to.
 
     Not part of the ruleset value (those are rule *metadata*), so it's a small
@@ -249,7 +270,7 @@ def placement_form_spec() -> object:
     )
 
 
-def _serialize(spec: object, field_id: str) -> dict[str, Any] | None:
+def _serialize[T](spec: FormSpec[T], field_id: str) -> dict[str, object] | None:
     """Serialize a FormSpec for the frontend, or None on any failure (form_specs
     APIs are internal/version-drifting — degrade instead of crash).
 
@@ -266,23 +287,19 @@ def _serialize(spec: object, field_id: str) -> dict[str, Any] | None:
         return None
 
 
-def _app_data() -> dict[str, Any]:
+def _app_data() -> dict[str, dict[str, object]]:
     """Serialized FormSpec payloads for every FormEdit-backed wizard step.
 
     Emitted only when serialization succeeds; the frontend degrades per-spec.
     """
-    specs = {
-        "connectionSpec": (connection_list_form_spec(), "je_connections"),
-        "extractionsSpec": (extractions_form_spec(), "je_extractions"),
-        "hostLabelsSpec": (host_labels_form_spec(), "je_host_labels"),
-        "placementSpec": (placement_form_spec(), "je_placement"),
+    # Spelled out rather than looped over: the specs hold different value types.
+    payloads = {
+        "connectionSpec": _serialize(connection_list_form_spec(), "je_connections"),
+        "extractionsSpec": _serialize(extractions_form_spec(), "je_extractions"),
+        "hostLabelsSpec": _serialize(host_labels_form_spec(), "je_host_labels"),
+        "placementSpec": _serialize(placement_form_spec(), "je_placement"),
     }
-    data: dict[str, Any] = {}
-    for key, (spec, field_id) in specs.items():
-        payload = _serialize(spec, field_id)
-        if payload is not None:
-            data[key] = payload
-    return data
+    return {key: payload for key, payload in payloads.items() if payload is not None}
 
 
 class ModeJsonExplorer(WatoMode):
