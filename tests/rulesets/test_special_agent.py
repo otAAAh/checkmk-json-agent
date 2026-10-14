@@ -6,6 +6,8 @@ import pytest
 from cmk.rulesets.v1.form_specs import FieldSize
 from cmk.rulesets.v1.form_specs.validators import ValidationError
 
+from cmk_addons.plugins.json_api.check_lib import section as check_section
+from cmk_addons.plugins.json_api.check_lib import timestamps as check_timestamps
 from cmk_addons.plugins.json_api.special_agent import extract as agent_extract
 
 
@@ -405,7 +407,7 @@ def test_aggregate_offers_every_function_the_agent_implements(ruleset):
         assert value is not None
 
 
-def test_value_as_offers_counter_and_timestamp(ruleset, check):
+def test_value_as_offers_counter_and_timestamp(ruleset):
     choices = {
         element.name
         for element in ruleset._extraction().elements["value_as"].parameter_form.elements
@@ -413,10 +415,10 @@ def test_value_as_offers_counter_and_timestamp(ruleset, check):
     assert choices == {"counter", "timestamp"}
     # Each choice must be one the check knows how to derive.
     for name in choices:
-        assert check._coerce_value_as([name, {}]) is not None
+        assert check_section._coerce_value_as([name, {}]) is not None
 
 
-def test_timestamp_formats_match_the_parser(ruleset, check):
+def test_timestamp_formats_match_the_parser(ruleset):
     timestamp = next(
         element
         for element in ruleset._extraction().elements["value_as"].parameter_form.elements
@@ -428,17 +430,16 @@ def test_timestamp_formats_match_the_parser(ruleset, check):
     }
     assert formats == {"auto", "epoch", "epoch_ms", "iso", "custom"}
     # Each offered format parses its canonical example.
-    assert check._parse_timestamp(1700000000, "epoch")
-    assert check._parse_timestamp(1700000000000, "epoch_ms")
-    assert check._parse_timestamp("2023-11-14T22:13:20Z", "iso")
-    assert check._parse_timestamp("2023-11-14T22:13:20Z", "auto")
-    assert check._parse_timestamp("14.11.2023 22:13:20", "custom", "%d.%m.%Y %H:%M:%S")
+    assert check_timestamps._parse_timestamp(1700000000, "epoch")
+    assert check_timestamps._parse_timestamp(1700000000000, "epoch_ms")
+    assert check_timestamps._parse_timestamp("2023-11-14T22:13:20Z", "iso")
+    assert check_timestamps._parse_timestamp("2023-11-14T22:13:20Z", "auto")
+    assert check_timestamps._parse_timestamp("14.11.2023 22:13:20", "custom", "%d.%m.%Y %H:%M:%S")
     # The pattern travels next to the format, through the check's coercion.
     assert "pattern" in timestamp.parameter_form.elements
-    assert check._coerce_value_as(["timestamp", {"format": "custom", "pattern": "%Y"}]) == (
-        "timestamp",
-        {"format": "custom", "pattern": "%Y"},
-    )
+    assert check_section._coerce_value_as(
+        ["timestamp", {"format": "custom", "pattern": "%Y"}]
+    ) == check_section.ReadAsTimestamp("custom", "%Y")
 
 
 @pytest.mark.parametrize(

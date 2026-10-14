@@ -5,6 +5,8 @@
 import pytest
 from cmk.rulesets.v1.form_specs.validators import ValidationError
 
+from cmk_addons.plugins.json_api.check_lib import units as check_units
+
 
 def _metric_names(graphing):
     return {getattr(graphing, name).name for name in dir(graphing) if name.startswith("metric_")}
@@ -42,35 +44,35 @@ def test_expected_metrics_are_defined(graphing):
     }
 
 
-def test_every_unit_metric_has_a_definition(check, graphing):
+def test_every_unit_metric_has_a_definition(graphing):
     # The check maps units to metric names; each of those must be a real metric.
-    assert set(check._UNIT_METRIC.values()) <= _metric_names(graphing)
+    assert set(check_units._UNIT_METRIC.values()) <= _metric_names(graphing)
 
 
-def test_every_rate_metric_has_a_definition(check, graphing):
+def test_every_rate_metric_has_a_definition(graphing):
     # Same for the rate metrics, and for the age / endpoint metrics the check
     # emits by name.
     names = _metric_names(graphing)
-    assert set(check._UNIT_RATE_METRIC.values()) <= names
-    assert {check._AGE_METRIC, "json_api_response_time", "json_api_response_size"} <= names
+    assert set(check_units._UNIT_RATE_METRIC.values()) <= names
+    assert {check_units._AGE_METRIC, "json_api_response_time", "json_api_response_size"} <= names
 
 
-def test_the_countable_units_are_the_ones_setup_allows_on_a_counter(check, ruleset):
+def test_the_countable_units_are_the_ones_setup_allows_on_a_counter(ruleset):
     # Every unit with a rate metric is a unit of its own, and every unit WITHOUT
     # one is refused on a counter by Setup - otherwise a counter in that unit
     # would silently fall back to the unit-less rate.
-    assert set(check._UNIT_RATE_METRIC) <= set(check._UNIT_METRIC)
-    for unit in set(check._UNIT_METRIC) - {None}:
+    assert set(check_units._UNIT_RATE_METRIC) <= set(check_units._UNIT_METRIC)
+    for unit in set(check_units._UNIT_METRIC) - {None}:
         entry = {"unit": unit, "value_as": ("counter", None)}
-        if unit in check._UNIT_RATE_METRIC:
+        if unit in check_units._UNIT_RATE_METRIC:
             ruleset._validate_extraction(entry)  # must not raise
         else:
             with pytest.raises(ValidationError, match="counter"):
                 ruleset._validate_extraction(entry)
 
 
-def test_the_units_offered_are_the_units_the_check_knows(check, ruleset):
+def test_the_units_offered_are_the_units_the_check_knows(ruleset):
     offered = {
         element.name for element in ruleset._extraction().elements["unit"].parameter_form.elements
     }
-    assert offered == set(check._UNIT_METRIC) - {None}
+    assert offered == set(check_units._UNIT_METRIC) - {None}
