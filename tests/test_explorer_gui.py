@@ -17,7 +17,9 @@ one is the point of the file: every gap fixed here existed because a field was
 added to the ruleset and the preview was never told.
 
 Loaded by path (``explorer_fetch`` fixture, see conftest); needs the ``cmk.gui``
-APIs, so it runs in the same Checkmk Pythons as the rest of the suite.
+APIs, so it runs in the same Checkmk Pythons as the rest of the suite. The
+connections are written as the visitor hands them over (the ruleset's disk
+value) and read the way the page reads them, with ``_parse_connection``.
 """
 
 import json
@@ -107,7 +109,8 @@ def serve():
 def test_a_ca_bundle_is_passed_to_requests_as_the_verify_argument(explorer_fetch):
     """A private CA must be usable in the preview, as it is in the agent —
     without it the only way to see the response is to switch verification off."""
-    assert explorer_fetch._verify_arg({"verify_cert": True, "ca_bundle": "/etc/ssl/own.pem"}) == (
+    connection = {"verify_cert": True, "ca_bundle": "/etc/ssl/own.pem"}
+    assert explorer_fetch._verify_arg(explorer_fetch._parse_connection(connection)) == (
         "/etc/ssl/own.pem"
     )
 
@@ -115,13 +118,12 @@ def test_a_ca_bundle_is_passed_to_requests_as_the_verify_argument(explorer_fetch
 def test_a_ca_bundle_is_ignored_while_verification_is_off(explorer_fetch):
     """Same rule as the agent's ``_verify_arg``: the bundle is how you verify
     against a private CA, not a second switch that turns verification back on."""
-    assert explorer_fetch._verify_arg({"verify_cert": False, "ca_bundle": "/etc/ssl/own.pem"}) is (
-        False
-    )
+    connection = {"verify_cert": False, "ca_bundle": "/etc/ssl/own.pem"}
+    assert explorer_fetch._verify_arg(explorer_fetch._parse_connection(connection)) is False
 
 
 def test_verification_is_on_when_the_connection_says_nothing(explorer_fetch):
-    assert explorer_fetch._verify_arg({}) is True
+    assert explorer_fetch._verify_arg(explorer_fetch._parse_connection({})) is True
 
 
 @pytest.mark.parametrize(
@@ -141,7 +143,8 @@ def test_the_client_certificate_becomes_the_requests_cert_argument(
 ):
     """Mutual TLS: a bundled key is one path, a separate key is a pair — the
     shapes ``requests`` accepts, and the ones the agent builds."""
-    assert explorer_fetch._client_cert({"client_cert": client_cert}) == expected
+    connection = explorer_fetch._parse_connection({"client_cert": client_cert})
+    assert explorer_fetch._client_cert(connection) == expected
 
 
 # --- the redirect guard ----------------------------------------------------
@@ -169,7 +172,9 @@ def test_an_api_key_header_is_stripped_on_a_cross_host_redirect(explorer_fetch, 
         lambda request, handler: _reply(handler, 302, headers={"Location": f"{target}/moved"})
     )
 
-    response = explorer_fetch._perform_request(_api_key_connection(start))
+    response = explorer_fetch._perform_request(
+        explorer_fetch._parse_connection(_api_key_connection(start))
+    )
 
     assert response.status_code == 200
     assert at_target, "the redirect was not followed"
@@ -189,11 +194,62 @@ def test_an_api_key_header_survives_a_same_host_redirect(explorer_fetch, serve):
 
     base, received = serve(respond)
 
-    response = explorer_fetch._perform_request(_api_key_connection(base))
+    response = explorer_fetch._perform_request(
+        explorer_fetch._parse_connection(_api_key_connection(base))
+    )
 
     assert response.status_code == 200
     assert received[-1].path == "/moved"
     assert received[-1].headers["x-api-key"] == "s3cr3t"
+
+
+# --- the request itself ------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "auth, header, value",
+    [
+        (("auth_login", {"username": "mon", "password": _SECRET}), "authorization", "Basic "),
+        (("auth_token", {"token": _SECRET}), "authorization", "Bearer s3cr3t"),
+        (("auth_header", {"header": "X-Token", "key": _SECRET}), "x-token", "s3cr3t"),
+        (("auth_header", {"key": _SECRET}), "x-api-key", "s3cr3t"),
+    ],
+)
+def test_the_connection_describes_the_request_that_is_sent(
+    explorer_fetch, serve, auth, header, value
+):
+    """Method, body, request headers and the credentials all reach the API as
+    the rule wrote them - read once from the disk value, not re-derived per use."""
+    base, received = serve(lambda request, handler: _reply(handler, 200, {"ok": True}))
+    connection = {
+        "url": f"{base}/items",
+        "method": "post",
+        "body": '{"q": 1}',
+        "headers": [{"name": "X-Tenant", "value": "acme"}],
+        "auth": auth,
+    }
+
+    explorer_fetch._perform_request(explorer_fetch._parse_connection(connection))
+
+    sent = received[0]
+    assert sent.body == b'{"q": 1}'
+    assert sent.headers["content-type"] == "application/json"
+    assert sent.headers["x-tenant"] == "acme"
+    assert sent.headers[header].startswith(value)
+
+
+def test_an_api_key_query_parameter_is_added_to_the_url(explorer_fetch, serve):
+    base, received = serve(lambda request, handler: _reply(handler, 200, {"ok": True}))
+    connection = {"url": f"{base}/items", "auth": ("auth_query", {"key": _SECRET})}
+
+    explorer_fetch._perform_request(explorer_fetch._parse_connection(connection))
+
+    assert received[0].path == "/items?api_key=s3cr3t"
+
+
+def test_a_body_is_only_sent_with_a_post(explorer_fetch):
+    connection = explorer_fetch._parse_connection({"url": "https://a.example", "body": "{}"})
+    assert connection.body is None
 
 
 # --- the proxy -------------------------------------------------------------
@@ -215,13 +271,17 @@ def test_the_configured_proxy_reaches_requests(explorer_fetch, proxy, expected):
     """An endpoint reachable only through the corporate egress proxy has to be
     previewable. 'Environment' and an absent setting are requests' own default,
     so they add nothing to the session."""
-    assert explorer_fetch._proxies({"proxy": proxy} if proxy is not None else {}) == expected
+    connection = explorer_fetch._parse_connection({"proxy": proxy} if proxy is not None else {})
+    assert explorer_fetch._proxies(connection) == expected
 
 
 def test_the_session_carries_the_proxy_and_the_redirect_guard(explorer_fetch):
     session = explorer_fetch._session(
-        _api_key_connection(
-            "https://api.example/v1", proxy=("cmk_postprocessed", "explicit_proxy", "http://p:3128")
+        explorer_fetch._parse_connection(
+            _api_key_connection(
+                "https://api.example/v1",
+                proxy=("cmk_postprocessed", "explicit_proxy", "http://p:3128"),
+            )
         )
     )
     assert session.proxies == {"http": "http://p:3128", "https": "http://p:3128"}
@@ -252,18 +312,20 @@ def test_the_token_exchange_goes_through_the_endpoints_own_session(
     )
     api, at_api = serve(lambda request, handler: _reply(handler, 200, {"ok": True}))
 
-    connection = {
-        "url": api,
-        "auth": (
-            "auth_oauth2",
-            {
-                "token_url": f"{idp}/token",
-                "client_id": "monitoring",
-                "client_secret": _SECRET,
-                "client_auth": "post",
-            },
-        ),
-    }
+    connection = explorer_fetch._parse_connection(
+        {
+            "url": api,
+            "auth": (
+                "auth_oauth2",
+                {
+                    "token_url": f"{idp}/token",
+                    "client_id": "monitoring",
+                    "client_secret": _SECRET,
+                    "client_auth": "post",
+                },
+            ),
+        }
+    )
     response = explorer_fetch._perform_request(connection)
 
     assert response.status_code == 200
@@ -277,16 +339,23 @@ def test_a_failing_token_request_never_reports_the_client_secret(explorer_fetch,
     that request contains the secret — so only the status is reported."""
     idp, _ = serve(lambda request, handler: _reply(handler, 401, {"error": "invalid_client"}))
 
+    connection = explorer_fetch._parse_connection(
+        {
+            "url": "https://api.example/v1",
+            "auth": (
+                "auth_oauth2",
+                {
+                    "token_url": f"{idp}/token",
+                    "client_id": "monitoring",
+                    "client_secret": _SECRET,
+                    "client_auth": "post",
+                },
+            ),
+        }
+    )
+
     with pytest.raises(explorer_fetch._TokenError) as caught:
-        explorer_fetch._access_token(
-            {
-                "token_url": f"{idp}/token",
-                "client_id": "monitoring",
-                "client_secret": _SECRET,
-                "client_auth": "post",
-            },
-            {},
-        )
+        explorer_fetch._access_token(connection.oauth2, connection)
 
     assert "s3cr3t" not in str(caught.value)
     assert "401" in str(caught.value)
@@ -302,7 +371,7 @@ def test_the_preview_refuses_a_body_larger_than_the_agent_accepts(
     monkeypatch.setattr(explorer_fetch, "_MAX_RESPONSE_BYTES", 1000)
     url, _ = serve(lambda request, handler: _reply(handler, 200, {"pad": "x" * 5000}))
 
-    response = explorer_fetch._perform_request({"url": url})
+    response = explorer_fetch._perform_request(explorer_fetch._parse_connection({"url": url}))
     with pytest.raises(explorer_fetch._PreviewError, match="larger than 1000 bytes"):
         explorer_fetch._read_capped(response)
 
@@ -310,7 +379,7 @@ def test_the_preview_refuses_a_body_larger_than_the_agent_accepts(
 def test_the_preview_reads_a_body_within_the_limit(explorer_fetch, serve):
     url, _ = serve(lambda request, handler: _reply(handler, 200, {"status": "UP"}))
 
-    response = explorer_fetch._perform_request({"url": url})
+    response = explorer_fetch._perform_request(explorer_fetch._parse_connection({"url": url}))
     assert json.loads(explorer_fetch._read_capped(response)) == {"status": "UP"}
 
 
@@ -400,9 +469,9 @@ def test_the_preview_asks_for_the_agents_first_page(explorer_fetch, url, paginat
     endpoint = {"url": url, "pagination": pagination}
     # The agent reads the same blob, parsed as it parses every '--endpoint'.
     agent_endpoint = agent_models.parse_endpoint(endpoint)
-    assert explorer_fetch._first_page_url(endpoint) == agent_pagination._first_page_url(
-        agent_endpoint
-    )
+    assert explorer_fetch._first_page_url(
+        explorer_fetch._parse_connection(endpoint)
+    ) == agent_pagination._first_page_url(agent_endpoint)
 
 
 def test_the_counted_first_page_reaches_the_api(explorer_fetch, serve):
@@ -417,7 +486,7 @@ def test_the_counted_first_page_reaches_the_api(explorer_fetch, serve):
             "items": "data",
         },
     }
-    explorer_fetch._perform_request(connection)
+    explorer_fetch._perform_request(explorer_fetch._parse_connection(connection))
     assert received[0].path == "/items?state=open&offset=0&limit=25"
 
 
