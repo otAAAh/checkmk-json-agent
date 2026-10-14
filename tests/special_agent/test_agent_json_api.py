@@ -914,9 +914,11 @@ def test_secret_resolution_24_fallback(agent, monkeypatch):
             "myid:/var/store",
         ]
     )
+    from cmk.utils import password_store
+
     captured = {}
     monkeypatch.setattr(
-        agent._legacy_pwstore,
+        password_store,
         "lookup",
         lambda pw_file, pw_id: captured.update(file=str(pw_file), id=pw_id) or "S3CRET",
     )
@@ -924,11 +926,18 @@ def test_secret_resolution_24_fallback(agent, monkeypatch):
     assert captured == {"file": "/var/store", "id": "myid"}
 
 
+def test_a_missing_secret_reference_is_named_on_24(agent, monkeypatch):
+    monkeypatch.setattr(agent, "_HAVE_PWSTORE_V1", False)
+    args = agent.parse_arguments(["--endpoint", '{"url": "http://x", "auth": "auth_token"}'])
+    with pytest.raises(ValueError, match="no --secret_0-id given"):
+        agent._reveal_secret(args, "secret_0")
+
+
 def test_secret_resolution_v1_direct(agent):
     # The Checkmk 2.5+ convenience API: the direct (unsafe) secret form, keyed
     # per endpoint index. Skipped on a 2.4-only environment.
     if not agent._HAVE_PWSTORE_V1:
-        pytest.skip("v1_unstable password store API not available")
+        pytest.skip("public password store API not available")
     args = agent.parse_arguments(
         ["--endpoint", '{"url": "http://x", "auth": "auth_token"}', "--secret_0", "abc"]
     )
@@ -2092,6 +2101,43 @@ def test_cache_write_is_owner_only(cache_dir):
     assert path.stat().st_mode & 0o777 == 0o600
     # No temp files left behind.
     assert [p.name for p in cache_dir.iterdir()] == [path.name]
+
+
+def test_a_private_write_is_never_readable_by_others_meanwhile(tmp_path, monkeypatch):
+    # The file must be 0600 from creation, not chmod-ed after the content is in.
+    seen = []
+    real_fdopen = agent_cache.os.fdopen
+
+    def spy(handle, *args, **kwargs):
+        seen.append(agent_cache.os.fstat(handle).st_mode & 0o777)
+        return real_fdopen(handle, *args, **kwargs)
+
+    monkeypatch.setattr(agent_cache.os, "fdopen", spy)
+    agent_cache._write_private(tmp_path / "entry.json", "secret")
+    assert seen == [0o600]
+
+
+def test_concurrent_private_writes_of_one_key_do_not_share_a_temporary_file(tmp_path):
+    # The agent writes from a thread pool: one process, so a pid-based name
+    # would be the same for every thread.
+    from concurrent.futures import ThreadPoolExecutor
+
+    target = tmp_path / "entry.json"
+    texts = [json.dumps({"n": n, "pad": "x" * 100_000}) for n in range(16)]
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        list(pool.map(lambda text: agent_cache._write_private(target, text), texts))
+    assert target.read_text() in texts
+    assert [p.name for p in tmp_path.iterdir()] == ["entry.json"]
+
+
+def test_a_failed_private_write_leaves_no_temporary_file(tmp_path, monkeypatch):
+    def fail(*_args):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(agent_cache.os, "replace", fail)
+    with pytest.raises(OSError):
+        agent_cache._write_private(tmp_path / "entry.json", "x")
+    assert list(tmp_path.iterdir()) == []
 
 
 def test_prune_cache_removes_only_stale_files(cache_dir):

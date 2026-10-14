@@ -4,7 +4,6 @@
 
 import hashlib
 import json
-import os
 import time
 from contextlib import suppress
 from pathlib import Path
@@ -12,7 +11,7 @@ from pathlib import Path
 import requests
 
 from . import cache
-from .cache import _prune_cache
+from .cache import _prune_cache, _write_private
 from .paths import _as_float
 from .transport import _apply_proxy, _client_cert, _debug, _verify_arg
 
@@ -106,7 +105,6 @@ def _store_token(spec: dict, secret: str | None, token: str, ttl: float) -> None
         return
     entry = {"token": token, "expires_at": time.time() + max(ttl - _TOKEN_EXPIRY_SKEW, 0.0)}
     try:
-        temporary = path.with_suffix(f".{os.getpid()}.tmp")
         # An access token is a bearer credential at rest. Storing one is the
         # whole point of caching it - the alternative is asking the identity
         # provider on every check - and it cannot be hashed (it has to be sent)
@@ -117,11 +115,7 @@ def _store_token(spec: dict, secret: str | None, token: str, ttl: float) -> None
         # (CodeQL flags this as clear-text storage. The suppression comment
         # below is honoured by the CodeQL CLI but not by GitHub's default code
         # scanning, so the alert also has to be dismissed in the Security tab.)
-        temporary.write_text(  # codeql[py/clear-text-storage-sensitive-data]
-            json.dumps(entry), encoding="utf-8"
-        )
-        temporary.chmod(0o600)
-        temporary.replace(path)
+        _write_private(path, json.dumps(entry))  # codeql[py/clear-text-storage-sensitive-data]
         _prune_cache(path.parent)
     except OSError:
         return
