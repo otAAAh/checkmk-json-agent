@@ -505,34 +505,22 @@ def test_parse_duplicate_service_names_kept_distinct(check):
 
 def test_coerce_match_normalizes_shapes(check):
     # Canonical must_match: dict with pattern + no-match state (defaults CRIT=2).
-    assert check._coerce_match(["must_match", {"pattern": "UP"}]) == (
-        "must_match",
-        {"pattern": "UP", "state_no_match": 2},
-    )
-    assert check._coerce_match(["must_match", {"pattern": "UP", "state_no_match": 1}]) == (
-        "must_match",
-        {"pattern": "UP", "state_no_match": 1},
-    )
+    assert check._coerce_match(["must_match", {"pattern": "UP"}]) == check.MustMatch("UP", 2)
+    assert check._coerce_match(
+        ["must_match", {"pattern": "UP", "state_no_match": 1}]
+    ) == check.MustMatch("UP", 1)
     # A bare string is accepted for hand-written rules/CLI.
-    assert check._coerce_match(["must_match", "UP"]) == (
-        "must_match",
-        {"pattern": "UP", "state_no_match": 2},
-    )
+    assert check._coerce_match(["must_match", "UP"]) == check.MustMatch("UP", 2)
     # state_map keeps only real patterns and always carries a no-match state.
-    assert check._coerce_match(["state_map", {"ok": "UP", "crit": "DOWN"}]) == (
-        "state_map",
-        {"ok": "UP", "crit": "DOWN", "state_no_match": 0},
+    assert check._coerce_match(["state_map", {"ok": "UP", "crit": "DOWN"}]) == check.StateMap(
+        ok="UP", crit="DOWN", state_no_match=0
     )
-    assert check._coerce_match(["state_map", {"ok": "", "warn": "W", "x": "y"}]) == (
-        "state_map",
-        {"warn": "W", "state_no_match": 0},
+    assert check._coerce_match(["state_map", {"ok": "", "warn": "W", "x": "y"}]) == check.StateMap(
+        warn="W", state_no_match=0
     )
     assert check._coerce_match(None) is None
     # Back-compat: an old section with only the flat 'expected' regex -> CRIT.
-    assert check._coerce_match(None, "UP|ok") == (
-        "must_match",
-        {"pattern": "UP|ok", "state_no_match": 2},
-    )
+    assert check._coerce_match(None, "UP|ok") == check.MustMatch("UP|ok", 2)
 
 
 def test_check_must_match_explicit_shape(check):
@@ -831,22 +819,17 @@ def _counter_store(check, monkeypatch, store):
 
 
 def test_coerce_value_as(check):
-    assert check._coerce_value_as(["counter", None]) == ("counter", None)
-    assert check._coerce_value_as(["timestamp", {"format": "iso"}]) == (
-        "timestamp",
-        {"format": "iso"},
-    )
+    assert check._coerce_value_as(["counter", None]) == check.ReadAsCounter()
+    assert check._coerce_value_as(["timestamp", {"format": "iso"}]) == check.ReadAsTimestamp("iso")
     # A timestamp without a format falls back to auto-detection.
-    assert check._coerce_value_as(["timestamp", {}]) == ("timestamp", {"format": "auto"})
+    assert check._coerce_value_as(["timestamp", {}]) == check.ReadAsTimestamp("auto")
     # A custom pattern is carried along; an empty or non-string one is dropped.
-    assert check._coerce_value_as(["timestamp", {"format": "custom", "pattern": "%Y"}]) == (
-        "timestamp",
-        {"format": "custom", "pattern": "%Y"},
-    )
-    assert check._coerce_value_as(["timestamp", {"format": "custom", "pattern": ""}]) == (
-        "timestamp",
-        {"format": "custom"},
-    )
+    assert check._coerce_value_as(
+        ["timestamp", {"format": "custom", "pattern": "%Y"}]
+    ) == check.ReadAsTimestamp("custom", "%Y")
+    assert check._coerce_value_as(
+        ["timestamp", {"format": "custom", "pattern": ""}]
+    ) == check.ReadAsTimestamp("custom", None)
     # Absent / unknown: monitor the value as it stands.
     assert check._coerce_value_as(None) is None
     assert check._coerce_value_as(["something_new", {}]) is None

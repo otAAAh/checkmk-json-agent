@@ -435,10 +435,9 @@ def test_timestamp_formats_match_the_parser(ruleset, check):
     assert check._parse_timestamp("14.11.2023 22:13:20", "custom", "%d.%m.%Y %H:%M:%S")
     # The pattern travels next to the format, through the check's coercion.
     assert "pattern" in timestamp.parameter_form.elements
-    assert check._coerce_value_as(["timestamp", {"format": "custom", "pattern": "%Y"}]) == (
-        "timestamp",
-        {"format": "custom", "pattern": "%Y"},
-    )
+    assert check._coerce_value_as(
+        ["timestamp", {"format": "custom", "pattern": "%Y"}]
+    ) == check.ReadAsTimestamp("custom", "%Y")
 
 
 @pytest.mark.parametrize(

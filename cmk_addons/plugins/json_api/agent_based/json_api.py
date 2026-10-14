@@ -22,7 +22,7 @@ import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import Final
+from typing import ClassVar, Final, Literal
 
 from cmk.agent_based.v2 import (
     AgentSection,
@@ -54,24 +54,67 @@ from cmk.agent_based.v2 import (
 _LABEL_NS = "json_api/"
 
 # Level tuples come straight from the SimpleLevels form spec, JSON-encoded by
-# the agent: ("fixed", (warn, crit)) or ("no_levels", None) or absent.
+# the agent: ("fixed", (warn, crit)) or ("no_levels", None) or absent. Only the
+# first means anything to check_levels, so _coerce_levels reads the other two
+# as None and this is all that is left.
 # Plain alias (not a PEP 695 `type` statement) to stay portable to Checkmk 2.4.
-_Levels = tuple[str, tuple[float, float] | None] | None
+_Levels = tuple[Literal["fixed"], tuple[float, float]] | None
+
 
 # The string-matching config from the CascadingSingleChoice form spec, JSON-encoded
-# by the agent. After _coerce_match it is one of:
-#   ("must_match", {"pattern": <regex>, "state_no_match": <0-3>})
-#   ("state_map",  {"ok"/"warn"/"crit": <regex>, "state_no_match": <0-3>})
-_Match = tuple[str, object] | None
+# by the agent as ("must_match", {...}) or ("state_map", {...}). It is read into
+# one of the two classes below once, by _coerce_match, so that matching and the
+# details line work on checked values instead of re-checking a dict each time.
+@dataclass(frozen=True)
+class MustMatch:
+    """The value has to match ``pattern`` in full, else ``state_no_match``."""
+
+    pattern: str
+    state_no_match: int = 2
+
+
+@dataclass(frozen=True)
+class StateMap:
+    """The first of the OK, WARN, CRIT patterns to match in full sets the state.
+
+    A pattern left out (or empty) is ``None``; ``state_no_match`` applies when
+    none of them matches.
+    """
+
+    ok: str | None = None
+    warn: str | None = None
+    crit: str | None = None
+    state_no_match: int = 0
+
+
+_Match = MustMatch | StateMap | None
+
 
 # How to read the extracted value, from the 'Interpret the value as'
-# CascadingSingleChoice (JSON-encoded by the agent). After _coerce_value_as:
-#   ("counter", None)                    -> monitor the per-second rate
-#   ("timestamp", {"format": "auto"})    -> monitor the age in seconds
-#   ("timestamp", {"format": "custom", "pattern": "%d.%m.%Y"}) -> likewise, read
-#                                           with that strptime pattern
-# ``None`` monitors the value as it stands.
-_ValueAs = tuple[str, object] | None
+# CascadingSingleChoice (JSON-encoded by the agent as ("counter", None) or
+# ("timestamp", {"format": ..., "pattern": ...})). Read into one of these by
+# _coerce_value_as; ``None`` monitors the value as it stands.
+@dataclass(frozen=True)
+class ReadAsCounter:
+    """Monitor the value's per-second rate."""
+
+    kind: ClassVar[str] = "counter"
+
+
+@dataclass(frozen=True)
+class ReadAsTimestamp:
+    """Monitor the value's age in seconds.
+
+    ``format`` is one of the formats _parse_timestamp knows ('auto' when the
+    rule names none); ``pattern`` is the strptime pattern of the 'custom' one.
+    """
+
+    kind: ClassVar[str] = "timestamp"
+    format: str = "auto"
+    pattern: str | None = None
+
+
+_ValueAs = ReadAsCounter | ReadAsTimestamp | None
 
 
 # Maps the unit chosen in the rule to the metric defined in graphing/json_api.py.
@@ -144,12 +187,12 @@ def _boundaries(value_range: object) -> tuple[float | None, float | None] | None
     return None if low is None and high is None else (low, high)
 
 
-def _metric_name(unit: object) -> str:
-    return _UNIT_METRIC.get(unit if isinstance(unit, str) else None, "json_api_value")
+def _metric_name(unit: str | None) -> str:
+    return _UNIT_METRIC.get(unit, "json_api_value")
 
 
-def _rate_metric_name(unit: object) -> str:
-    return _UNIT_RATE_METRIC.get(unit if isinstance(unit, str) else None, "json_api_rate")
+def _rate_metric_name(unit: str | None) -> str:
+    return _UNIT_RATE_METRIC.get(unit, "json_api_rate")
 
 
 def _render_days(days: float) -> str:
@@ -228,11 +271,11 @@ _UNIT_RENDER: Final[Mapping[str, Callable[[float], str]]] = {
 }
 
 
-def _render_func(unit: object) -> Callable[[float], str] | None:
-    return _UNIT_RENDER.get(unit) if isinstance(unit, str) else None
+def _render_func(unit: str | None) -> Callable[[float], str] | None:
+    return _UNIT_RENDER.get(unit) if unit is not None else None
 
 
-def _rate_render_func(unit: object) -> Callable[[float], str]:
+def _rate_render_func(unit: str | None) -> Callable[[float], str]:
     """Render a per-second rate: the unit's own rendering plus '/s'.
 
     A rate is almost never a round number (it is a difference divided by an
@@ -242,7 +285,7 @@ def _rate_render_func(unit: object) -> Callable[[float], str]:
     """
     # Only a unit with a rate of its own lends it its rendering: a counter 'in
     # bytes per second' would otherwise read '1.00 KiB/s/s'.
-    countable = isinstance(unit, str) and unit in _UNIT_RATE_METRIC
+    countable = unit is not None and unit in _UNIT_RATE_METRIC
     base = (_render_func(unit) if countable else None) or _fmt_rate
     return lambda number: f"{base(number)}/s"
 
@@ -280,13 +323,20 @@ class InventoryTarget:
 @dataclass(frozen=True)
 class Item:
     found: bool
+    # The JSON value itself. Its type is the data, not configuration: the agent
+    # sends a scalar (an object or array arrives as its JSON text), and what the
+    # check does with it - a number, a string to match, a timestamp - is decided
+    # by looking at it on every run.
     value: object
     error: str | None
     levels_upper: _Levels
     levels_lower: _Levels
     match: _Match
     calc: str | None
-    unit: object
+    # The unit named in the rule. Any string is kept, an unknown one too: an
+    # empty or unknown unit still counts as "the rule chose one" for a
+    # timestamp's age (see _derive), which keeps the plain metric then.
+    unit: str | None
     # The metric name derived from the unit - what this field emits unless the
     # rule overrode it (metric_override) or it shares a service.
     metric_name: str
@@ -420,7 +470,7 @@ def _coerce_state(raw: object, default: int) -> int:
 
 
 def _coerce_match(raw: object, legacy_expected: object = None) -> _Match:
-    """Normalize the string-match config (list from JSON -> tuple).
+    """Read the string-match config (a list from JSON) into MustMatch / StateMap.
 
     ``must_match`` carries ``{"pattern", "state_no_match"}`` (a bare string is
     also accepted for a hand-written rule/CLI). ``state_map`` carries the
@@ -433,25 +483,18 @@ def _coerce_match(raw: object, legacy_expected: object = None) -> _Match:
         case ["must_match", dict() as cfg]:
             pattern = cfg.get("pattern")
             if isinstance(pattern, str):
-                return (
-                    "must_match",
-                    {
-                        "pattern": pattern,
-                        "state_no_match": _coerce_state(cfg.get("state_no_match"), 2),
-                    },
-                )
+                return MustMatch(pattern, _coerce_state(cfg.get("state_no_match"), 2))
         case ["must_match", str() as pattern]:
-            return ("must_match", {"pattern": pattern, "state_no_match": 2})
+            return MustMatch(pattern)
         case ["state_map", dict() as cfg]:
-            cleaned: dict[str, object] = {
-                key: cfg[key]
-                for key in ("ok", "warn", "crit")
-                if isinstance(cfg.get(key), str) and cfg[key]
-            }
-            cleaned["state_no_match"] = _coerce_state(cfg.get("state_no_match"), 0)
-            return ("state_map", cleaned)
+            return StateMap(
+                ok=_optional_str(cfg.get("ok")),
+                warn=_optional_str(cfg.get("warn")),
+                crit=_optional_str(cfg.get("crit")),
+                state_no_match=_coerce_state(cfg.get("state_no_match"), 0),
+            )
     if isinstance(legacy_expected, str):
-        return ("must_match", {"pattern": legacy_expected, "state_no_match": 2})
+        return MustMatch(legacy_expected)
     return None
 
 
@@ -468,7 +511,7 @@ def _coerce_calc(raw: object) -> str | None:
 
 
 def _coerce_value_as(raw: object) -> _ValueAs:
-    """Normalize the 'Interpret the value as' config (list from JSON -> tuple).
+    """Read the 'Interpret the value as' config (a list from JSON).
 
     Anything unrecognized falls back to ``None`` ("monitor the value as it
     stands"), so an unknown future choice degrades to the plain behaviour instead
@@ -476,16 +519,25 @@ def _coerce_value_as(raw: object) -> _ValueAs:
     """
     match raw:
         case ["counter", _] | "counter":
-            return ("counter", None)
+            return ReadAsCounter()
         case ["timestamp", dict() as cfg]:
-            fmt = cfg.get("format")
-            coerced = {"format": fmt if isinstance(fmt, str) and fmt else "auto"}
-            if isinstance(pattern := cfg.get("pattern"), str) and pattern:
-                coerced["pattern"] = pattern
-            return ("timestamp", coerced)
+            return ReadAsTimestamp(
+                format=_optional_str(cfg.get("format")) or "auto",
+                pattern=_optional_str(cfg.get("pattern")),
+            )
         case ["timestamp", _] | "timestamp":
-            return ("timestamp", {"format": "auto"})
+            return ReadAsTimestamp()
     return None
+
+
+def _coerce_unit(raw: object) -> str | None:
+    """The unit named in the rule: any string as it stands, else None.
+
+    Not ``_optional_str``: an empty string is a unit the rule set (if not one
+    the check knows), and it is kept apart from no unit at all - see
+    ``Item.unit``.
+    """
+    return raw if isinstance(raw, str) else None
 
 
 def _coerce_aggregate(raw: object) -> str | None:
@@ -555,6 +607,16 @@ def _optional_int(raw: object) -> int | None:
 
 def _optional_str(raw: object) -> str | None:
     return raw if isinstance(raw, str) and raw else None
+
+
+def _text(raw: object) -> str:
+    """A field the agent writes as text, as text: '' for anything falsy.
+
+    Every reader of these fields treats an empty one as absent and writes a
+    present one into an f-string, so this is how they have always read - only
+    now the type says so.
+    """
+    return str(raw) if raw else ""
 
 
 def _unique_name(name: str, taken: Mapping[str, object]) -> str:
@@ -670,22 +732,23 @@ def parse_json_api(string_table: StringTable) -> Section | None:
             name = shared_names[service]
         else:
             name = _unique_name(service, {**endpoint_names, **items})
+        unit = _coerce_unit(result.get("unit"))
         entry = Item(
-            found=result["found"],
+            found=bool(result["found"]),
             value=result["value"],
-            error=result["error"],
+            error=_text(result["error"]) or None,
             levels_upper=_coerce_levels(result.get("levels_upper")),
             levels_lower=_coerce_levels(result.get("levels_lower")),
             match=_coerce_match(result.get("match"), result.get("expected")),
             calc=_coerce_calc(result.get("calc")),
             calc_other=_optional_number(result.get("calc_other")),
-            unit=result.get("unit"),
+            unit=unit,
             boundaries=_boundaries(result.get("value_range")),
-            metric_name=_metric_name(result.get("unit")),
+            metric_name=_metric_name(unit),
             metric_override=_optional_str(result.get("metric_name")),
-            render_func=_render_func(result.get("unit")),
-            path=result.get("path", ""),
-            url=result.get("url", ""),
+            render_func=_render_func(unit),
+            path=_text(result.get("path")),
+            url=_text(result.get("url")),
             value_as=_coerce_value_as(result.get("value_as")),
             aggregate=_coerce_aggregate(result.get("aggregate")),
             service_labels=_service_labels(result.get("labels")),
@@ -697,7 +760,7 @@ def parse_json_api(string_table: StringTable) -> Section | None:
         )
         items.setdefault(name, []).append(entry)
     return Section(
-        error=payload.get("error"),
+        error=_text(payload.get("error")) or None,
         items={name: tuple(entries) for name, entries in items.items()},
         host_labels=_coerce_host_labels(payload.get("host_labels")),
         endpoints=endpoints,
@@ -806,17 +869,17 @@ def _context(entry: Item, match: _Match) -> CheckResult:
     if entry.aggregate:
         lines.append(f"Aggregation: {_AGGREGATE_LABEL.get(entry.aggregate, entry.aggregate)}")
     if entry.value_as is not None:
-        lines.append(f"Read as: {_VALUE_AS_LABEL.get(entry.value_as[0], entry.value_as[0])}")
-    if match is not None:
-        kind, cfg = match
-        if kind == "must_match" and isinstance(cfg, dict) and isinstance(cfg.get("pattern"), str):
-            lines.append(f"Expected pattern: {cfg['pattern']}")
-        elif kind == "state_map" and isinstance(cfg, dict):
-            parts = [
-                f"{key.upper()} /{cfg[key]}/" for key in ("ok", "warn", "crit") if cfg.get(key)
-            ]
-            if parts:
-                lines.append("State map: " + ", ".join(parts))
+        lines.append(f"Read as: {_VALUE_AS_LABEL[entry.value_as.kind]}")
+    if isinstance(match, MustMatch):
+        lines.append(f"Expected pattern: {match.pattern}")
+    elif isinstance(match, StateMap):
+        parts = [
+            f"{key.upper()} /{pattern}/"
+            for key, pattern, _state in _state_map_order(match)
+            if pattern
+        ]
+        if parts:
+            lines.append("State map: " + ", ".join(parts))
     if lines:
         yield Result(state=State.OK, notice="\n".join(lines))
 
@@ -837,30 +900,31 @@ def _response_context(entry: Item) -> CheckResult:
         yield Result(state=State.OK, notice=f"Response context:\n{entry.context}")
 
 
-_STATE_MAP_ORDER = (("ok", State.OK), ("warn", State.WARN), ("crit", State.CRIT))
+def _state_map_order(match: StateMap) -> tuple[tuple[str, str | None, State], ...]:
+    """The state map's patterns in the order they are tried, with their states."""
+    return (
+        ("ok", match.ok, State.OK),
+        ("warn", match.warn, State.WARN),
+        ("crit", match.crit, State.CRIT),
+    )
 
 
-def _evaluate_match(match: tuple[str, object], text: str) -> tuple[State, str]:
+def _evaluate_match(match: MustMatch | StateMap, text: str) -> tuple[State, str]:
     """Return ``(state, description)`` for a string value's configured matching.
 
-    ``must_match`` is OK on a full match, else CRIT. ``state_map`` tries the OK,
-    WARN then CRIT pattern and the first full match wins; no match stays OK.
+    ``must_match`` is OK on a full match, else its ``state_no_match`` (CRIT by
+    default). ``state_map`` tries the OK, WARN then CRIT pattern and the first
+    full match wins; no match is its ``state_no_match`` (OK by default).
     Raises ``re.error`` on a bad pattern so the caller surfaces it as UNKNOWN.
     """
-    kind, cfg = match
-    if not isinstance(cfg, dict):
-        return State.OK, ""
-    if kind == "must_match":
-        pattern = cfg.get("pattern")
-        pattern = pattern if isinstance(pattern, str) else ""
-        if re.fullmatch(pattern, text) is not None:
+    if isinstance(match, MustMatch):
+        if re.fullmatch(match.pattern, text) is not None:
             return State.OK, ""
-        return State(_coerce_state(cfg.get("state_no_match"), 2)), f"expected to match '{pattern}'"
-    for key, state in _STATE_MAP_ORDER:
-        pattern = cfg.get(key)
-        if isinstance(pattern, str) and pattern and re.fullmatch(pattern, text) is not None:
+        return State(match.state_no_match), f"expected to match '{match.pattern}'"
+    for key, pattern, state in _state_map_order(match):
+        if pattern and re.fullmatch(pattern, text) is not None:
             return state, f"matched {key.upper()}"
-    no_match = _coerce_state(cfg.get("state_no_match"), 0)
+    no_match = match.state_no_match
     return State(no_match), ("no pattern matched" if no_match != 0 else "")
 
 
@@ -1082,8 +1146,7 @@ def _derive(entry: Item) -> tuple[float | None, str, Callable[[float], str] | No
     if entry.value_as is None:
         return number, entry.metric_name, entry.render_func, []
 
-    kind, cfg = entry.value_as
-    if kind == "counter":
+    if isinstance(entry.value_as, ReadAsCounter):
         if number is None:
             return (
                 None,
@@ -1113,13 +1176,7 @@ def _derive(entry: Item) -> tuple[float | None, str, Callable[[float], str] | No
             [reading],
         )
 
-    fmt = cfg.get("format") if isinstance(cfg, dict) else None
-    pattern = cfg.get("pattern") if isinstance(cfg, dict) else None
-    stamp = _parse_timestamp(
-        entry.value,
-        fmt if isinstance(fmt, str) else "auto",
-        pattern if isinstance(pattern, str) else None,
-    )
+    stamp = _parse_timestamp(entry.value, entry.value_as.format, entry.value_as.pattern)
     if stamp is None:
         return (
             None,
@@ -1135,7 +1192,7 @@ def _derive(entry: Item) -> tuple[float | None, str, Callable[[float], str] | No
     reading = Result(state=State.OK, notice=f"Timestamp: {_render_value(entry.value)}")
     # An age is a duration in seconds, so it graphs and renders as one unless the
     # rule explicitly chose a unit (e.g. after a transform into hours).
-    if isinstance(entry.unit, str):
+    if entry.unit is not None:
         return time.time() - stamp, entry.metric_name, entry.render_func, [reading]
     return time.time() - stamp, _AGE_METRIC, render.time_offset, [reading]
 
@@ -1153,7 +1210,7 @@ def _value_label(value_as: _ValueAs, line: str | None = None) -> str:
     """
     if line:
         return line
-    return _VALUE_LABEL.get(value_as[0], "Value") if value_as is not None else "Value"
+    return _VALUE_LABEL[value_as.kind] if value_as is not None else "Value"
 
 
 def _metric_slug(line: str) -> str:
@@ -1216,10 +1273,10 @@ def _emitted_metric_name(entry: Item) -> str:
     """
     if entry.value_as is None:
         return entry.metric_name
-    if entry.value_as[0] == "counter":
+    if isinstance(entry.value_as, ReadAsCounter):
         return _rate_metric_name(entry.unit)
     # A timestamp becomes an age: seconds, unless the rule named a unit itself.
-    return entry.metric_name if isinstance(entry.unit, str) else _AGE_METRIC
+    return entry.metric_name if entry.unit is not None else _AGE_METRIC
 
 
 def _field_metric_name(entry: Item) -> str:
