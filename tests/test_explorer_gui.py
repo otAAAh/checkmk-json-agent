@@ -291,6 +291,50 @@ def test_a_failing_token_request_never_reports_the_client_secret(explorer_fetch,
     assert "401" in str(caught.value)
 
 
+# --- stored passwords ---------------------------------------------------------
+
+# The preview sends a stored password to a URL the browser chose, so revealing
+# one is only allowed for an entry the user may use - otherwise any Setup user
+# could read the whole password store through a server of their own.
+
+
+def _stored(ident):
+    return ("cmk_postprocessed", "stored_password", (ident, ""))
+
+
+def test_a_stored_password_the_user_may_not_use_is_never_revealed(explorer_fetch, monkeypatch):
+    monkeypatch.setattr(explorer_fetch, "usable_password_ids", lambda: {"mine"})
+
+    with pytest.raises(explorer_fetch._PreviewError, match="may not use"):
+        explorer_fetch._resolve_password(_stored("someone_elses"))
+
+
+def test_a_usable_stored_password_is_looked_up(explorer_fetch, monkeypatch):
+    from cmk.utils import password_store
+
+    monkeypatch.setattr(explorer_fetch, "usable_password_ids", lambda: {"mine"})
+    monkeypatch.setattr(password_store, "password_store_path", lambda: Path("/nowhere"))
+    monkeypatch.setattr(password_store, "lookup", lambda _path, ident: f"secret-of-{ident}")
+
+    assert explorer_fetch._resolve_password(_stored("mine")) == "secret-of-mine"
+
+
+def test_a_failed_lookup_is_reported_rather_than_sent_empty(explorer_fetch, monkeypatch):
+    """An empty secret would send the request unauthenticated, and the preview
+    would show the API's 401 as if it were the endpoint's answer."""
+    from cmk.utils import password_store
+
+    def broken(_path, _ident):
+        raise OSError("unreadable")
+
+    monkeypatch.setattr(explorer_fetch, "usable_password_ids", lambda: {"mine"})
+    monkeypatch.setattr(password_store, "password_store_path", lambda: Path("/nowhere"))
+    monkeypatch.setattr(password_store, "lookup", broken)
+
+    with pytest.raises(explorer_fetch._PreviewError, match="Cannot read"):
+        explorer_fetch._resolve_password(_stored("mine"))
+
+
 # --- the first page of a counted pagination ---------------------------------
 
 # The wizard fetches one page, but it must be the agent's FIRST page: where the

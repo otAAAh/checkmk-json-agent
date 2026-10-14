@@ -26,6 +26,8 @@ from typing import Any
 from cmk.gui.http import request
 from cmk.gui.pages import AjaxPage, PageContext, PageResult
 
+from .guards import check_csrf
+
 
 class JsonExplorerCreatePage(AjaxPage):
     def page(self, ctx: PageContext) -> PageResult:
@@ -44,6 +46,7 @@ class JsonExplorerCreatePage(AjaxPage):
         )
 
         user.need_permission("wato.use")
+        check_csrf(ctx)
 
         connection_spec = connection_form_spec()
         extractions_spec = extractions_form_spec()

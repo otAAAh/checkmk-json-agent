@@ -13,6 +13,7 @@ import {
   convertWizardToValueRaw,
   createHost,
   createRule,
+  csrfToken,
   fetchEndpointJson,
   rulesetOverviewUrl,
   validateSpec,
@@ -120,6 +121,42 @@ describe('the AJAX pages, whose replies are wrapped in an envelope', () => {
       headers: { x: 'y' },
     })
     expect(calls[0]!.url).toBe('https://mon.example.com/heute/check_mk/json_explorer_fetch.py')
+  })
+})
+
+describe('the CSRF token the AJAX pages check', () => {
+  function withMeta(content: string | null): void {
+    vi.stubGlobal('document', {
+      head: {
+        querySelector: () => (content === null ? null : { getAttribute: () => content }),
+      },
+    })
+  }
+
+  it("reads 3.0's meta tag", () => {
+    withMeta('tok-30')
+    expect(csrfToken()).toBe('tok-30')
+  })
+
+  it("falls back to 2.5's script variable", () => {
+    withMeta(null)
+    vi.stubGlobal('window', {
+      location: { origin: 'https://mon.example.com', pathname: '/heute/check_mk/' },
+      global_csrf_token: 'tok-25',
+    })
+    expect(csrfToken()).toBe('tok-25')
+  })
+
+  it('is sent with every AJAX request', async () => {
+    withMeta('tok')
+    const calls = stubFetch({ json: { result_code: 0, result: { ok: true, messages: [] } } })
+    await validateSpec('extractions', [])
+    await fetchEndpointJson({ url: 'https://api.example.com' })
+    await convertWizardToValueRaw({ endpoints: [] })
+    expect(calls).toHaveLength(3)
+    for (const call of calls) {
+      expect(new URLSearchParams(call.init.body as URLSearchParams).get('_csrf_token')).toBe('tok')
+    }
   })
 })
 

@@ -44,6 +44,24 @@ export function rulesetOverviewUrl(ruleset = 'special_agents:json_api'): string 
   return `${checkmkBase()}/wato.py?mode=edit_ruleset&varname=${encodeURIComponent(ruleset)}`
 }
 
+/**
+ * The session's CSRF token, which the Explorer's AJAX pages check (as Checkmk's
+ * own AJAX pages do). Checkmk 3.0 writes it into the page head as
+ * `<meta name="cmk-csrf-token">`, 2.5 as the `global_csrf_token` script
+ * variable. Empty when neither is there; the page then refuses the request.
+ */
+export function csrfToken(): string {
+  const meta =
+    typeof document === 'undefined'
+      ? null
+      : document.head?.querySelector('meta[name="cmk-csrf-token"]')?.getAttribute('content')
+  if (meta) {
+    return meta
+  }
+  const legacy = (window as unknown as { global_csrf_token?: unknown }).global_csrf_token
+  return typeof legacy === 'string' ? legacy : ''
+}
+
 export interface EndpointJson {
   ok: boolean
   json?: unknown
@@ -86,7 +104,7 @@ export async function convertWizardToValueRaw(payload: unknown): Promise<Convert
       method: 'POST',
       credentials: 'include',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({ payload: JSON.stringify(payload) }),
+      body: new URLSearchParams({ _csrf_token: csrfToken(), payload: JSON.stringify(payload) }),
     })
     if (!res.ok) {
       const text = await res.text().catch(() => '')
@@ -129,7 +147,7 @@ export async function validateSpec(spec: string, value: unknown): Promise<Valida
       method: 'POST',
       credentials: 'include',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({ spec, value: JSON.stringify(value) }),
+      body: new URLSearchParams({ _csrf_token: csrfToken(), spec, value: JSON.stringify(value) }),
     })
     if (!res.ok) {
       return []
@@ -160,7 +178,10 @@ export async function fetchEndpointJson(connection: unknown): Promise<EndpointJs
       method: 'POST',
       credentials: 'include',
       headers: { Accept: 'application/json', 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({ connection: JSON.stringify(connection) }),
+      body: new URLSearchParams({
+        _csrf_token: csrfToken(),
+        connection: JSON.stringify(connection),
+      }),
     })
     if (!res.ok) {
       const text = await res.text().catch(() => '')
