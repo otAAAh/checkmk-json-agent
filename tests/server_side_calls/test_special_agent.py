@@ -75,8 +75,6 @@ def test_basic_command_line(ssc):
             "inventory": None,
             "summary": None,
             "aggregate": None,
-            # Superseded by 'aggregate', still passed on for unmigrated rules.
-            "count": False,
             "value_as": None,
         }
     ]
@@ -322,23 +320,6 @@ def test_calc_passed_through(ssc):
     )
     (endpoint,) = _endpoints(ssc, args)
     assert endpoint["extractions"][0]["calc"] == "value / 1024"
-
-
-def test_count_passed_through(ssc):
-    args = _command_args(
-        ssc,
-        {
-            "endpoints": [
-                {
-                    "url": "http://x",
-                    "verify_cert": True,
-                    "extractions": [{"path": "items", "service": "Items", "count": True}],
-                }
-            ]
-        },
-    )
-    (endpoint,) = _endpoints(ssc, args)
-    assert endpoint["extractions"][0]["count"] is True
 
 
 def test_multiple_endpoints_each_with_own_config(ssc):
@@ -745,10 +726,10 @@ def test_endpoint_name_resolves_macros(ssc):
     assert endpoint["name"] == "web01 API"
 
 
-def test_unmigrated_count_flag_still_reaches_the_agent(ssc):
-    # A rule stored before the aggregate dropdown carries count=True; the ruleset
-    # migrates it only when the rule is next opened in Setup, so it must survive
-    # the trip to the agent (which reads it as aggregate="count").
+def test_unmigrated_count_flag_reaches_the_agent_as_an_aggregate(ssc):
+    # A rule stored before the aggregate dropdown carries count=True. The ruleset
+    # migrates it only when the rule is next opened in Setup, so the server-side
+    # call applies the same migration.
     args = _command_args(
         ssc,
         {
@@ -761,7 +742,32 @@ def test_unmigrated_count_flag_still_reaches_the_agent(ssc):
         },
     )
     (endpoint,) = _endpoints(ssc, args)
-    assert endpoint["extractions"][0]["count"] is True
+    assert endpoint["extractions"][0]["aggregate"] == "count"
+    assert "count" not in endpoint["extractions"][0]
+
+
+def test_a_flat_rule_from_before_multiple_endpoints_still_runs(ssc):
+    # Without the migration pydantic drops the unknown top-level keys, and the
+    # agent is called with no endpoint at all.
+    args = _command_args(ssc, {"url": "https://x/health", "extractions": []})
+    (endpoint,) = _endpoints(ssc, args)
+    assert endpoint["url"] == "https://x/health"
+
+
+def test_an_unmigrated_expected_regex_keeps_its_check(ssc):
+    args = _command_args(
+        ssc,
+        {
+            "endpoints": [
+                {
+                    "url": "https://x/health",
+                    "extractions": [{"path": "status", "service": "S", "expected": "^UP$"}],
+                }
+            ]
+        },
+    )
+    (endpoint,) = _endpoints(ssc, args)
+    assert endpoint["extractions"][0]["match"] == ["must_match", {"pattern": "^UP$"}]
 
 
 @pytest.mark.parametrize("aggregate", ["count", "sum", "avg", "min", "max"])
