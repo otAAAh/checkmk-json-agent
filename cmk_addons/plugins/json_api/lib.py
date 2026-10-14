@@ -3,8 +3,8 @@
 # SPDX-License-Identifier: GPL-2.0-only
 """Form specs shared between the special-agent rule and the check-parameters rule.
 
-The special agent (``rulesets/special_agent.py``) carries the *discovered
-defaults* for a field's thresholds / string matching; the check-parameters rule
+The special agent (``rulesets/special_agent.py``) carries the defaults for
+a field's thresholds / string matching; the check-parameters rule
 (``rulesets/check_parameters.py``) lets those same values be overridden per
 folder / host / service. Both build the identical form controls, so the widgets
 (and their translated strings) live here once. This module is not a plugin part
