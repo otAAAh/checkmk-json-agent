@@ -28,19 +28,17 @@ _CACHE_PRUNE_AFTER = 7 * 86400
 def _cache_dir(name: str = _CACHE_DIR_NAME) -> Path | None:
     """A cache directory of the given name, or ``None`` if there isn't one.
 
-    Prefers the tmp directory Checkmk hands the agent, then the site's own tmp,
-    and only then the system default - a monitoring cache belongs inside the site
-    so it is cleaned out with it. ``None`` (nothing writable) disables caching
-    rather than failing the fetch.
+    Prefers the site's own tmp (``$OMD_ROOT/tmp``; the agent runs in the site's
+    environment) over the system default - a monitoring cache belongs inside
+    the site so it is cleaned out with it. ``None`` (nothing writable) disables
+    caching rather than failing the fetch.
 
     ``name`` separates the response cache from the OAuth2 token cache: they are
     keyed differently and expire differently, so they must not share a directory
     (the pruner walks a whole directory).
     """
     directory = Path(tempfile.gettempdir()) / name
-    if mk_tmp := os.environ.get("MK_TMPDIR"):
-        directory = Path(mk_tmp) / name
-    elif omd_root := os.environ.get("OMD_ROOT"):
+    if omd_root := os.environ.get("OMD_ROOT"):
         directory = Path(omd_root) / "tmp" / name
     try:
         directory.mkdir(mode=0o700, parents=True, exist_ok=True)

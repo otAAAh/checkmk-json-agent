@@ -22,6 +22,7 @@ import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from typing import Final
 
 from cmk.agent_based.v2 import (
     AgentSection,
@@ -84,7 +85,7 @@ _ValueAs = tuple[str, object] | None
 # The value is never scaled: levels, the value range and the summary all speak
 # the unit the API reports in. That is why there is no 'milliseconds' here - a
 # latency in ms is the 'seconds' unit behind the transform 'value / 1000'.
-_UNIT_METRIC = {
+_UNIT_METRIC: Final[Mapping[str | None, str]] = {
     None: "json_api_value",
     "count": "json_api_count",
     "bytes": "json_api_bytes",
@@ -107,7 +108,7 @@ _UNIT_METRIC = {
 # Only the units something can be COUNTED in are here. A counter of a rate or of
 # a temperature is not a thing, and the ruleset refuses the combination; a rule
 # written by hand that asks for it gets the plain, unit-less rate.
-_UNIT_RATE_METRIC = {
+_UNIT_RATE_METRIC: Final[Mapping[str | None, str]] = {
     None: "json_api_rate",
     "count": "json_api_count_rate",
     "bytes": "json_api_bytes_rate",
@@ -210,7 +211,7 @@ def _render_celsius(number: float) -> str:
     return f"{number:.1f} °C"
 
 
-_UNIT_RENDER: dict[str, Callable[[float], str]] = {
+_UNIT_RENDER: Final[Mapping[str, Callable[[float], str]]] = {
     "bytes": render.bytes,
     # time_offset, not timespan: timespan raises on a negative value, and a
     # negative duration is ordinary here (the age of a timestamp in the future).
@@ -774,7 +775,7 @@ def _as_number(value: object) -> float | None:
     return number if math.isfinite(number) else None
 
 
-_AGGREGATE_LABEL = {
+_AGGREGATE_LABEL: Final[Mapping[str, str]] = {
     "count": "number of elements",
     "sum": "sum of the elements",
     "avg": "average of the elements",
@@ -782,7 +783,7 @@ _AGGREGATE_LABEL = {
     "max": "largest element",
 }
 
-_VALUE_AS_LABEL = {
+_VALUE_AS_LABEL: Final[Mapping[str, str]] = {
     "counter": "counter (per-second rate)",
     "timestamp": "timestamp (age)",
 }
@@ -1140,7 +1141,7 @@ def _derive(entry: Item) -> tuple[float | None, str, Callable[[float], str] | No
 
 
 # What the derived number is called in the summary and the levels line.
-_VALUE_LABEL = {"counter": "Rate", "timestamp": "Age"}
+_VALUE_LABEL: Final[Mapping[str, str]] = {"counter": "Rate", "timestamp": "Age"}
 
 
 def _value_label(value_as: _ValueAs, line: str | None = None) -> str:

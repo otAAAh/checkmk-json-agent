@@ -2,12 +2,15 @@
 <!-- Copyright (C) 2026 Benjamin Knapp -->
 <!-- SPDX-License-Identifier: GPL-2.0-only -->
 <!--
-  THROWAWAY EVALUATION HARNESS — NOT a shipped feature.
+  EVALUATION HARNESS AND DRIFT PROBE — not a user-facing feature.
 
-  This page binds to the *site's own* cmk-frontend-vue bundle (already installed
-  under htdocs/cmk-frontend-vue/) to evaluate whether the native Checkmk Vue
-  components are worth adopting for the JSON API Explorer. Nothing is bundled or
-  shipped: we just reference the running site's asset, same-origin.
+  Shipped in the json_api_explorer package on purpose: the bridge-check CI job
+  (.github/workflows/bridge-check.yml, tests/bridge/) installs the package in
+  real Checkmk containers and loads this page to detect a release that breaks
+  the bridge. It was written to evaluate the native Checkmk Vue components for
+  the JSON API Explorer. It binds to the *site's own* cmk-frontend-vue bundle
+  (already installed under htdocs/cmk-frontend-vue/); nothing of it is bundled
+  here: we just reference the running site's asset, same-origin.
 
   How it works (mirrors cmk/gui/htmllib/html.py):
     1. fetch ../cmk-frontend-vue/.manifest.json

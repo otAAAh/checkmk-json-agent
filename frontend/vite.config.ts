@@ -1,7 +1,8 @@
 // Copyright (C) 2026 Benjamin Knapp
 // SPDX-License-Identifier: GPL-2.0-only
-import { fileURLToPath, URL } from 'node:url'
+import os from 'node:os'
 import path from 'node:path'
+import { fileURLToPath, URL } from 'node:url'
 
 import vue from '@vitejs/plugin-vue'
 import { defineConfig } from 'vite'
@@ -20,8 +21,9 @@ import { defineConfig } from 'vite'
 //   CMK_SHARED_TYPING     dir holding generated `typescript/*.ts` — codegen
 //                         (`packages/cmk-shared-typing/run -b`). Only set in CI;
 //                         locally it resolves via cmk-frontend-vue/node_modules.
-// All default to a single fully-built $CMK_REPO checkout for local dev.
-const CMK_REPO = process.env.CMK_REPO ?? '/home/benjaminknapp/git/checkmk'
+// All default to a single fully-built $CMK_REPO checkout for local dev, which
+// itself defaults to ~/git/checkmk like the Makefile and dev-build-frontend.sh.
+const CMK_REPO = process.env.CMK_REPO ?? path.join(os.homedir(), 'git/checkmk')
 const FRONTEND_VUE_SRC =
   process.env.CMK_FRONTEND_VUE_SRC ?? path.join(CMK_REPO, 'packages/cmk-frontend-vue/src')
 const FRONTEND_DIST =
