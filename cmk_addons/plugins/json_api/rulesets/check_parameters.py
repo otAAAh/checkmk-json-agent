@@ -8,9 +8,10 @@ Thresholds (upper/lower levels) and string matching for a discovered ``JSON
 parameter model: a default on a top folder, overridable further down the folder
 tree / per host / per service.
 
-The values a field carries in the special-agent rule become the service's
-*discovered defaults*; a rule of this ruleset overrides them (standard
-precedence: plugin defaults < discovered < this rule). Keeping thresholds here -
+The values a field carries in the special-agent rule are the service's
+defaults - they reach the check through the agent section, so editing them
+takes effect without a re-discovery - and a rule of this ruleset overrides them
+per key (precedence: agent rule < this rule). Keeping thresholds here -
 rather than only in the special-agent rule - is what lets an operator retune a
 level from the service's "Parameters" view without touching the agent
 connection, and gives the level a per-folder override it never had while it

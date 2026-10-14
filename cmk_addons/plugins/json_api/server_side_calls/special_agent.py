@@ -22,7 +22,9 @@ from cmk.server_side_calls.v1 import (
     URLProxy,
     replace_macros,
 )
-from pydantic import BaseModel
+from pydantic import BaseModel, model_validator
+
+from ..migrations import migrate_extraction, migrate_to_endpoints
 
 
 class Header(BaseModel, frozen=True):
@@ -130,6 +132,13 @@ class ValueRange(BaseModel, frozen=True):
 
 
 class Extraction(BaseModel, frozen=True):
+    @model_validator(mode="before")
+    @classmethod
+    def upgrade_stored_shape(cls, value: object) -> object:
+        # A rule stored in an older shape and not opened in Setup since is
+        # upgraded here, with the ruleset's own migrate (see ``migrations``).
+        return migrate_extraction(value) if isinstance(value, dict) else value
+
     path: str
     service: str
     # Report this field into a shared service of this name instead of one of its
@@ -183,11 +192,6 @@ class Extraction(BaseModel, frozen=True):
     # Collapse the collection at the path into one number: count / sum / avg /
     # min / max (resolved by the agent, which has the document).
     aggregate: Literal["count", "sum", "avg", "min", "max"] | None = None
-    # Superseded by ``aggregate``: the old boolean "count the elements at this
-    # path". A rule saved before the aggregate dropdown still carries it (the
-    # ruleset migrates it only when the rule is next opened in Setup), so it is
-    # passed on and the agent reads it as aggregate="count".
-    count: bool = False
     # ("counter", None) or ("timestamp", {"format": ...}) from the
     # CascadingSingleChoice: derive a per-second rate / an age from the value.
     # Opaque here; the check interprets it.
@@ -313,6 +317,11 @@ class Endpoint(BaseModel, frozen=True):
 
 
 class Params(BaseModel, frozen=True):
+    @model_validator(mode="before")
+    @classmethod
+    def upgrade_stored_shape(cls, value: object) -> object:
+        return migrate_to_endpoints(value) if isinstance(value, dict) else value
+
     endpoints: Sequence[Endpoint] = ()
 
 

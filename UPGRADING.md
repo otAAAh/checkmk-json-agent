@@ -12,6 +12,35 @@ this list needs none.
 `scripts/gen_changelog.py --version X.Y.Z` appends the matching section to the
 GitHub Release body, so these notes travel with the release people actually read.
 
+## [0.24.1]
+
+### Levels edited in the special-agent rule apply without a re-discovery
+
+Discovery used to copy a field's levels and string matching from the
+special-agent rule into the service's discovered parameters. Those take
+precedence over what the agent reports and only change on a re-discovery, so a
+level edited in the agent rule did nothing until the host was discovered again.
+Discovery no longer copies them; the check reads them from the agent rule on
+every run, and a *Generic JSON API* check-parameters rule still overrides them.
+
+**Effect:** services discovered by an earlier version still carry the old
+values as discovered parameters. Run a service discovery on the affected hosts
+and accept the changed parameters (*Accept all* / *Refresh parameters*) once;
+until then they behave as before.
+
+### Rules saved by an old version and never opened since run again
+
+A rule saved before 0.10.0 (one connection at the top level, from before
+multiple endpoints) or an extraction from before string matching (a flat
+*expected* regex) is upgraded when the rule is opened in Setup. A rule nobody
+had opened since reached the agent in its old shape, and the old parts were
+dropped: a pre-0.10.0 rule called the agent with no endpoint at all, which
+stopped with a usage error, and an *expected* regex was silently not checked.
+Both are now upgraded on the way to the agent.
+
+**Effect:** such a rule starts producing services on the next discovery, and an
+*expected* regex goes CRIT again when the value does not match.
+
 ## [0.24.0]
 
 ### A timestamp field with format `auto` now reads Go's default time layout

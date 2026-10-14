@@ -1025,6 +1025,28 @@ def test_main_isolates_an_endpoint_blob_that_is_not_an_object(agent, monkeypatch
     assert payload["endpoints"][1]["ok"] is True
 
 
+def _broken_fetch(endpoint, secret, debug=False):
+    raise RuntimeError("bug in the agent")
+
+
+_ONE_ENDPOINT = json.dumps({"url": "http://up", "extractions": [{"path": "s", "service": "Up"}]})
+
+
+def test_an_unexpected_error_costs_only_its_endpoints_services(agent, monkeypatch, capsys):
+    monkeypatch.setattr(agent, "_fetch", _broken_fetch)
+    assert agent.main(["--endpoint", _ONE_ENDPOINT]) == 0
+    payload = json.loads(capsys.readouterr().out.splitlines()[1])
+    assert "bug in the agent" in payload["endpoints"][0]["error"]
+
+
+def test_debug_lets_an_unexpected_error_through(agent, monkeypatch):
+    # Checkmk's '--debug' contract: the traceback is what someone running the
+    # program by hand needs, not a one-line service text.
+    monkeypatch.setattr(agent, "_fetch", _broken_fetch)
+    with pytest.raises(RuntimeError, match="bug in the agent"):
+        agent.main(["--endpoint", _ONE_ENDPOINT, "--debug"])
+
+
 def test_main_flushes_stdout(agent, monkeypatch):
     """The section is flushed before returning, so a consultant who copies the
     program call out of `cmk -D <host>` and runs it by hand on a TTY sees the

@@ -23,6 +23,8 @@ import json
 from cmk.gui.http import request
 from cmk.gui.pages import AjaxPage, PageContext, PageResult
 
+from .guards import check_csrf
+
 
 class JsonExplorerValidatePage(AjaxPage):
     def page(self, ctx: PageContext) -> PageResult:
@@ -37,6 +39,7 @@ class JsonExplorerValidatePage(AjaxPage):
         )
 
         user.need_permission("wato.use")
+        check_csrf(ctx)
 
         builders = {
             "connections": connection_list_form_spec,

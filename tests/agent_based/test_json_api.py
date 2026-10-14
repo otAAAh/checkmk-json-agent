@@ -726,7 +726,7 @@ def test_check_api_error_is_crit(check):
     assert "boom" in result.summary
 
 
-# --- check-parameters ruleset: discovery seeds defaults, rule overrides them ---
+# --- check-parameters ruleset: overrides the agent rule's values per key -------
 
 
 def test_plugin_wires_check_ruleset(check):
@@ -734,9 +734,9 @@ def test_plugin_wires_check_ruleset(check):
     assert check.check_plugin_json_api.check_ruleset_name == "json_api"
 
 
-def test_discovery_seeds_parameters_from_section(check):
-    # The thresholds / match configured in the agent rule become the service's
-    # discovered defaults; a field with neither carries no parameters.
+def test_discovery_does_not_freeze_the_agent_rules_levels(check):
+    # Discovered parameters take precedence over the section and only change on a
+    # re-discovery, so seeding them from the agent rule would freeze its levels.
     section = _section(
         check,
         [
@@ -746,9 +746,21 @@ def test_discovery_seeds_parameters_from_section(check):
         ],
     )
     services = {s.item: s.parameters for s in check.discover_json_api(section)}
-    assert services["Conns"] == {"levels_upper": ("fixed", (5.0, 10.0))}
-    assert services["Up"]["match"][0] == "must_match"
-    assert services["Plain"] == {}
+    assert services == {"Conns": {}, "Up": {}, "Plain": {}}
+
+
+def test_a_level_edited_in_the_agent_rule_applies_without_rediscovery(check):
+    # The service was discovered while the agent rule said 5/10; the rule now
+    # says 100/200, and the check must follow the section, not the autocheck.
+    before = _section(check, [_entry("Conns", value=7, levels_upper=["fixed", [5.0, 10.0]])])
+    (service,) = list(check.discover_json_api(before))
+    after = _section(check, [_entry("Conns", value=7, levels_upper=["fixed", [100.0, 200.0]])])
+    result = next(
+        r
+        for r in check.check_json_api("Conns", service.parameters, after)
+        if isinstance(r, Result) and r.summary
+    )
+    assert result.state == State.OK
 
 
 def test_check_levels_param_overrides_section(check):

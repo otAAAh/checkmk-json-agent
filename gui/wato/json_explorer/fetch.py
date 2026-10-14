@@ -61,11 +61,19 @@ from cmk.gui.i18n import _
 from cmk.gui.logged_in import user
 from cmk.gui.pages import AjaxPage, PageContext, PageResult
 
+from .guards import check_csrf, usable_password_ids
+
 _TIMEOUT = 10
 
 
 def _resolve_password(value: object) -> str:
-    """Reveal a Password FormSpec disk value: ('cmk_postprocessed', kind, (id, pw))."""
+    """Reveal a Password FormSpec disk value: ('cmk_postprocessed', kind, (id, pw)).
+
+    A stored password is revealed only when the user may use that entry. The id
+    comes from the browser, and the secret goes to a URL the browser chose, so
+    without the check any Setup user could read every password in the store by
+    pointing the preview at a server of their own.
+    """
     if not (isinstance(value, (list, tuple)) and len(value) == 3):
         return ""
     _tag, kind, ref = value
@@ -74,12 +82,21 @@ def _resolve_password(value: object) -> str:
     if kind == "explicit_password":
         return plain or ""
     if kind == "stored_password":
+        if pid not in usable_password_ids():
+            raise _PreviewError(
+                _("The stored password '%s' does not exist or you may not use it") % pid
+            )
         try:
             from cmk.utils import password_store
 
             return password_store.lookup(password_store.password_store_path(), pid)
-        except Exception:
-            return ""
+        except Exception as exc:
+            # Never fall back to an empty secret: the request would go out
+            # unauthenticated and the preview would show the API's rejection
+            # as if it were the endpoint's answer.
+            raise _PreviewError(
+                _("Cannot read the stored password '%s' (%s)") % (pid, type(exc).__name__)
+            ) from exc
     return ""
 
 
@@ -379,7 +396,10 @@ def _redacted(text: str, conn: dict[str, Any]) -> str:
     if not (isinstance(auth, (list, tuple)) and len(auth) == 2 and auth[0] == "auth_query"):
         return text
     params = auth[1] if isinstance(auth[1], dict) else {}
-    secret = _resolve_password(params.get("key"))
+    try:
+        secret = _resolve_password(params.get("key"))
+    except _PreviewError:  # the request resolved it first; nothing to mask otherwise
+        return text
     for form in (secret, quote(secret, safe=""), quote_plus(secret)):
         if form:
             text = text.replace(form, "<redacted>")
@@ -389,6 +409,7 @@ def _redacted(text: str, conn: dict[str, Any]) -> str:
 class JsonExplorerFetchPage(AjaxPage):
     def page(self, ctx: PageContext) -> PageResult:
         user.need_permission("wato.use")  # gate the SSRF surface to Setup users
+        check_csrf(ctx)
 
         conn = _connection()
         url = str(conn.get("url", "")).strip()

@@ -715,28 +715,12 @@ def discover_json_api(section: Section) -> DiscoveryResult:
         visible = _visible_entries(entries)
         if not visible:
             continue
-        # Seed each service's discovered parameters with the thresholds / match
-        # configured in the special-agent rule. These become the service's
-        # defaults; a "Generic JSON API" check-parameters rule then overrides
-        # them per folder/host/service (precedence: default < discovered < rule).
-        # Only carry the keys that are actually set, so an unset level stays
-        # absent (and the check falls back to the section for pre-upgrade
-        # autochecks that have no discovered parameters at all).
+        # No discovered parameters. The thresholds and string matching configured
+        # in the special-agent rule reach the check through the section on every
+        # run; copying them into the autocheck here would freeze them, because
+        # discovered parameters take precedence over the section and only change
+        # on a re-discovery. A check-parameters rule overrides them per key.
         #
-        # A service several fields share gets NONE of this: one set of levels
-        # cannot describe several fields, and seeding it from whichever field
-        # happened to be first would apply that field's thresholds to all of
-        # them. Those services keep their per-field configuration from the agent
-        # rule instead, which is where it was written.
-        params: dict[str, object] = {}
-        if len(visible) == 1:
-            entry = visible[0]
-            if entry.levels_upper is not None:
-                params["levels_upper"] = entry.levels_upper
-            if entry.levels_lower is not None:
-                params["levels_lower"] = entry.levels_lower
-            if entry.match is not None:
-                params["match"] = entry.match
         # Service labels the agent resolved for this service, namespaced. Attached
         # at discovery, so they update when the service is re-discovered. Where
         # fields share a service they contribute to one label set (later wins per
@@ -744,7 +728,6 @@ def discover_json_api(section: Section) -> DiscoveryResult:
         labels = {key: value for entry in visible for key, value in entry.service_labels}
         yield Service(
             item=name,
-            parameters=params,
             labels=[ServiceLabel(f"{_LABEL_NS}{key}", value) for key, value in labels.items()],
         )
 
@@ -1434,10 +1417,10 @@ def check_json_api(item: str, params: Mapping[str, object], section: Section) ->
     for index, entry in enumerate(entries):
         if entry.inventory is not None and not entry.inventory.keep_service:
             continue  # an inventory-only field of a shared service
-        # Effective parameters: a check-parameters rule (or the discovered
-        # defaults) wins per key; where a key is absent we fall back to the value
-        # the agent embedded in the section, so services discovered by a
-        # pre-parameters version keep their thresholds until re-discovered.
+        # Effective parameters: a check-parameters rule wins per key; where a key
+        # is absent the value the agent rule embedded in the section applies.
+        # (Services discovered before 0.24.1 still carry the agent rule's values
+        # as discovered parameters, which win the same way until re-discovered.)
         levels_upper = (
             _coerce_levels(params["levels_upper"])
             if "levels_upper" in params and not combined
