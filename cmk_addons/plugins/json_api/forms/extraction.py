@@ -8,18 +8,14 @@ what its service shows - with the checks that need the field as a whole.
 import ast
 import re
 
-from cmk.rulesets.v1 import Help, Label, Message, Title
+from cmk.rulesets.v1 import Help, Message, Title
 from cmk.rulesets.v1.form_specs import (
-    CascadingSingleChoice,
-    CascadingSingleChoiceElement,
     DefaultValue,
     DictElement,
     Dictionary,
     FieldSize,
-    FixedValue,
     Float,
     InputHint,
-    List,
     SingleChoice,
     SingleChoiceElement,
     String,
@@ -30,9 +26,9 @@ from ..lib import levels_lower, levels_upper, string_match
 from ..migrations import migrate_extraction as _migrate_extraction
 from .common import _element_filter
 from .inventory import _INVENTORY_ROW_KEY, _inventory
-from .labels import _validate_label_spec
+from .labels import _piggyback_labels, _service_labels
 from .metrics import _UNIT_RATE_METRIC, _validate_metric_name
-from .value_as import _validate_strptime_pattern, _validate_timestamp_format
+from .value_as import _value_as
 
 # The AST node types a calc expression may contain: an arithmetic tree over
 # numeric literals and the variable 'value'. Kept in lock-step with the check's
@@ -357,129 +353,11 @@ def _extraction() -> Dictionary:
             ),
             "piggyback_labels": DictElement(
                 required=False,
-                parameter_form=List(
-                    title=Title("Labels for the created host"),
-                    help_text=Help(
-                        "Checkmk HOST labels for the host each '[*]' element becomes, "
-                        "built from fields within that element - so the 50 hosts a "
-                        "'nodes[*]' rule creates can carry their own region, role or "
-                        "tier and be targeted by folder rules, views and filters. "
-                        "Needs 'Create one host per element' above; without it the "
-                        "element stays a service on this host and there is nothing "
-                        "to label. Each key is prefixed with 'json_api/'. A label can "
-                        "also be a classification rather than a field: a condition on "
-                        "the element plus a literal value tags only the hosts the "
-                        "condition holds for. These are HOST labels, unlike 'Service "
-                        "labels' below, which describe the individual service."
-                    ),
-                    element_template=Dictionary(
-                        custom_validate=(_validate_label_spec,),
-                        elements={
-                            "path": DictElement(
-                                required=False,
-                                parameter_form=String(
-                                    title=Title("JSON path"),
-                                    field_size=FieldSize.LARGE,
-                                    help_text=Help(
-                                        "Relative to each '[*]' element, e.g. "
-                                        "'region'. Can be left empty only where a "
-                                        "condition and a literal value describe the "
-                                        "label on their own."
-                                    ),
-                                ),
-                            ),
-                            "key": DictElement(
-                                required=False,
-                                parameter_form=String(
-                                    title=Title("Label key (optional)"),
-                                    help_text=Help(
-                                        "Defaults to the path's last segment. The "
-                                        "'json_api/' prefix is added automatically."
-                                    ),
-                                ),
-                            ),
-                            "value": DictElement(
-                                required=False,
-                                parameter_form=String(
-                                    title=Title("Label value (literal)"),
-                                    help_text=Help(
-                                        "A value written here instead of read from "
-                                        "the response ('yes', 'production', ...). "
-                                        "With it a '[*]' path produces ONE label for "
-                                        "the whole collection rather than one per "
-                                        "element, so the key is used exactly as "
-                                        "given - no '<key>/<element>' suffix. "
-                                        "Combined with the condition below this is "
-                                        "the classification case: 'if any element "
-                                        "matches, tag the host'."
-                                    ),
-                                ),
-                            ),
-                            "filter": DictElement(
-                                required=False,
-                                parameter_form=_element_filter(
-                                    Title("Only elements matching a condition"),
-                                    Help(
-                                        "Emit the label only for the elements whose "
-                                        "sub-field matches this condition - e.g. "
-                                        "'name' matching '^MyApp' over a "
-                                        "'services[*]' path. The field path is "
-                                        "resolved within each element; an element "
-                                        "whose field is missing or is not a scalar "
-                                        "never matches. Without a '[*]' wildcard the "
-                                        "condition is checked once, in the same "
-                                        "scope the path is read from, so the label "
-                                        "is set only when it holds."
-                                    ),
-                                ),
-                            ),
-                        },
-                    ),
-                ),
+                parameter_form=_piggyback_labels(),
             ),
             "labels": DictElement(
                 required=False,
-                parameter_form=List(
-                    title=Title("Service labels"),
-                    help_text=Help(
-                        "Attach Checkmk service labels to THIS service, built from "
-                        "fields in the response. Each key is prefixed with "
-                        "'json_api/'. For a '[*]' path the value is resolved within "
-                        "each element (e.g. 'name'), so a per-element service gets "
-                        "its own label; for a non-wildcard path it is resolved from "
-                        "the response root. Host-wide facts belong in the endpoint's "
-                        "'Host labels' instead. Labels are set at discovery, so pick "
-                        "stable, low-cardinality fields - a value that changes churns "
-                        "the label."
-                    ),
-                    element_template=Dictionary(
-                        elements={
-                            "path": DictElement(
-                                required=True,
-                                parameter_form=String(
-                                    title=Title("JSON path"),
-                                    field_size=FieldSize.LARGE,
-                                    help_text=Help(
-                                        "Relative to each '[*]' element (like the name "
-                                        "suffix), or the response root for a "
-                                        "non-wildcard path."
-                                    ),
-                                    custom_validate=(validators.LengthInRange(min_value=1),),
-                                ),
-                            ),
-                            "key": DictElement(
-                                required=False,
-                                parameter_form=String(
-                                    title=Title("Label key (optional)"),
-                                    help_text=Help(
-                                        "Defaults to the path's last segment. The "
-                                        "'json_api/' prefix is added automatically."
-                                    ),
-                                ),
-                            ),
-                        }
-                    ),
-                ),
+                parameter_form=_service_labels(),
             ),
             "aggregate": DictElement(
                 required=False,
@@ -525,121 +403,7 @@ def _extraction() -> Dictionary:
             ),
             "value_as": DictElement(
                 required=False,
-                parameter_form=CascadingSingleChoice(
-                    title=Title("Interpret the value as"),
-                    help_text=Help(
-                        "By default the extracted value is monitored as it stands. "
-                        "Two common API values are worth deriving something else "
-                        "from: a counter that only ever grows (its rate of change "
-                        "is what matters, not the total), and a timestamp (its age "
-                        "is what matters, not the date). The derived number is what "
-                        "the transform, the levels, the metric and the summary then "
-                        "use."
-                    ),
-                    prefill=DefaultValue("counter"),
-                    elements=[
-                        CascadingSingleChoiceElement(
-                            name="counter",
-                            title=Title("A counter - monitor its per-second rate"),
-                            parameter_form=FixedValue(
-                                value=None,
-                                title=Title("Per-second rate"),
-                                label=Label(
-                                    "The difference to the previous check is divided "
-                                    "by the elapsed time"
-                                ),
-                                help_text=Help(
-                                    "For monotonically growing counters such as "
-                                    "'requests_total' or 'bytes_sent': the check "
-                                    "monitors the change per second instead of the "
-                                    "absolute total. The first check after a "
-                                    "restart of the counter cannot compute a rate "
-                                    "yet and keeps the service's previous state."
-                                ),
-                            ),
-                        ),
-                        CascadingSingleChoiceElement(
-                            name="timestamp",
-                            title=Title("A timestamp - monitor its age"),
-                            parameter_form=Dictionary(
-                                help_text=Help(
-                                    "For values such as 'last_backup' or "
-                                    "'updated_at': the check monitors the number of "
-                                    "seconds since that point in time, so upper "
-                                    "levels alert on stale data. A timestamp in the "
-                                    "future yields a negative age. The age graphs "
-                                    "and reads as a duration on its own; choose a "
-                                    "unit below only to override that (e.g. after a "
-                                    "transform into hours)."
-                                ),
-                                elements={
-                                    "format": DictElement(
-                                        required=True,
-                                        parameter_form=SingleChoice(
-                                            title=Title("Timestamp format"),
-                                            help_text=Help(
-                                                "'Detect automatically' reads a "
-                                                "number as Unix epoch seconds "
-                                                "(milliseconds when it is far too "
-                                                "large for seconds) and text as "
-                                                "ISO 8601, as an HTTP-date ('Wed, "
-                                                "21 Oct 2015 07:28:00 GMT') or in "
-                                                "Go's default layout ('2015-10-21 "
-                                                "07:28:00 +0000 UTC'). 'Custom "
-                                                "format' reads text with the pattern "
-                                                "below. A timestamp without a time "
-                                                "zone is read as UTC."
-                                            ),
-                                            elements=[
-                                                SingleChoiceElement(
-                                                    "auto", Title("Detect automatically")
-                                                ),
-                                                SingleChoiceElement(
-                                                    "epoch", Title("Unix epoch seconds")
-                                                ),
-                                                SingleChoiceElement(
-                                                    "epoch_ms",
-                                                    Title("Unix epoch milliseconds"),
-                                                ),
-                                                SingleChoiceElement(
-                                                    "iso",
-                                                    Title(
-                                                        "ISO 8601 / RFC 3339, "
-                                                        "e.g. '2026-07-28T02:00:00Z'"
-                                                    ),
-                                                ),
-                                                SingleChoiceElement(
-                                                    "custom",
-                                                    Title("Custom format (pattern below)"),
-                                                ),
-                                            ],
-                                            prefill=DefaultValue("auto"),
-                                        ),
-                                    ),
-                                    "pattern": DictElement(
-                                        required=False,
-                                        parameter_form=String(
-                                            title=Title("Custom format pattern"),
-                                            help_text=Help(
-                                                "Only used with 'Custom format'. "
-                                                "Python strptime directives, e.g. "
-                                                "'%d.%m.%Y %H:%M:%S' for "
-                                                "'28.07.2026 02:00:00' or "
-                                                "'%m/%d/%Y %I:%M %p' for "
-                                                "'07/28/2026 02:00 AM'. Without %z "
-                                                "in the pattern the time is read "
-                                                "as UTC."
-                                            ),
-                                            field_size=FieldSize.LARGE,
-                                            custom_validate=(_validate_strptime_pattern,),
-                                        ),
-                                    ),
-                                },
-                                custom_validate=(_validate_timestamp_format,),
-                            ),
-                        ),
-                    ],
-                ),
+                parameter_form=_value_as(),
             ),
             "unit": DictElement(
                 required=False,
