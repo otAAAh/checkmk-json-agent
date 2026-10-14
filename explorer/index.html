@@ -1415,7 +1415,7 @@ function paginationObj(e) {
 }
 
 // Parse the "accept status codes" text field into a de-duplicated int array,
-// mirroring the ruleset's List(Integer) and the agent's _accepted_statuses.
+// mirroring the ruleset's List(Integer) and the agent's _accept_status (models.py).
 function parseStatuses(s) {
   const out = [];
   for (const part of String(s || "").split(",")) {
