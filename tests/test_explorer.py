@@ -23,10 +23,10 @@ import subprocess
 from pathlib import Path
 
 import pytest
+from ruleset_ast import ruleset_definition, ruleset_source
 
 _ROOT = Path(__file__).resolve().parent.parent
 _HARNESS = Path(__file__).parent / "explorer_harness.mjs"
-_RULESET = _ROOT / "cmk_addons" / "plugins" / "json_api" / "rulesets" / "special_agent.py"
 
 pytestmark = pytest.mark.skipif(
     shutil.which("node") is None, reason="Node is required to drive the Explorer"
@@ -36,14 +36,13 @@ pytestmark = pytest.mark.skipif(
 def _required_keys(func_name: str) -> set[str]:
     """The keys of ``required=True`` DictElements in a ruleset builder function.
 
-    AST-parses ``special_agent.py`` (no ``cmk`` import needed) and reads the
+    AST-parses the ruleset and its ``forms/`` modules (no ``cmk`` import
+    needed) and reads the
     single ``Dictionary(elements={...})`` returned by ``func_name`` (e.g.
     ``endpoint_form`` / ``_extraction``).
     """
-    tree = ast.parse(_RULESET.read_text())
-    func = next(
-        node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == func_name
-    )
+    func = ruleset_definition(func_name)
+    assert isinstance(func, ast.FunctionDef), func_name
     elements = next(
         kw.value
         for call in ast.walk(func)
@@ -173,7 +172,7 @@ def test_explorer_choices_match_the_ruleset(explorer_output: dict):
     # Every aggregate / value_as / timestamp-format choice the Explorer offers
     # must exist in the ruleset, or it generates a rule Checkmk rejects.
     source = (_ROOT / "explorer" / "index.html").read_text()
-    ruleset = _RULESET.read_text()
+    ruleset = ruleset_source()
     for choice in ("count", "sum", "avg", "min", "max"):
         assert f'SingleChoiceElement("{choice}"' in ruleset
     for choice in ("counter", "timestamp"):
@@ -469,7 +468,7 @@ def test_explorer_refuses_counted_settings_setup_would_refuse(explorer_output: d
     # Each of the ruleset's checks, answered with the ruleset's own message, and
     # no pagination emitted: a rule that fails on import helps nobody, and in the
     # CLI blob the size would overwrite the position.
-    source = _RULESET.read_text()
+    source = ruleset_source()
     # The ruleset's messages with the implicit string concatenation undone.
     flat = re.sub(r'"\s*\n\s*"', "", source)
     for name, refused in explorer_output["refused"].items():
@@ -512,18 +511,14 @@ def test_explorer_emits_a_value_range_the_ruleset_accepts(rule_value: dict, expl
 
 
 def _ruleset_assignment(name: str) -> ast.expr:
-    """The value assigned to a module-level ``name`` in the ruleset.
+    """The value assigned to a module-level ``name`` in the ruleset or its forms.
 
     AST again, not an import: this file's whole point is running without
     ``cmk.*`` (the CI 'explorer' job is a plain Python with no Checkmk).
     """
-    tree = ast.parse(_RULESET.read_text())
-    for node in tree.body:
-        if isinstance(node, ast.Assign) and any(
-            isinstance(t, ast.Name) and t.id == name for t in node.targets
-        ):
-            return node.value
-    raise AssertionError(f"the ruleset no longer defines {name}")
+    node = ruleset_definition(name)
+    assert isinstance(node, ast.Assign), name
+    return node.value
 
 
 def test_explorers_metric_name_pattern_matches_the_rulesets():
