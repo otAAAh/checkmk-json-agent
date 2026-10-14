@@ -29,6 +29,7 @@ from pathlib import Path
 import pytest
 from ruleset_ast import dictionary_keys
 
+from cmk_addons.plugins.json_api.special_agent import models as agent_models
 from cmk_addons.plugins.json_api.special_agent import pagination as agent_pagination
 
 _FETCH = Path(__file__).resolve().parent.parent / "gui" / "wato" / "json_explorer" / "fetch.py"
@@ -397,7 +398,11 @@ _COUNTED = [
 )
 def test_the_preview_asks_for_the_agents_first_page(explorer_fetch, url, pagination):
     endpoint = {"url": url, "pagination": pagination}
-    assert explorer_fetch._first_page_url(endpoint) == agent_pagination._first_page_url(endpoint)
+    # The agent reads the same blob, parsed as it parses every '--endpoint'.
+    agent_endpoint = agent_models.parse_endpoint(endpoint)
+    assert explorer_fetch._first_page_url(endpoint) == agent_pagination._first_page_url(
+        agent_endpoint
+    )
 
 
 def test_the_counted_first_page_reaches_the_api(explorer_fetch, serve):

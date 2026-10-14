@@ -9,13 +9,73 @@ import time
 import pytest
 import requests
 
+from cmk_addons.plugins.json_api.special_agent import agent_json_api as agent_main
 from cmk_addons.plugins.json_api.special_agent import cache as agent_cache
 from cmk_addons.plugins.json_api.special_agent import extract as agent_extract
 from cmk_addons.plugins.json_api.special_agent import fetch as agent_fetch
+from cmk_addons.plugins.json_api.special_agent import models as agent_models
 from cmk_addons.plugins.json_api.special_agent import oauth2 as agent_oauth2
 from cmk_addons.plugins.json_api.special_agent import pagination as agent_pagination
 from cmk_addons.plugins.json_api.special_agent import paths as agent_paths
 from cmk_addons.plugins.json_api.special_agent import transport as agent_transport
+
+# --- the '--endpoint' blob as the agent reads it -----------------------------
+#
+# The agent parses each blob once into typed values (special_agent/models.py);
+# the tests write the blob as the server-side call does, and hand it over parsed.
+
+
+def _endpoint(blob):
+    """An endpoint blob as the agent parses it; a URL is supplied where the test has none."""
+    return agent_models.parse_endpoint({"url": "http://test", **blob})
+
+
+def _blob(blob):
+    """A blob that may not be runnable at all, as ``_parse_endpoint`` reads it."""
+    return agent_main._endpoint_from_blob(blob)
+
+
+def _fields(specs):
+    return tuple(agent_models.parse_extraction(spec) for spec in specs)
+
+
+def _field(spec):
+    return agent_models.parse_extraction({"path": "p", "service": "S", **spec})
+
+
+def _context(spec):
+    return agent_models._field_context(spec)
+
+
+def _host_labels(specs):
+    return agent_models.parse_host_labels(specs)
+
+
+def _labels(specs):
+    return agent_models.parse_service_labels(specs)
+
+
+def _filter(spec):
+    return agent_models.parse_filter(spec)
+
+
+def _retry(blob):
+    retry = _endpoint(blob).retry
+    return retry.attempts, retry.backoff
+
+
+def _pagination_limits(spec):
+    pagination = agent_models._pagination(spec)
+    return pagination.max_pages, pagination.max_elements
+
+
+def _reported_limit(spec):
+    return agent_models._response_report(spec).max_bytes
+
+
+def _oauth2(spec):
+    return agent_models._oauth2({"auth": "auth_oauth2", "oauth2": spec})
+
 
 DOC = {
     "status": "UP",
@@ -69,7 +129,7 @@ def test_extract_scalar():
         {"path": "components.db", "service": "DB"},  # dict -> serialized to JSON text
         {"path": "missing", "service": "Gone"},
     ]
-    results = agent_extract._extract(DOC, specs, "http://test/h")
+    results = agent_extract._extract(DOC, _fields(specs), "http://test/h")
     by_service = {r["service"]: r for r in results}
 
     assert by_service["Health"]["value"] == "UP"
@@ -93,7 +153,7 @@ def test_extract_from_response_header():
         {"path": "@header.X-Absent", "service": "Gone"},
     ]
     headers = {"X-RateLimit-Remaining": "4999", "Content-Type": "application/json"}
-    results = agent_extract._extract(DOC, specs, "http://test/h", headers)
+    results = agent_extract._extract(DOC, _fields(specs), "http://test/h", headers)
     by_service = {r["service"]: r for r in results}
 
     assert by_service["Budget"]["found"] is True
@@ -108,10 +168,12 @@ def test_extract_header_path_does_not_touch_the_body():
     field of the same name, and reports 'not in response' with no headers at all
     (an endpoint served from a pre-header cache) rather than falling back."""
     specs = [{"path": "@header.status", "service": "H"}]
-    (result,) = agent_extract._extract(DOC, specs, "http://test/h", {"status": "from-header"})
+    (result,) = agent_extract._extract(
+        DOC, _fields(specs), "http://test/h", {"status": "from-header"}
+    )
     assert result["value"] == "from-header"
 
-    (result,) = agent_extract._extract(DOC, specs, "http://test/h", None)
+    (result,) = agent_extract._extract(DOC, _fields(specs), "http://test/h", None)
     assert result["found"] is False
 
 
@@ -119,7 +181,7 @@ def test_extract_header_ignores_wildcard_machinery():
     """Header names contain no path grammar: '[*]' and aggregation do not apply,
     so a name is looked up verbatim rather than split into segments."""
     specs = [{"path": "@header.X-Odd[*]Name", "service": "Odd", "aggregate": "count"}]
-    (result,) = agent_extract._extract(DOC, specs, "http://test/h", {"X-Odd[*]Name": "1"})
+    (result,) = agent_extract._extract(DOC, _fields(specs), "http://test/h", {"X-Odd[*]Name": "1"})
     assert result["found"] is True
     assert result["value"] == "1"
 
@@ -137,7 +199,7 @@ def test_calc_second_path_resolved_per_element():
             "calc_path": "total",
         }
     ]
-    results = agent_extract._extract(doc, specs, "http://test/h")
+    results = agent_extract._extract(doc, _fields(specs), "http://test/h")
     assert [r["calc_other"] for r in results] == [100, 200]
     # The expression itself is passed through untouched for the check to apply.
     assert all(r["calc"] == "value / other * 100" for r in results)
@@ -148,7 +210,7 @@ def test_calc_second_path_from_root_without_a_wildcard():
     specs = [
         {"path": "used", "service": "Quota", "calc": "value / other * 100", "calc_path": "limit"}
     ]
-    (result,) = agent_extract._extract(doc, specs, "http://test/h")
+    (result,) = agent_extract._extract(doc, _fields(specs), "http://test/h")
     assert result["calc_other"] == 12
 
 
@@ -156,40 +218,40 @@ def test_calc_second_path_missing_resolves_to_none():
     """An unresolvable second path is reported as absent, not as a zero: the
     check then fails the expression instead of computing a plausible ratio."""
     specs = [{"path": "status", "service": "S", "calc": "value / other", "calc_path": "nope"}]
-    (result,) = agent_extract._extract(DOC, specs, "http://test/h")
+    (result,) = agent_extract._extract(DOC, _fields(specs), "http://test/h")
     assert result["calc_other"] is None
 
 
 def test_extract_count_list():
     specs = [{"path": "items", "service": "Items", "count": True}]
-    (result,) = agent_extract._extract(DOC, specs, "http://test/h")
+    (result,) = agent_extract._extract(DOC, _fields(specs), "http://test/h")
     assert result["found"] is True
     assert result["value"] == 2
 
 
 def test_extract_count_object_keys():
     specs = [{"path": "components", "service": "Comps", "count": True}]
-    (result,) = agent_extract._extract(DOC, specs, "http://test/h")
+    (result,) = agent_extract._extract(DOC, _fields(specs), "http://test/h")
     assert result["found"] is True
     assert result["value"] == 1
 
 
 def test_extract_count_on_scalar_is_not_found():
     specs = [{"path": "status", "service": "Bad", "count": True}]
-    (result,) = agent_extract._extract(DOC, specs, "http://test/h")
+    (result,) = agent_extract._extract(DOC, _fields(specs), "http://test/h")
     assert result["found"] is False
     assert "cannot aggregate" in result["error"]
 
 
 def test_extract_wildcard_index_label():
     specs = [{"path": "items[*].count", "service": "Item"}]
-    results = agent_extract._extract(DOC, specs, "http://test/h")
+    results = agent_extract._extract(DOC, _fields(specs), "http://test/h")
     assert [(r["service"], r["value"]) for r in results] == [("Item 0", 42), ("Item 1", 99)]
 
 
 def test_extract_wildcard_with_label_path():
     specs = [{"path": "items[*].count", "service": "Item", "label_path": "name"}]
-    results = agent_extract._extract(DOC, specs, "http://test/h")
+    results = agent_extract._extract(DOC, _fields(specs), "http://test/h")
     assert [(r["service"], r["value"]) for r in results] == [
         ("Item alpha", 42),
         ("Item beta", 99),
@@ -198,14 +260,14 @@ def test_extract_wildcard_with_label_path():
 
 def test_extract_wildcard_scalar_array():
     specs = [{"path": "nodes[*]", "service": "Node"}]
-    results = agent_extract._extract(DOC, specs, "http://test/h")
+    results = agent_extract._extract(DOC, _fields(specs), "http://test/h")
     assert [(r["service"], r["value"]) for r in results] == [("Node 0", "n0"), ("Node 1", "n1")]
 
 
 def test_extract_wildcard_duplicate_labels_disambiguated():
     doc = {"pods": [{"app": "web", "v": 1}, {"app": "web", "v": 2}, {"app": "db", "v": 3}]}
     specs = [{"path": "pods[*].v", "service": "Pod", "label_path": "app"}]
-    results = agent_extract._extract(doc, specs, "http://test/h")
+    results = agent_extract._extract(doc, _fields(specs), "http://test/h")
     names = [r["service"] for r in results]
     # the two "web" pods are disambiguated by index; "db" stays clean
     assert names == ["Pod web [0]", "Pod web [1]", "Pod db"]
@@ -214,7 +276,7 @@ def test_extract_wildcard_duplicate_labels_disambiguated():
 
 def test_extract_wildcard_not_a_container():
     specs = [{"path": "status[*]", "service": "X"}]
-    (result,) = agent_extract._extract(DOC, specs, "http://test/h")
+    (result,) = agent_extract._extract(DOC, _fields(specs), "http://test/h")
     assert result["found"] is False
     assert result["error"] == "array or object not found at wildcard path"
 
@@ -231,7 +293,7 @@ def test_extract_wildcard_over_object_keys():
         },
     }
     specs = [{"path": "components[*].status", "service": "Health"}]
-    results = agent_extract._extract(doc, specs, "http://test/h")
+    results = agent_extract._extract(doc, _fields(specs), "http://test/h")
     assert [(r["service"], r["value"]) for r in results] == [
         ("Health module1", "UP"),
         ("Health module2", "DOWN"),
@@ -243,7 +305,7 @@ def test_extract_wildcard_over_object_with_label_path():
     # A field inside each value can still override the key as the label.
     doc = {"nodes": {"a": {"name": "web", "up": True}, "b": {"name": "db", "up": False}}}
     specs = [{"path": "nodes[*].up", "service": "Node", "label_path": "name"}]
-    results = agent_extract._extract(doc, specs, "http://test/h")
+    results = agent_extract._extract(doc, _fields(specs), "http://test/h")
     assert [(r["service"], r["value"]) for r in results] == [
         ("Node web", True),
         ("Node db", False),
@@ -264,7 +326,7 @@ def test_extract_nested_wildcard_cartesian_product():
         ]
     }
     specs = [{"path": "pods[*].containers[*].ready", "service": "Container", "label_path": "name"}]
-    results = agent_extract._extract(doc, specs, "http://test/h")
+    results = agent_extract._extract(doc, _fields(specs), "http://test/h")
     assert [(r["service"], r["value"]) for r in results] == [
         ("Container web / nginx", True),
         ("Container db / postgres", True),
@@ -275,7 +337,9 @@ def test_extract_nested_wildcard_cartesian_product():
 def test_extract_nested_wildcard_index_labels():
     # No label_path: every level falls back to its array index.
     doc = {"a": [{"b": [10, 11]}, {"b": [20]}]}
-    results = agent_extract._extract(doc, [{"path": "a[*].b[*]", "service": "X"}], "http://test/h")
+    results = agent_extract._extract(
+        doc, _fields([{"path": "a[*].b[*]", "service": "X"}]), "http://test/h"
+    )
     assert [(r["service"], r["value"]) for r in results] == [
         ("X 0 / 0", 10),
         ("X 0 / 1", 11),
@@ -288,7 +352,7 @@ def test_extract_nested_wildcard_missing_inner_array():
     # by the level(s) resolved so far.
     doc = {"a": [{"name": "ok", "b": [1]}, {"name": "broken"}]}
     results = agent_extract._extract(
-        doc, [{"path": "a[*].b[*]", "service": "X", "label_path": "name"}], "http://test/h"
+        doc, _fields([{"path": "a[*].b[*]", "service": "X", "label_path": "name"}]), "http://test/h"
     )
     assert [(r["service"], r["found"], r["value"]) for r in results] == [
         ("X ok / 0", True, 1),
@@ -307,7 +371,7 @@ def test_service_labels_resolved_per_element():
             "labels": [{"path": "name"}],
         }
     ]
-    results = agent_extract._extract(doc, specs, "http://test/h")
+    results = agent_extract._extract(doc, _fields(specs), "http://test/h")
     assert [r["labels"] for r in results] == [
         [{"key": "name", "value": "alpha"}],
         [{"key": "name", "value": "beta"}],
@@ -323,7 +387,7 @@ def test_service_labels_key_override_and_default_from_path():
             "labels": [{"path": "app.version", "key": "ver"}, {"path": "app.version"}],
         }
     ]
-    (result,) = agent_extract._extract(doc, specs, "http://test/h")
+    (result,) = agent_extract._extract(doc, _fields(specs), "http://test/h")
     assert result["labels"] == [
         {"key": "ver", "value": "1.2.3"},
         {"key": "version", "value": "1.2.3"},
@@ -344,7 +408,7 @@ def test_service_labels_skip_missing_and_non_scalar_values():
             ],
         }
     ]
-    (result,) = agent_extract._extract(doc, specs, "http://test/h")
+    (result,) = agent_extract._extract(doc, _fields(specs), "http://test/h")
     assert result["labels"] == [{"key": "n", "value": "a"}]
 
 
@@ -356,14 +420,17 @@ def test_resolve_host_labels_from_root():
         {"path": "bad"},  # object -> skipped
         {"path": "missing"},  # absent -> skipped
     ]
-    assert agent_extract._resolve_host_labels(specs, doc) == {"region": "eu", "ver": "2.4.0"}
+    assert agent_extract._resolve_host_labels(_host_labels(specs), doc) == {
+        "region": "eu",
+        "ver": "2.4.0",
+    }
 
 
 def test_resolve_host_labels_wildcard_membership():
     # A '[*]' map path -> one unique label per element; default value 'true'.
     doc = {"components": {"db": {"status": "ok"}, "cache": {"status": "degraded"}}}
     specs = [{"path": "components[*]", "key": "component"}]
-    assert agent_extract._resolve_host_labels(specs, doc) == {
+    assert agent_extract._resolve_host_labels(_host_labels(specs), doc) == {
         "component/db": "true",
         "component/cache": "true",
     }
@@ -373,7 +440,7 @@ def test_resolve_host_labels_wildcard_value_field():
     # value_field picks the per-element value; key stays unique via the element id.
     doc = {"components": {"db": {"status": "ok"}, "cache": {"status": "degraded"}}}
     specs = [{"path": "components[*]", "key": "component", "value_field": "status"}]
-    assert agent_extract._resolve_host_labels(specs, doc) == {
+    assert agent_extract._resolve_host_labels(_host_labels(specs), doc) == {
         "component/db": "ok",
         "component/cache": "degraded",
     }
@@ -392,7 +459,7 @@ def test_resolve_host_labels_filtered_collection_yields_one_label():
     ]
     # One label, keyed exactly as configured - no '<key>/<element>' suffixing,
     # and not one label per matching element.
-    assert agent_extract._resolve_host_labels(specs, doc) == {"MyApp": "yes"}
+    assert agent_extract._resolve_host_labels(_host_labels(specs), doc) == {"MyApp": "yes"}
 
 
 def test_resolve_host_labels_filter_matching_nothing_emits_no_label():
@@ -405,7 +472,7 @@ def test_resolve_host_labels_filter_matching_nothing_emits_no_label():
             "filter": {"path": "name", "op": "regex", "value": "^MyApp.*"},
         }
     ]
-    assert agent_extract._resolve_host_labels(specs, doc) == {}
+    assert agent_extract._resolve_host_labels(_host_labels(specs), doc) == {}
 
 
 def test_resolve_host_labels_filter_without_a_literal_value_keeps_one_label_per_element():
@@ -419,7 +486,7 @@ def test_resolve_host_labels_filter_without_a_literal_value_keeps_one_label_per_
             "filter": {"path": "role", "op": "equals", "value": "db"},
         }
     ]
-    assert agent_extract._resolve_host_labels(specs, doc) == {"node/0": "a"}
+    assert agent_extract._resolve_host_labels(_host_labels(specs), doc) == {"node/0": "a"}
 
 
 def test_resolve_host_labels_plain_path_filter_is_checked_once():
@@ -427,8 +494,8 @@ def test_resolve_host_labels_plain_path_filter_is_checked_once():
     doc = {"version": "2.4.0", "mode": "production"}
     keep = [{"path": "version", "filter": {"path": "mode", "op": "equals", "value": "production"}}]
     drop = [{"path": "version", "filter": {"path": "mode", "op": "equals", "value": "staging"}}]
-    assert agent_extract._resolve_host_labels(keep, doc) == {"version": "2.4.0"}
-    assert agent_extract._resolve_host_labels(drop, doc) == {}
+    assert agent_extract._resolve_host_labels(_host_labels(keep), doc) == {"version": "2.4.0"}
+    assert agent_extract._resolve_host_labels(_host_labels(drop), doc) == {}
 
 
 def test_resolve_host_labels_literal_value_without_a_path():
@@ -447,19 +514,19 @@ def test_resolve_host_labels_literal_value_without_a_path():
         },
         {"value": "yes"},  # no key and no path -> nothing to emit
     ]
-    assert agent_extract._resolve_host_labels(specs, doc) == {"prod": "yes"}
+    assert agent_extract._resolve_host_labels(_host_labels(specs), doc) == {"prod": "yes"}
 
 
 def test_resolve_host_labels_literal_value_beats_the_value_field():
     doc = {"components": {"db": {"status": "ok"}}}
     specs = [{"path": "components[*]", "key": "c", "value_field": "status", "value": "yes"}]
-    assert agent_extract._resolve_host_labels(specs, doc) == {"c": "yes"}
+    assert agent_extract._resolve_host_labels(_host_labels(specs), doc) == {"c": "yes"}
 
 
 def test_resolve_host_labels_missing_collection_is_not_an_element():
     """A collection that is absent must not be labelled as if it had one element."""
     specs = [{"path": "components[*]", "key": "component"}]
-    assert agent_extract._resolve_host_labels(specs, {}) == {}
+    assert agent_extract._resolve_host_labels(_host_labels(specs), {}) == {}
 
 
 def test_piggyback_labels_classify_the_created_host():
@@ -479,7 +546,7 @@ def test_piggyback_labels_classify_the_created_host():
             ],
         }
     ]
-    n1, n2 = agent_extract._extract(doc, specs, "http://test/h")
+    n1, n2 = agent_extract._extract(doc, _fields(specs), "http://test/h")
     assert n1["host_labels"] == {"db": "yes"}
     assert n2["host_labels"] == {}
 
@@ -495,19 +562,25 @@ def test_process_endpoint_emits_host_labels(agent, monkeypatch):
         "extractions": [{"path": "nodes[*].health", "service": "Node"}],
         "host_labels": [{"path": "version"}],
     }
-    results, host_labels, _record = agent._process_endpoint(argparse.Namespace(), 0, endpoint)
+    results, host_labels, _record = agent._process_endpoint(
+        argparse.Namespace(), 0, _blob(endpoint)
+    )
     assert host_labels == {"version": "9.9"}
     assert results and results[0]["service"].startswith("Node")
 
 
 def test_build_session_defaults_json_content_type_for_body():
-    _session, headers = agent_transport._build_session({"method": "POST", "body": "{}"}, None)
+    _session, headers = agent_transport._build_session(
+        _endpoint({"method": "POST", "body": "{}"}), None
+    )
     assert headers["Content-Type"] == "application/json"
 
 
 def test_build_session_omits_json_content_type_for_get_with_body():
     # A GET never sends the configured body, so it must not advertise one either.
-    _session, headers = agent_transport._build_session({"method": "GET", "body": "{}"}, None)
+    _session, headers = agent_transport._build_session(
+        _endpoint({"method": "GET", "body": "{}"}), None
+    )
     assert "Content-Type" not in headers
 
 
@@ -517,18 +590,18 @@ def test_build_session_keeps_explicit_content_type():
         "body": "a=1",
         "headers": [["Content-Type", "application/x-www-form-urlencoded"]],
     }
-    _session, headers = agent_transport._build_session(endpoint, None)
+    _session, headers = agent_transport._build_session(_endpoint(endpoint), None)
     assert headers["Content-Type"] == "application/x-www-form-urlencoded"
 
 
 def test_build_session_token_auth():
-    _session, headers = agent_transport._build_session({"auth": "auth_token"}, "abc")
+    _session, headers = agent_transport._build_session(_endpoint({"auth": "auth_token"}), "abc")
     assert headers["Authorization"] == "Bearer abc"
 
 
 def test_build_session_basic_auth_and_headers():
     endpoint = {"auth": "auth_login", "username": "user", "headers": [["X-Api", "v1"]]}
-    session, headers = agent_transport._build_session(endpoint, "pw")
+    session, headers = agent_transport._build_session(_endpoint(endpoint), "pw")
     assert session.auth == ("user", "pw")
     assert headers["X-Api"] == "v1"
 
@@ -631,7 +704,7 @@ def test_oauth2_exchanges_credentials_and_sends_a_bearer_token(agent, monkeypatc
     posts = _capture_token_post(agent, monkeypatch)
     captured = _capture_request(agent, monkeypatch)
 
-    document, error, _meta = agent_fetch._fetch(OAUTH2_ENDPOINT, "s3cret")
+    document, error, _meta = agent_fetch._fetch(_endpoint(OAUTH2_ENDPOINT), "s3cret")
 
     assert error is None and document == {"ok": 1}
     # The client credentials went to the TOKEN url, as a basic-auth pair.
@@ -649,7 +722,7 @@ def test_oauth2_can_send_the_credentials_in_the_body(agent, monkeypatch, token_c
     posts = _capture_token_post(agent, monkeypatch)
     _capture_request(agent, monkeypatch)
 
-    agent_fetch._fetch(endpoint, "s3cret")
+    agent_fetch._fetch(_endpoint(endpoint), "s3cret")
 
     (post,) = posts
     assert post["auth"] is None  # not in the Authorization header
@@ -661,8 +734,8 @@ def test_oauth2_reuses_a_cached_token_across_fetches(agent, monkeypatch, token_c
     posts = _capture_token_post(agent, monkeypatch)
     _capture_request(agent, monkeypatch)
 
-    agent_fetch._fetch(OAUTH2_ENDPOINT, "s3cret")
-    agent_fetch._fetch(OAUTH2_ENDPOINT, "s3cret")
+    agent_fetch._fetch(_endpoint(OAUTH2_ENDPOINT), "s3cret")
+    agent_fetch._fetch(_endpoint(OAUTH2_ENDPOINT), "s3cret")
 
     # One exchange for two requests: that is the point of caching the token.
     assert len(posts) == 1
@@ -676,9 +749,9 @@ def test_oauth2_refetches_an_expired_token(agent, monkeypatch, token_cache):
     )
     _capture_request(agent, monkeypatch)
 
-    agent_fetch._fetch(OAUTH2_ENDPOINT, "s3cret")
+    agent_fetch._fetch(_endpoint(OAUTH2_ENDPOINT), "s3cret")
     # expires_in below the refresh skew means the entry is already stale.
-    agent_fetch._fetch(OAUTH2_ENDPOINT, "s3cret")
+    agent_fetch._fetch(_endpoint(OAUTH2_ENDPOINT), "s3cret")
 
     assert len(posts) == 2
 
@@ -688,11 +761,11 @@ def test_oauth2_discards_a_cached_token_rejected_with_401(agent, monkeypatch, to
     fresh token beats reporting 401 until the cached entry times out."""
     posts = _capture_token_post(agent, monkeypatch)
     _capture_request(agent, monkeypatch)
-    agent_fetch._fetch(OAUTH2_ENDPOINT, "s3cret")  # seed the cache
+    agent_fetch._fetch(_endpoint(OAUTH2_ENDPOINT), "s3cret")  # seed the cache
     assert len(posts) == 1
 
     _capture_request(agent, monkeypatch, response=_FakeResponse(body=b"", status_code=401))
-    _document, error, meta = agent_fetch._fetch(OAUTH2_ENDPOINT, "s3cret")
+    _document, error, meta = agent_fetch._fetch(_endpoint(OAUTH2_ENDPOINT), "s3cret")
 
     assert "401" in error
     assert len(posts) == 2  # the cached token was discarded and re-fetched
@@ -705,7 +778,7 @@ def test_oauth2_does_not_retry_a_401_on_a_freshly_minted_token(agent, monkeypatc
     posts = _capture_token_post(agent, monkeypatch)
     _capture_request(agent, monkeypatch, response=_FakeResponse(body=b"", status_code=401))
 
-    _document, error, _meta = agent_fetch._fetch(OAUTH2_ENDPOINT, "s3cret")
+    _document, error, _meta = agent_fetch._fetch(_endpoint(OAUTH2_ENDPOINT), "s3cret")
 
     assert "401" in error
     assert len(posts) == 1
@@ -717,7 +790,7 @@ def test_oauth2_token_failure_is_reported_without_the_secret(agent, monkeypatch,
     )
     _capture_request(agent, monkeypatch)
 
-    _document, error, _meta = agent_fetch._fetch(OAUTH2_ENDPOINT, "s3cret")
+    _document, error, _meta = agent_fetch._fetch(_endpoint(OAUTH2_ENDPOINT), "s3cret")
 
     assert "Token request returned HTTP 401" in error
     assert "s3cret" not in error
@@ -737,7 +810,7 @@ def test_oauth2_connection_failure_reports_no_request_detail(agent, monkeypatch,
     _capture_request(agent, monkeypatch)
     endpoint = {**OAUTH2_ENDPOINT, "oauth2": {**OAUTH2_ENDPOINT["oauth2"], "client_auth": "post"}}
 
-    _document, error, _meta = agent_fetch._fetch(endpoint, "s3cret")
+    _document, error, _meta = agent_fetch._fetch(_endpoint(endpoint), "s3cret")
 
     assert "s3cret" not in error
     assert "ConnectionError" in error and "https://idp/token" in error
@@ -747,7 +820,7 @@ def test_oauth2_token_response_without_a_token_is_an_error(agent, monkeypatch, t
     _capture_token_post(agent, monkeypatch, response=_FakeTokenResponse(payload={"foo": "bar"}))
     _capture_request(agent, monkeypatch)
 
-    _document, error, _meta = agent_fetch._fetch(OAUTH2_ENDPOINT, "s3cret")
+    _document, error, _meta = agent_fetch._fetch(_endpoint(OAUTH2_ENDPOINT), "s3cret")
     assert "no 'access_token'" in error
 
 
@@ -758,7 +831,7 @@ def test_oauth2_debug_output_never_shows_the_bearer_token(agent, monkeypatch, to
     _capture_token_post(agent, monkeypatch)
     _capture_request(agent, monkeypatch)
 
-    agent_fetch._fetch(OAUTH2_ENDPOINT, "s3cret", debug=True)
+    agent_fetch._fetch(_endpoint(OAUTH2_ENDPOINT), "s3cret", debug=True)
 
     err = capsys.readouterr().err
     assert "header Authorization: <redacted>" in err
@@ -772,7 +845,7 @@ def test_debug_body_preview_masks_a_credential_the_api_echoes(agent, monkeypatch
     _capture_request(agent, monkeypatch, response=_FakeResponse(body=b'{"key": "sekret"}'))
 
     agent_fetch._fetch(
-        {"url": "http://x", "auth": "auth_header", "auth_header": "X-API-Key"},
+        _endpoint({"url": "http://x", "auth": "auth_header", "auth_header": "X-API-Key"}),
         "sekret",
         debug=True,
     )
@@ -791,54 +864,58 @@ def test_oauth2_expired_token_is_removed_from_disk_on_read(agent, monkeypatch, t
         response=lambda: _FakeTokenResponse({"access_token": "tok-1", "expires_in": 1}),
     )
     _capture_request(agent, monkeypatch)
-    agent_fetch._fetch(OAUTH2_ENDPOINT, "s3cret")
+    agent_fetch._fetch(_endpoint(OAUTH2_ENDPOINT), "s3cret")
     assert list(token_cache.glob("*.json")), "a token should have been cached"
 
     # Reading it once it is stale both misses AND cleans up.
-    assert agent_oauth2._cached_token(OAUTH2_ENDPOINT["oauth2"], "s3cret") is None
+    assert agent_oauth2._cached_token(_endpoint(OAUTH2_ENDPOINT).oauth2, "s3cret") is None
     assert not list(token_cache.glob("*.json"))
 
 
 def test_oauth2_token_cache_key_separates_credentials_and_scope():
     spec = OAUTH2_ENDPOINT["oauth2"]
-    base = agent_oauth2._token_cache_key(spec, "s3cret")
+    base = agent_oauth2._token_cache_key(_oauth2(spec), "s3cret")
     # A different secret, scope or client must never share a cached token.
-    assert base != agent_oauth2._token_cache_key(spec, "other")
-    assert base != agent_oauth2._token_cache_key({**spec, "scope": "other"}, "s3cret")
-    assert base != agent_oauth2._token_cache_key({**spec, "client_id": "other"}, "s3cret")
+    assert base != agent_oauth2._token_cache_key(_oauth2(spec), "other")
+    assert base != agent_oauth2._token_cache_key(_oauth2({**spec, "scope": "other"}), "s3cret")
+    assert base != agent_oauth2._token_cache_key(_oauth2({**spec, "client_id": "other"}), "s3cret")
     # The secret itself never appears in the key (it becomes a filename).
     assert "s3cret" not in base
 
 
 def test_fetch_disables_redirects_when_configured(agent, monkeypatch):
     captured = _capture_request(agent, monkeypatch)
-    doc, error, _meta = agent_fetch._fetch({"url": "http://x", "follow_redirects": False}, None)
+    doc, error, _meta = agent_fetch._fetch(
+        _endpoint({"url": "http://x", "follow_redirects": False}), None
+    )
     assert error is None and doc == {"ok": 1}
     assert captured["allow_redirects"] is False
 
 
 def test_fetch_follows_redirects_by_default(agent, monkeypatch):
     captured = _capture_request(agent, monkeypatch)
-    agent_fetch._fetch({"url": "http://x"}, None)
+    agent_fetch._fetch(_endpoint({"url": "http://x"}), None)
     assert captured["allow_redirects"] is True
 
 
 def test_fetch_get_does_not_send_a_body(agent, monkeypatch):
     captured = _capture_request(agent, monkeypatch)
-    agent_fetch._fetch({"url": "http://x", "method": "GET", "body": "should-be-ignored"}, None)
+    agent_fetch._fetch(
+        _endpoint({"url": "http://x", "method": "GET", "body": "should-be-ignored"}), None
+    )
     assert captured["data"] is None
 
 
 def test_fetch_post_sends_the_body(agent, monkeypatch):
     captured = _capture_request(agent, monkeypatch)
-    agent_fetch._fetch({"url": "http://x", "method": "POST", "body": "payload"}, None)
+    agent_fetch._fetch(_endpoint({"url": "http://x", "method": "POST", "body": "payload"}), None)
     assert captured["data"] == "payload"
 
 
 def test_fetch_rejects_oversized_response(agent, monkeypatch):
     monkeypatch.setattr(agent_fetch, "_MAX_RESPONSE_BYTES", 8)
     _capture_request(agent, monkeypatch, response=_FakeResponse(body=b"0123456789" * 2))
-    doc, error, _meta = agent_fetch._fetch({"url": "http://x"}, None)
+    doc, error, _meta = agent_fetch._fetch(_endpoint({"url": "http://x"}), None)
     assert doc is None
     assert "exceeds" in error
 
@@ -846,14 +923,16 @@ def test_fetch_rejects_oversized_response(agent, monkeypatch):
 def test_fetch_reports_unexpected_redirect_when_disabled(agent, monkeypatch):
     response = _FakeResponse(body=b"", status_code=302, headers={"Location": "http://internal"})
     _capture_request(agent, monkeypatch, response=response)
-    doc, error, _meta = agent_fetch._fetch({"url": "http://x", "follow_redirects": False}, None)
+    doc, error, _meta = agent_fetch._fetch(
+        _endpoint({"url": "http://x", "follow_redirects": False}), None
+    )
     assert doc is None
     assert "Unexpected 302 redirect to http://internal" in error
 
 
 def test_fetch_non_json_response_is_reported(agent, monkeypatch):
     _capture_request(agent, monkeypatch, response=_FakeResponse(body=b"<html>nope</html>"))
-    doc, error, _meta = agent_fetch._fetch({"url": "http://x"}, None)
+    doc, error, _meta = agent_fetch._fetch(_endpoint({"url": "http://x"}), None)
     assert doc is None
     assert error.startswith("Response is not valid JSON")
 
@@ -869,7 +948,7 @@ def test_process_endpoint_isolates_secret_failure(agent, monkeypatch):
         "extractions": [{"path": "s", "service": "S"}],
     }
     results, _labels, _record = agent._process_endpoint(
-        agent.parse_arguments(["--endpoint", "{}"]), 0, endpoint
+        agent.parse_arguments(["--endpoint", "{}"]), 0, _blob(endpoint)
     )
     (result,) = results
     assert result["found"] is False
@@ -884,7 +963,7 @@ def test_process_endpoint_isolates_extraction_failure(agent, monkeypatch):
     monkeypatch.setattr(agent, "_fetch", lambda *_a: ({"ok": 1}, None, {}))
     endpoint = {"url": "http://x", "extractions": [{"path": "s", "service": "S"}]}
     results, _labels, _record = agent._process_endpoint(
-        agent.parse_arguments(["--endpoint", "{}"]), 0, endpoint
+        agent.parse_arguments(["--endpoint", "{}"]), 0, _blob(endpoint)
     )
     (result,) = results
     assert result["found"] is False
@@ -895,11 +974,87 @@ def test_process_endpoint_isolates_malformed_blob(agent):
     # An endpoint blob missing 'url' must not take down the whole data source.
     endpoint = {"extractions": [{"path": "s", "service": "S"}]}
     results, _labels, _record = agent._process_endpoint(
-        agent.parse_arguments(["--endpoint", "{}"]), 0, endpoint
+        agent.parse_arguments(["--endpoint", "{}"]), 0, _blob(endpoint)
     )
     (result,) = results
     assert result["found"] is False
-    assert result["error"].startswith("Endpoint processing failed")
+    assert result["service"] == "S", "the failure lands on the field's own service"
+    assert result["error"] == "Endpoint configuration is invalid: no 'url'"
+
+
+@pytest.mark.parametrize(
+    ("blob", "reason"),
+    [
+        ({"url": "http://x", "extractions": [{"service": "S"}]}, "a field has no 'path'"),
+        ({"url": "http://x", "extractions": [{"path": "s"}]}, "the field 's' has no 'service'"),
+        ({"url": "http://x", "extractions": "s"}, "'extractions' is a str, not a list"),
+        ({"url": "http://x", "headers": [["X-Only-A-Name"]]}, "not a [name, value] pair"),
+        ({"url": "http://x", "auth": "auth_login"}, "without a 'username'"),
+        ({"url": "http://x", "timeout": "30"}, "'timeout' is a str, not a number"),
+    ],
+)
+def test_a_blob_the_agent_cannot_run_fails_on_its_own_services(agent, blob, reason):
+    endpoint = agent._endpoint_from_blob(blob)
+    assert isinstance(endpoint, agent_models.InvalidEndpoint)
+    assert reason in endpoint.error
+    results, _labels, record = agent._process_endpoint(
+        agent.parse_arguments(["--endpoint", "{}"]), 0, endpoint
+    )
+    assert all(result["found"] is False for result in results)
+    assert record["ok"] is False and reason in record["error"]
+
+
+def test_an_unusable_setting_falls_back_instead_of_failing():
+    # Absent or meaningless for its purpose is "off", as it always was - only a
+    # blob that cannot be run is an error.
+    endpoint = _endpoint(
+        {
+            "retry": {"attempts": 0},
+            "cache_ttl": 0,
+            "show_response": "yes",
+            "proxy": {"mode": "environment"},
+            "pagination": None,
+            "accept_status": None,
+            "extractions": [{"path": "p", "service": "S", "filter": {"op": "equals"}}],
+        }
+    )
+    assert endpoint.retry == agent_models.Retry()
+    assert endpoint.cache_ttl is None
+    assert endpoint.show_response is None
+    assert endpoint.proxy is None
+    assert endpoint.pagination is None
+    assert endpoint.accept_status == frozenset()
+    assert endpoint.extractions[0].filter is None
+
+
+def test_an_explicit_null_keeps_certificate_verification_on():
+    # requests reads verify=None as "use the default", which is to verify; the
+    # parsed flag must not turn that into False.
+    assert _endpoint({"verify_cert": None}).verify_cert is True
+    assert _endpoint({"verify_cert": False}).verify_cert is False
+
+
+def test_the_values_the_check_interprets_reach_the_section_untouched(agent, monkeypatch):
+    # Levels, matching, transform, unit, metric name/range and value_as are the
+    # check's business: the agent hands them over exactly as the rule has them.
+    opaque = {
+        "levels_upper": ["fixed", [1, 2]],
+        "levels_lower": ["no_levels", None],
+        "match": ["state_map", {"ok": "UP"}],
+        "calc": "value * 2",
+        "unit": "bytes",
+        "metric_name": "my_metric",
+        "value_range": {"min": 0, "max": None},
+        "value_as": ["timestamp", {"format": "auto"}],
+    }
+    monkeypatch.setattr(agent, "_fetch", lambda *_a: ({"s": 1}, None, {}))
+    results, _labels, _record = agent._process_endpoint(
+        agent.parse_arguments(["--endpoint", "{}"]),
+        0,
+        _blob({"url": "http://x", "extractions": [{"path": "s", "service": "S", **opaque}]}),
+    )
+    (result,) = results
+    assert {key: result[key] for key in opaque} == opaque
 
 
 def test_process_endpoint_failure_is_visible_without_extractions(agent, monkeypatch):
@@ -907,7 +1062,7 @@ def test_process_endpoint_failure_is_visible_without_extractions(agent, monkeypa
     monkeypatch.setattr(agent, "_fetch", lambda *_a: (None, "boom", {}))
     endpoint = {"url": "http://x"}
     results, _labels, _record = agent._process_endpoint(
-        agent.parse_arguments(["--endpoint", "{}"]), 0, endpoint
+        agent.parse_arguments(["--endpoint", "{}"]), 0, _blob(endpoint)
     )
     (result,) = results
     assert result["found"] is False
@@ -963,7 +1118,7 @@ def test_secret_resolution_v1_direct(agent):
 def test_main_merges_multiple_endpoints(agent, monkeypatch, capsys):
     docs = {"http://a": {"s": "UP"}, "http://b": {"s": "DOWN"}}
     monkeypatch.setattr(
-        agent, "_fetch", lambda endpoint, secret, debug=False: (docs[endpoint["url"]], None, {})
+        agent, "_fetch", lambda endpoint, secret, debug=False: (docs[endpoint.url], None, {})
     )
     endpoints = [
         {"url": "http://a", "extractions": [{"path": "s", "service": "A"}]},
@@ -982,7 +1137,7 @@ def test_main_merges_multiple_endpoints(agent, monkeypatch, capsys):
 
 def test_main_isolates_endpoint_failure(agent, monkeypatch, capsys):
     def fake_fetch(endpoint, secret, debug=False):
-        if endpoint["url"] == "http://down":
+        if endpoint.url == "http://down":
             return None, "Request failed: boom", {}
         return {"s": "UP"}, None, {}
 
@@ -1138,7 +1293,7 @@ def test_debug_writes_to_stderr_not_stdout():
 def test_fetch_debug_redacts_bearer_and_reports_status(agent, monkeypatch, capsys):
     _capture_request(agent, monkeypatch, response=_FakeResponse(body=b'{"ok": 1}'))
     doc, error, _meta = agent_fetch._fetch(
-        {"url": "http://x", "auth": "auth_token"}, "topsecret", debug=True
+        _endpoint({"url": "http://x", "auth": "auth_token"}), "topsecret", debug=True
     )
     assert error is None and doc == {"ok": 1}
     captured = capsys.readouterr()
@@ -1151,7 +1306,7 @@ def test_fetch_debug_redacts_bearer_and_reports_status(agent, monkeypatch, capsy
 
 def test_fetch_without_debug_is_silent(agent, monkeypatch, capsys):
     _capture_request(agent, monkeypatch)
-    agent_fetch._fetch({"url": "http://x"}, None)
+    agent_fetch._fetch(_endpoint({"url": "http://x"}), None)
     captured = capsys.readouterr()
     assert captured.out == "" and captured.err == ""
 
@@ -1177,16 +1332,16 @@ def test_main_debug_keeps_stdout_clean(agent, monkeypatch, capsys):
 
 
 def test_accepted_statuses_helper():
-    assert agent_transport._accepted_statuses({"accept_status": [503, 202]}) == {503, 202}
-    assert agent_transport._accepted_statuses({}) == set()
-    assert agent_transport._accepted_statuses({"accept_status": None}) == set()
+    assert _endpoint({"accept_status": [503, 202]}).accept_status == {503, 202}
+    assert _endpoint({}).accept_status == set()
+    assert _endpoint({"accept_status": None}).accept_status == set()
 
 
 def test_fetch_rejects_non_2xx_by_default(agent, monkeypatch):
     _capture_request(
         agent, monkeypatch, response=_FakeResponse(body=b'{"status": "DOWN"}', status_code=503)
     )
-    doc, error, _meta = agent_fetch._fetch({"url": "http://x"}, None)
+    doc, error, _meta = agent_fetch._fetch(_endpoint({"url": "http://x"}), None)
     assert doc is None
     assert error == "HTTP 503"
 
@@ -1197,7 +1352,9 @@ def test_fetch_reads_body_of_accepted_status(agent, monkeypatch):
     _capture_request(
         agent, monkeypatch, response=_FakeResponse(body=b'{"status": "DOWN"}', status_code=503)
     )
-    doc, error, _meta = agent_fetch._fetch({"url": "http://x", "accept_status": [503]}, None)
+    doc, error, _meta = agent_fetch._fetch(
+        _endpoint({"url": "http://x", "accept_status": [503]}), None
+    )
     assert error is None
     assert doc == {"status": "DOWN"}
 
@@ -1205,44 +1362,56 @@ def test_fetch_reads_body_of_accepted_status(agent, monkeypatch):
 def test_fetch_non_accepted_status_still_fails(agent, monkeypatch):
     # Opting 503 in does not widen acceptance to other error codes.
     _capture_request(agent, monkeypatch, response=_FakeResponse(body=b"{}", status_code=500))
-    doc, error, _meta = agent_fetch._fetch({"url": "http://x", "accept_status": [503]}, None)
+    doc, error, _meta = agent_fetch._fetch(
+        _endpoint({"url": "http://x", "accept_status": [503]}), None
+    )
     assert doc is None
     assert error == "HTTP 500"
 
 
 def test_apply_proxy_url_sets_session_proxies():
     session, _headers = agent_transport._build_session(
-        {"proxy": {"mode": "url", "url": "http://proxy:3128"}}, None
+        _endpoint({"proxy": {"mode": "url", "url": "http://proxy:3128"}}), None
     )
     assert session.proxies == {"http": "http://proxy:3128", "https": "http://proxy:3128"}
     assert session.trust_env is True
 
 
 def test_apply_proxy_no_proxy_disables_env():
-    session, _headers = agent_transport._build_session({"proxy": {"mode": "no_proxy"}}, None)
+    session, _headers = agent_transport._build_session(
+        _endpoint({"proxy": {"mode": "no_proxy"}}), None
+    )
     assert session.trust_env is False
 
 
 def test_apply_proxy_absent_leaves_defaults():
-    session, _headers = agent_transport._build_session({"url": "http://x"}, None)
+    session, _headers = agent_transport._build_session(_endpoint({"url": "http://x"}), None)
     assert session.trust_env is True
     assert session.proxies == {}
 
 
 def test_verify_arg():
-    assert agent_transport._verify_arg({}) is True
-    assert agent_transport._verify_arg({"verify_cert": True}) is True
-    assert agent_transport._verify_arg({"verify_cert": False}) is False
+    assert agent_transport._verify_arg(_endpoint({})) is True
+    assert agent_transport._verify_arg(_endpoint({"verify_cert": True})) is True
+    assert agent_transport._verify_arg(_endpoint({"verify_cert": False})) is False
     # A CA bundle is used only when verification is on.
-    assert agent_transport._verify_arg({"verify_cert": True, "ca_bundle": "/ca.pem"}) == "/ca.pem"
-    assert agent_transport._verify_arg({"verify_cert": False, "ca_bundle": "/ca.pem"}) is False
+    assert (
+        agent_transport._verify_arg(_endpoint({"verify_cert": True, "ca_bundle": "/ca.pem"}))
+        == "/ca.pem"
+    )
+    assert (
+        agent_transport._verify_arg(_endpoint({"verify_cert": False, "ca_bundle": "/ca.pem"}))
+        is False
+    )
 
 
 def test_client_cert():
-    assert agent_transport._client_cert({}) is None
-    assert agent_transport._client_cert({"client_cert": {}}) is None
-    assert agent_transport._client_cert({"client_cert": {"cert": "/c.pem"}}) == "/c.pem"
-    assert agent_transport._client_cert({"client_cert": {"cert": "/c.pem", "key": "/k.pem"}}) == (
+    assert agent_transport._client_cert(_endpoint({})) is None
+    assert agent_transport._client_cert(_endpoint({"client_cert": {}})) is None
+    assert agent_transport._client_cert(_endpoint({"client_cert": {"cert": "/c.pem"}})) == "/c.pem"
+    assert agent_transport._client_cert(
+        _endpoint({"client_cert": {"cert": "/c.pem", "key": "/k.pem"}})
+    ) == (
         "/c.pem",
         "/k.pem",
     )
@@ -1251,12 +1420,14 @@ def test_client_cert():
 def test_fetch_passes_verify_and_cert(agent, monkeypatch):
     captured = _capture_request(agent, monkeypatch)
     agent_fetch._fetch(
-        {
-            "url": "http://x",
-            "verify_cert": True,
-            "ca_bundle": "/ca.pem",
-            "client_cert": {"cert": "/c.pem", "key": "/k.pem"},
-        },
+        _endpoint(
+            {
+                "url": "http://x",
+                "verify_cert": True,
+                "ca_bundle": "/ca.pem",
+                "client_cert": {"cert": "/c.pem", "key": "/k.pem"},
+            }
+        ),
         None,
     )
     assert captured["verify"] == "/ca.pem"
@@ -1267,32 +1438,47 @@ def test_matches_filter():
     el = {"status": "critical", "n": 5}
     assert agent_extract._matches_filter(el, None) is True  # no filter → keep
     assert (
-        agent_extract._matches_filter(el, {"path": "status", "op": "equals", "value": "critical"})
+        agent_extract._matches_filter(
+            el, _filter({"path": "status", "op": "equals", "value": "critical"})
+        )
         is True
     )
     assert (
-        agent_extract._matches_filter(el, {"path": "status", "op": "equals", "value": "ok"})
+        agent_extract._matches_filter(
+            el, _filter({"path": "status", "op": "equals", "value": "ok"})
+        )
         is False
     )
     assert (
-        agent_extract._matches_filter(el, {"path": "status", "op": "not_equals", "value": "ok"})
+        agent_extract._matches_filter(
+            el, _filter({"path": "status", "op": "not_equals", "value": "ok"})
+        )
         is True
     )
     assert (
-        agent_extract._matches_filter(el, {"path": "status", "op": "regex", "value": "crit.*"})
+        agent_extract._matches_filter(
+            el, _filter({"path": "status", "op": "regex", "value": "crit.*"})
+        )
         is True
     )
     assert (
-        agent_extract._matches_filter(el, {"path": "status", "op": "not_regex", "value": "ok"})
+        agent_extract._matches_filter(
+            el, _filter({"path": "status", "op": "not_regex", "value": "ok"})
+        )
         is True
     )
     # A missing field drops the element regardless of the operator.
     assert (
-        agent_extract._matches_filter(el, {"path": "missing", "op": "not_equals", "value": "ok"})
+        agent_extract._matches_filter(
+            el, _filter({"path": "missing", "op": "not_equals", "value": "ok"})
+        )
         is False
     )
     # Numeric values are compared as their string form.
-    assert agent_extract._matches_filter(el, {"path": "n", "op": "equals", "value": "5"}) is True
+    assert (
+        agent_extract._matches_filter(el, _filter({"path": "n", "op": "equals", "value": "5"}))
+        is True
+    )
 
 
 def test_extract_wildcard_filter_keeps_only_matching():
@@ -1311,7 +1497,7 @@ def test_extract_wildcard_filter_keeps_only_matching():
             "filter": {"path": "health", "op": "not_equals", "value": "ok"},
         }
     ]
-    results = agent_extract._extract(doc, specs, "http://t")
+    results = agent_extract._extract(doc, _fields(specs), "http://t")
     assert [(r["service"], r["value"]) for r in results] == [("Node b", "critical")]
 
 
@@ -1325,7 +1511,7 @@ def test_extract_wildcard_filter_missing_container_still_errors():
             "filter": {"path": "health", "op": "not_equals", "value": "ok"},
         }
     ]
-    (result,) = agent_extract._extract(doc, specs, "http://t")
+    (result,) = agent_extract._extract(doc, _fields(specs), "http://t")
     assert result["found"] is False
     assert "not found" in result["error"]
 
@@ -1340,7 +1526,7 @@ def test_count_with_filter_array():
             "filter": {"path": "s", "op": "equals", "value": "bad"},
         }
     ]
-    (result,) = agent_extract._extract(doc, specs, "http://t")
+    (result,) = agent_extract._extract(doc, _fields(specs), "http://t")
     assert result["found"] is True
     assert result["value"] == 2
 
@@ -1355,7 +1541,7 @@ def test_count_with_filter_object_map():
             "filter": {"path": "status", "op": "not_equals", "value": "UP"},
         }
     ]
-    (result,) = agent_extract._extract(doc, specs, "http://t")
+    (result,) = agent_extract._extract(doc, _fields(specs), "http://t")
     assert result["value"] == 1
 
 
@@ -1379,14 +1565,14 @@ AGG_DOC = {
 )
 def test_aggregate_container_of_numbers(mode, expected):
     specs = [{"path": "values", "service": "Values", "aggregate": mode}]
-    (result,) = agent_extract._extract(AGG_DOC, specs, "http://test/h")
+    (result,) = agent_extract._extract(AGG_DOC, _fields(specs), "http://test/h")
     assert result["found"] is True
     assert result["value"] == expected
 
 
 def test_aggregate_object_map_values():
     specs = [{"path": "sizes", "service": "Sizes", "aggregate": "sum"}]
-    (result,) = agent_extract._extract(AGG_DOC, specs, "http://test/h")
+    (result,) = agent_extract._extract(AGG_DOC, _fields(specs), "http://test/h")
     assert result["value"] == 40.0
 
 
@@ -1398,7 +1584,7 @@ def test_aggregate_collapses_a_wildcard(mode, expected):
     # 'queues[*].depth' would fan out into one service per queue; aggregating
     # collapses it into a single service over the same values.
     specs = [{"path": "queues[*].depth", "service": "Depth", "aggregate": mode}]
-    (result,) = agent_extract._extract(AGG_DOC, specs, "http://test/h")
+    (result,) = agent_extract._extract(AGG_DOC, _fields(specs), "http://test/h")
     assert result["found"] is True
     assert result["value"] == expected
 
@@ -1412,7 +1598,7 @@ def test_aggregate_wildcard_honours_the_filter():
             "filter": {"path": "status", "op": "not_equals", "value": "ok"},
         }
     ]
-    (result,) = agent_extract._extract(AGG_DOC, specs, "http://test/h")
+    (result,) = agent_extract._extract(AGG_DOC, _fields(specs), "http://test/h")
     assert result["value"] == 2.5  # only the node that is not 'ok'
 
 
@@ -1425,7 +1611,7 @@ def test_aggregate_container_honours_the_filter():
             "filter": {"path": "depth", "op": "regex", "value": "[45]"},
         }
     ]
-    (result,) = agent_extract._extract(AGG_DOC, specs, "http://test/h")
+    (result,) = agent_extract._extract(AGG_DOC, _fields(specs), "http://test/h")
     assert result["value"] == 2
 
 
@@ -1438,7 +1624,7 @@ def test_aggregate_sum_of_nothing_is_zero():
             "filter": {"path": "status", "op": "equals", "value": "nonexistent"},
         }
     ]
-    (result,) = agent_extract._extract(AGG_DOC, specs, "http://test/h")
+    (result,) = agent_extract._extract(AGG_DOC, _fields(specs), "http://test/h")
     assert result["found"] is True
     assert result["value"] == 0
 
@@ -1453,21 +1639,21 @@ def test_aggregate_average_of_nothing_is_not_found():
             "filter": {"path": "status", "op": "equals", "value": "nonexistent"},
         }
     ]
-    (result,) = agent_extract._extract(AGG_DOC, specs, "http://test/h")
+    (result,) = agent_extract._extract(AGG_DOC, _fields(specs), "http://test/h")
     assert result["found"] is False
     assert result["error"] == "no elements to aggregate"
 
 
 def test_aggregate_non_numeric_element_is_not_found():
     specs = [{"path": "queues", "service": "Queues", "aggregate": "sum"}]
-    (result,) = agent_extract._extract(AGG_DOC, specs, "http://test/h")
+    (result,) = agent_extract._extract(AGG_DOC, _fields(specs), "http://test/h")
     assert result["found"] is False
     assert "not numeric" in result["error"]
 
 
 def test_aggregate_wildcard_missing_container_is_not_found():
     specs = [{"path": "missing[*].depth", "service": "Depth", "aggregate": "sum"}]
-    (result,) = agent_extract._extract(AGG_DOC, specs, "http://test/h")
+    (result,) = agent_extract._extract(AGG_DOC, _fields(specs), "http://test/h")
     assert result["found"] is False
     assert "array or object not found" in result["error"]
 
@@ -1487,7 +1673,7 @@ def test_count_of_a_null_element_counts_it():
     # [null] is a collection of one element, not a missing collection.
     doc = {"nodes": [None]}
     specs = [{"path": "nodes[*]", "service": "Nodes", "aggregate": "count"}]
-    (result,) = agent_extract._extract(doc, specs, "http://test/h")
+    (result,) = agent_extract._extract(doc, _fields(specs), "http://test/h")
     assert result["found"] is True
     assert result["value"] == 1
 
@@ -1505,14 +1691,14 @@ def test_filtered_aggregation_over_a_null_element_is_empty_not_an_error():
             "filter": {"path": "status", "op": "not_equals", "value": "ok"},
         }
     ]
-    (result,) = agent_extract._extract(doc, specs, "http://test/h")
+    (result,) = agent_extract._extract(doc, _fields(specs), "http://test/h")
     assert result["found"] is True
     assert result["value"] == 0
 
 
 def test_aggregate_wildcard_missing_leaf_path_is_not_found():
     specs = [{"path": "queues[*].nope", "service": "Nope", "aggregate": "sum"}]
-    (result,) = agent_extract._extract(AGG_DOC, specs, "http://test/h")
+    (result,) = agent_extract._extract(AGG_DOC, _fields(specs), "http://test/h")
     assert result["found"] is False
     assert result["error"] == "path not found in any element"
 
@@ -1520,7 +1706,7 @@ def test_aggregate_wildcard_missing_leaf_path_is_not_found():
 def test_aggregate_skips_elements_without_the_value_path():
     doc = {"pods": [{"restarts": 2}, {"name": "no-restarts-field"}, {"restarts": 3}]}
     specs = [{"path": "pods[*].restarts", "service": "Restarts", "aggregate": "sum"}]
-    (result,) = agent_extract._extract(doc, specs, "http://test/h")
+    (result,) = agent_extract._extract(doc, _fields(specs), "http://test/h")
     assert result["value"] == 5.0
 
 
@@ -1531,7 +1717,7 @@ def test_count_over_a_wildcard_counts_only_elements_with_the_field():
     doc = {"nodes": [{"load": 1}, {"load": 2}, {"other": 9}]}
     values = {
         mode: agent_extract._extract(
-            doc, [{"path": "nodes[*].load", "service": "Load", "aggregate": mode}], "u"
+            doc, _fields([{"path": "nodes[*].load", "service": "Load", "aggregate": mode}]), "u"
         )[0]["value"]
         for mode in ("count", "sum", "avg")
     }
@@ -1543,7 +1729,7 @@ def test_count_over_a_wildcard_needs_no_numbers():
     # just as much as one of numbers does.
     doc = {"pods": [{"name": "a"}, {"name": "b"}]}
     specs = [{"path": "pods[*].name", "service": "Pods", "aggregate": "count"}]
-    (result,) = agent_extract._extract(doc, specs, "http://test/h")
+    (result,) = agent_extract._extract(doc, _fields(specs), "http://test/h")
     assert result["value"] == 2
 
 
@@ -1553,7 +1739,7 @@ def test_count_over_a_wildcard_reports_a_mistyped_value_path():
     # modes report it.
     doc = {"nodes": [{"load": 1}, {"load": 2}]}
     specs = [{"path": "nodes[*].lod", "service": "Load", "aggregate": "count"}]
-    (result,) = agent_extract._extract(doc, specs, "http://test/h")
+    (result,) = agent_extract._extract(doc, _fields(specs), "http://test/h")
     assert result["found"] is False
     assert result["error"] == "path not found in any element"
 
@@ -1570,7 +1756,7 @@ def test_count_over_a_wildcard_is_zero_when_the_filter_matches_nothing():
             "filter": {"path": "status", "op": "not_equals", "value": "ok"},
         }
     ]
-    (result,) = agent_extract._extract(doc, specs, "http://test/h")
+    (result,) = agent_extract._extract(doc, _fields(specs), "http://test/h")
     assert result["found"] is True
     assert result["value"] == 0
 
@@ -1580,24 +1766,24 @@ def test_count_of_a_container_still_counts_every_element():
     # counting the collection itself is unchanged.
     doc = {"nodes": [{"load": 1}, {"other": 9}]}
     specs = [{"path": "nodes", "service": "Nodes", "aggregate": "count"}]
-    (result,) = agent_extract._extract(doc, specs, "http://test/h")
+    (result,) = agent_extract._extract(doc, _fields(specs), "http://test/h")
     assert result["value"] == 2
 
 
 def test_aggregate_numeric_strings():
     doc = {"vals": ["1.5", "2.5"]}
     specs = [{"path": "vals", "service": "Vals", "aggregate": "sum"}]
-    (result,) = agent_extract._extract(doc, specs, "http://test/h")
+    (result,) = agent_extract._extract(doc, _fields(specs), "http://test/h")
     assert result["value"] == 4.0
 
 
 def test_aggregate_mode_reads_the_legacy_count_flag():
     # A rule saved before the aggregate dropdown (or a hand-written blob).
-    assert agent_extract._aggregate_mode({"count": True}) == "count"
-    assert agent_extract._aggregate_mode({"count": False}) is None
-    assert agent_extract._aggregate_mode({}) is None
+    assert agent_models._aggregate({"count": True}) == "count"
+    assert agent_models._aggregate({"count": False}) is None
+    assert agent_models._aggregate({}) is None
     # An explicit aggregation wins over the legacy flag.
-    assert agent_extract._aggregate_mode({"count": True, "aggregate": "avg"}) == "avg"
+    assert agent_models._aggregate({"count": True, "aggregate": "avg"}) == "avg"
 
 
 def test_result_carries_aggregate_and_value_as_to_the_check():
@@ -1609,7 +1795,7 @@ def test_result_carries_aggregate_and_value_as_to_the_check():
             "value_as": ["counter", None],
         }
     ]
-    (result,) = agent_extract._extract(AGG_DOC, specs, "http://test/h")
+    (result,) = agent_extract._extract(AGG_DOC, _fields(specs), "http://test/h")
     assert result["aggregate"] == "sum"
     assert result["value_as"] == ["counter", None]
 
@@ -1619,7 +1805,7 @@ def test_result_carries_aggregate_and_value_as_to_the_check():
 
 def test_fetch_records_status_size_and_final_url(agent, monkeypatch):
     _capture_request(agent, monkeypatch)
-    _doc, error, meta = agent_fetch._fetch({"url": "http://x"}, None)
+    _doc, error, meta = agent_fetch._fetch(_endpoint({"url": "http://x"}), None)
     assert error is None
     assert meta["status"] == 200
     assert meta["size"] == len(b'{"ok": 1}')
@@ -1632,7 +1818,7 @@ def test_fetch_records_the_duration_of_a_failed_request(monkeypatch):
         raise requests.exceptions.ConnectTimeout("nope")
 
     monkeypatch.setattr(requests.Session, "request", boom)
-    _doc, error, meta = agent_fetch._fetch({"url": "http://x"}, None)
+    _doc, error, meta = agent_fetch._fetch(_endpoint({"url": "http://x"}), None)
     assert error.startswith("Request failed")
     # A request that failed still took time, and has no status/size to report.
     assert meta["elapsed"] is not None
@@ -1647,7 +1833,7 @@ def test_process_endpoint_returns_a_record(agent, monkeypatch):
     )
     endpoint = {"url": "http://x", "name": "frontend", "extractions": []}
     _results, _labels, record = agent._process_endpoint(
-        agent.parse_arguments(["--endpoint", "{}"]), 0, endpoint
+        agent.parse_arguments(["--endpoint", "{}"]), 0, _blob(endpoint)
     )
     assert record == {
         "name": "frontend",
@@ -1675,30 +1861,30 @@ def test_process_endpoint_returns_a_record(agent, monkeypatch):
 
 
 def test_endpoint_record_falls_back_to_the_url_as_name(agent):
-    assert agent._endpoint_name({}, "http://x") == "http://x"
-    assert agent._endpoint_name({"name": "  "}, "http://x") == "http://x"
-    assert agent._endpoint_name({"name": "api"}, "http://x") == "api"
+    assert agent._endpoint_name(_blob({}), "http://x") == "http://x"
+    assert agent._endpoint_name(_blob({"name": "  "}), "http://x") == "http://x"
+    assert agent._endpoint_name(_blob({"name": "api"}), "http://x") == "api"
     # A configured name is used as given, minus surrounding whitespace (it is a
     # service description, not free text).
-    assert agent._endpoint_name({"name": " api "}, "http://x") == "api"
+    assert agent._endpoint_name(_blob({"name": " api "}), "http://x") == "api"
 
 
 def test_endpoint_name_drops_the_query_string(agent):
     # An API key in a query parameter must not travel into a service description,
     # which reaches notifications, availability reports and the metric paths.
     assert (
-        agent._endpoint_name({}, "https://api.example.com/health?api_key=s3cr3t&v=2")
+        agent._endpoint_name(_blob({}), "https://api.example.com/health?api_key=s3cr3t&v=2")
         == "https://api.example.com/health"
     )
-    assert agent._endpoint_name({}, "https://api.example.com/health#frag") == (
+    assert agent._endpoint_name(_blob({}), "https://api.example.com/health#frag") == (
         "https://api.example.com/health"
     )
     # Nothing to drop: unchanged, including the port and a trailing slash.
-    assert agent._endpoint_name({}, "https://api.example.com:8443/health/") == (
+    assert agent._endpoint_name(_blob({}), "https://api.example.com:8443/health/") == (
         "https://api.example.com:8443/health/"
     )
     # A configured name wins outright - no URL parsing involved.
-    assert agent._endpoint_name({"name": "frontend"}, "https://x/health?k=v") == "frontend"
+    assert agent._endpoint_name(_blob({"name": "frontend"}), "https://x/health?k=v") == "frontend"
 
 
 def test_url_without_query_never_yields_an_empty_item(agent):
@@ -1711,7 +1897,7 @@ def test_url_without_query_never_yields_an_empty_item(agent):
 
 def test_main_emits_one_endpoint_record_per_endpoint(agent, monkeypatch, capsys):
     def fake_fetch(endpoint, secret, debug=False):
-        if endpoint["url"] == "http://down":
+        if endpoint.url == "http://down":
             return None, "Request failed: boom", {"status": None, "elapsed": 0.5}
         return {"s": "UP"}, None, {"status": 200, "elapsed": 0.2, "size": 11}
 
@@ -1756,7 +1942,7 @@ def test_aggregate_trims_an_integral_result():
     doc = {"vals": [4, 5, 6]}
     values = {
         mode: agent_extract._extract(
-            doc, [{"path": "vals", "service": "V", "aggregate": mode}], "u"
+            doc, _fields([{"path": "vals", "service": "V", "aggregate": mode}]), "u"
         )[0]["value"]
         for mode in ("sum", "avg", "min", "max")
     }
@@ -1764,7 +1950,7 @@ def test_aggregate_trims_an_integral_result():
     assert all(isinstance(v, int) for v in values.values())
     # A genuinely fractional result keeps its decimals.
     (result,) = agent_extract._extract(
-        {"vals": [1, 2]}, [{"path": "vals", "service": "V", "aggregate": "avg"}], "u"
+        {"vals": [1, 2]}, _fields([{"path": "vals", "service": "V", "aggregate": "avg"}]), "u"
     )
     assert result["value"] == 1.5
 
@@ -1796,7 +1982,7 @@ def test_piggyback_host_reads_and_sanitises_the_name():
 
 def test_extraction_routes_each_element_to_its_own_host():
     specs = [{"path": "nodes[*].health", "service": "Health", "piggyback_host": "name"}]
-    results = agent_extract._extract(PB_DOC, specs, "http://test/h")
+    results = agent_extract._extract(PB_DOC, _fields(specs), "http://test/h")
     # The host carries the identity, so the service keeps its plain name.
     assert [(r["host"], r["service"], r["value"]) for r in results] == [
         ("node-01", "Health", "UP"),
@@ -1806,7 +1992,7 @@ def test_extraction_routes_each_element_to_its_own_host():
 
 def test_extraction_without_piggyback_is_unchanged():
     specs = [{"path": "nodes[*].health", "service": "Health", "label_path": "name"}]
-    results = agent_extract._extract(PB_DOC, specs, "http://test/h")
+    results = agent_extract._extract(PB_DOC, _fields(specs), "http://test/h")
     assert [(r["host"], r["service"]) for r in results] == [
         (None, "Health node-01"),
         (None, "Health node-02"),
@@ -1817,7 +2003,7 @@ def test_element_without_a_resolvable_host_stays_on_the_polling_host():
     # Losing the service would be worse than putting it somewhere imperfect.
     doc = {"nodes": [{"name": "node-01", "health": "UP"}, {"health": "DOWN"}]}
     specs = [{"path": "nodes[*].health", "service": "Health", "piggyback_host": "name"}]
-    results = agent_extract._extract(doc, specs, "http://test/h")
+    results = agent_extract._extract(doc, _fields(specs), "http://test/h")
     assert [(r["host"], r["service"], r["value"]) for r in results] == [
         ("node-01", "Health", "UP"),
         (None, "Health 1", "DOWN"),  # labelled by index, on the polling host
@@ -1833,7 +2019,7 @@ def test_piggyback_composes_with_the_element_filter():
             "filter": {"path": "health", "op": "not_equals", "value": "UP"},
         }
     ]
-    results = agent_extract._extract(PB_DOC, specs, "http://test/h")
+    results = agent_extract._extract(PB_DOC, _fields(specs), "http://test/h")
     assert [(r["host"], r["value"]) for r in results] == [("node-02", "DOWN")]
 
 
@@ -1968,7 +2154,7 @@ def test_piggyback_labels_are_ignored_without_a_piggyback_host():
         }
     ]
     doc = {"nodes": [{"name": "n1", "health": "UP", "region": "eu"}]}
-    results = agent_extract._extract(doc, specs, "http://test/h")
+    results = agent_extract._extract(doc, _fields(specs), "http://test/h")
     assert all(r["host_labels"] == {} for r in results)
 
 
@@ -2038,7 +2224,9 @@ def test_endpoint_record_carries_the_cert_expiry(agent, monkeypatch):
         ),
     )
     _results, _labels, record = agent._process_endpoint(
-        agent.parse_arguments(["--endpoint", "{}"]), 0, {"url": "https://x", "extractions": []}
+        agent.parse_arguments(["--endpoint", "{}"]),
+        0,
+        _blob({"url": "https://x", "extractions": []}),
     )
     assert record["cert_expiry"] == 1700000000.0
 
@@ -2056,31 +2244,33 @@ def cache_dir(agent, monkeypatch, tmp_path):
 
 
 def test_cache_ttl_reads_the_endpoint_setting():
-    assert agent_cache._cache_ttl({"cache_ttl": 300}) == 300.0
-    assert agent_cache._cache_ttl({"cache_ttl": 0.5}) == 0.5
+    assert _endpoint({"cache_ttl": 300}).cache_ttl == 300.0
+    assert _endpoint({"cache_ttl": 0.5}).cache_ttl == 0.5
     # Absent, zero/negative, or a non-number all mean "always fetch".
-    assert agent_cache._cache_ttl({}) is None
-    assert agent_cache._cache_ttl({"cache_ttl": 0}) is None
-    assert agent_cache._cache_ttl({"cache_ttl": -5}) is None
-    assert agent_cache._cache_ttl({"cache_ttl": "300"}) is None
-    assert agent_cache._cache_ttl({"cache_ttl": True}) is None
+    assert _endpoint({}).cache_ttl is None
+    assert _endpoint({"cache_ttl": 0}).cache_ttl is None
+    assert _endpoint({"cache_ttl": -5}).cache_ttl is None
+    assert _endpoint({"cache_ttl": "300"}).cache_ttl is None
+    assert _endpoint({"cache_ttl": True}).cache_ttl is None
 
 
 def test_cache_key_changes_with_the_request_identity():
     base = {"url": "http://a", "method": "POST", "body": '{"q":1}'}
-    key = agent_cache._cache_key(base)
-    assert key == agent_cache._cache_key(dict(base))  # stable
-    assert key != agent_cache._cache_key({**base, "url": "http://b"})
-    assert key != agent_cache._cache_key({**base, "body": '{"q":2}'})
-    assert key != agent_cache._cache_key({**base, "headers": [["X", "1"]]})
-    assert key != agent_cache._cache_key({**base, "verify_cert": False})
-    assert key != agent_cache._cache_key({**base, "proxy": {"mode": "no_proxy"}})
+    key = agent_cache._cache_key(_endpoint(base))
+    assert key == agent_cache._cache_key(_endpoint(dict(base)))  # stable
+    assert key != agent_cache._cache_key(_endpoint({**base, "url": "http://b"}))
+    assert key != agent_cache._cache_key(_endpoint({**base, "body": '{"q":2}'}))
+    assert key != agent_cache._cache_key(_endpoint({**base, "headers": [["X", "1"]]}))
+    assert key != agent_cache._cache_key(_endpoint({**base, "verify_cert": False}))
+    assert key != agent_cache._cache_key(_endpoint({**base, "proxy": {"mode": "no_proxy"}}))
 
 
 def test_cache_round_trip_serves_a_fresh_entry(cache_dir):
     endpoint = {"url": "http://a", "cache_ttl": 300}
-    agent_cache._cache_write(endpoint, b'{"s": "UP"}', {"status": 200, "elapsed": 0.4, "size": 11})
-    body, meta = agent_cache._cache_read(endpoint, 300)
+    agent_cache._cache_write(
+        _endpoint(endpoint), b'{"s": "UP"}', {"status": 200, "elapsed": 0.4, "size": 11}
+    )
+    body, meta = agent_cache._cache_read(_endpoint(endpoint), 300)
     assert json.loads(body) == {"s": "UP"}
     assert meta["from_cache"] is True
     assert 0 <= meta["cache_age"] < 5
@@ -2094,26 +2284,26 @@ def test_cache_round_trip_serves_a_fresh_entry(cache_dir):
 
 def test_cache_entry_older_than_the_ttl_is_a_miss(cache_dir, monkeypatch):
     endpoint = {"url": "http://a", "cache_ttl": 60}
-    agent_cache._cache_write(endpoint, b"{}", {})
+    agent_cache._cache_write(_endpoint(endpoint), b"{}", {})
     real_time = time.time
     monkeypatch.setattr(time, "time", lambda: real_time() + 61)
-    assert agent_cache._cache_read(endpoint, 60) is None
+    assert agent_cache._cache_read(_endpoint(endpoint), 60) is None
 
 
 def test_cache_read_treats_damage_as_a_miss(cache_dir):
     endpoint = {"url": "http://a"}
     # No file at all, and a corrupt one: both cost one extra request, nothing else.
-    assert agent_cache._cache_read(endpoint, 300) is None
-    (cache_dir / f"{agent_cache._cache_key(endpoint)}.json").write_text("not json")
-    assert agent_cache._cache_read(endpoint, 300) is None
-    (cache_dir / f"{agent_cache._cache_key(endpoint)}.json").write_text('{"stored": 1}')
-    assert agent_cache._cache_read(endpoint, 300) is None
+    assert agent_cache._cache_read(_endpoint(endpoint), 300) is None
+    (cache_dir / f"{agent_cache._cache_key(_endpoint(endpoint))}.json").write_text("not json")
+    assert agent_cache._cache_read(_endpoint(endpoint), 300) is None
+    (cache_dir / f"{agent_cache._cache_key(_endpoint(endpoint))}.json").write_text('{"stored": 1}')
+    assert agent_cache._cache_read(_endpoint(endpoint), 300) is None
 
 
 def test_cache_write_is_owner_only(cache_dir):
     endpoint = {"url": "http://a"}
-    agent_cache._cache_write(endpoint, b"{}", {})
-    path = cache_dir / f"{agent_cache._cache_key(endpoint)}.json"
+    agent_cache._cache_write(_endpoint(endpoint), b"{}", {})
+    path = cache_dir / f"{agent_cache._cache_key(_endpoint(endpoint))}.json"
     assert path.stat().st_mode & 0o777 == 0o600
     # No temp files left behind.
     assert [p.name for p in cache_dir.iterdir()] == [path.name]
@@ -2170,13 +2360,13 @@ def test_prune_cache_removes_only_stale_files(cache_dir):
 
 def test_fetch_serves_from_cache_without_a_request(cache_dir, monkeypatch):
     endpoint = {"url": "http://a", "cache_ttl": 300}
-    agent_cache._cache_write(endpoint, b'{"s": "UP"}', {"status": 200, "size": 11})
+    agent_cache._cache_write(_endpoint(endpoint), b'{"s": "UP"}', {"status": 200, "size": 11})
 
     def explode(*_args, **_kw):
         raise AssertionError("a cache hit must not touch the network")
 
     monkeypatch.setattr(agent_fetch, "_build_session", explode)
-    document, error, meta = agent_fetch._fetch(endpoint, None)
+    document, error, meta = agent_fetch._fetch(_endpoint(endpoint), None)
     assert document == {"s": "UP"}
     assert error is None
     assert meta["from_cache"] is True
@@ -2186,12 +2376,12 @@ def test_fetch_serves_from_cache_without_a_request(cache_dir, monkeypatch):
 def test_fetch_without_a_ttl_never_reads_the_cache(cache_dir, monkeypatch):
     # Freshness is the default; a stored body must not be served without opting in.
     endpoint = {"url": "http://a"}
-    agent_cache._cache_write(endpoint, b'{"s": "STALE"}', {})
+    agent_cache._cache_write(_endpoint(endpoint), b'{"s": "STALE"}', {})
     monkeypatch.setattr(
         agent_fetch, "_build_session", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("live"))
     )
     with pytest.raises(RuntimeError, match="live"):
-        agent_fetch._fetch(endpoint, None)
+        agent_fetch._fetch(_endpoint(endpoint), None)
 
 
 def test_fetch_caches_only_a_parseable_response(agent, cache_dir, monkeypatch):
@@ -2199,18 +2389,18 @@ def test_fetch_caches_only_a_parseable_response(agent, cache_dir, monkeypatch):
     # whole TTL instead of being retried.
     endpoint = {"url": "http://a", "cache_ttl": 300}
     _capture_request(agent, monkeypatch, _FakeResponse(b"nope"))
-    _document, error, _meta = agent_fetch._fetch(endpoint, None)
+    _document, error, _meta = agent_fetch._fetch(_endpoint(endpoint), None)
     assert error is not None
-    assert agent_cache._cache_read(endpoint, 300) is None
+    assert agent_cache._cache_read(_endpoint(endpoint), 300) is None
 
 
 def test_fetch_stores_a_successful_response(agent, cache_dir, monkeypatch):
     endpoint = {"url": "http://a", "cache_ttl": 300}
     _capture_request(agent, monkeypatch, _FakeResponse(b'{"s": "UP"}'))
-    document, error, meta = agent_fetch._fetch(endpoint, None)
+    document, error, meta = agent_fetch._fetch(_endpoint(endpoint), None)
     assert (document, error) == ({"s": "UP"}, None)
     assert meta["from_cache"] is False
-    body, cached = agent_cache._cache_read(endpoint, 300)
+    body, cached = agent_cache._cache_read(_endpoint(endpoint), 300)
     assert json.loads(body) == {"s": "UP"}
     assert cached["status"] == 200
 
@@ -2226,7 +2416,9 @@ def test_endpoint_record_reports_the_cache_state(agent, monkeypatch):
         ),
     )
     _results, _labels, record = agent._process_endpoint(
-        agent.parse_arguments(["--endpoint", "{}"]), 0, {"url": "http://x", "extractions": []}
+        agent.parse_arguments(["--endpoint", "{}"]),
+        0,
+        _blob({"url": "http://x", "extractions": []}),
     )
     assert record["from_cache"] is True
     assert record["cache_age"] == 120.0
@@ -2234,19 +2426,21 @@ def test_endpoint_record_reports_the_cache_state(agent, monkeypatch):
 
 def test_build_session_api_key_header_auth():
     _session, headers = agent_transport._build_session(
-        {"auth": "auth_header", "auth_header": "X-API-Key"}, "sekret"
+        _endpoint({"auth": "auth_header", "auth_header": "X-API-Key"}), "sekret"
     )
     assert headers["X-API-Key"] == "sekret"
 
 
 def test_build_session_api_key_header_defaults_when_unnamed():
-    _session, headers = agent_transport._build_session({"auth": "auth_header"}, "sekret")
+    _session, headers = agent_transport._build_session(_endpoint({"auth": "auth_header"}), "sekret")
     assert headers["X-API-Key"] == "sekret"
 
 
 def test_api_key_query_parameter_is_sent_but_not_in_the_configured_url(agent, monkeypatch):
     captured = _capture_request(agent, monkeypatch)
-    agent_fetch._fetch({"url": "http://x", "auth": "auth_query", "auth_query": "api_key"}, "sekret")
+    agent_fetch._fetch(
+        _endpoint({"url": "http://x", "auth": "auth_query", "auth_query": "api_key"}), "sekret"
+    )
     # requests appends it at send time; the URL that names the service is clean.
     assert captured["params"] == {"api_key": "sekret"}
     assert captured["url"] == "http://x"
@@ -2254,7 +2448,7 @@ def test_api_key_query_parameter_is_sent_but_not_in_the_configured_url(agent, mo
 
 def test_no_query_parameters_without_query_auth(agent, monkeypatch):
     captured = _capture_request(agent, monkeypatch)
-    agent_fetch._fetch({"url": "http://x", "auth": "auth_token"}, "sekret")
+    agent_fetch._fetch(_endpoint({"url": "http://x", "auth": "auth_token"}), "sekret")
     assert captured["params"] is None
 
 
@@ -2287,7 +2481,7 @@ def test_fetch_redacts_the_query_key_from_the_final_url(agent, monkeypatch):
     response.url = "http://x?api_key=sekret"
     _capture_request(agent, monkeypatch, response=response)
     _doc, error, meta = agent_fetch._fetch(
-        {"url": "http://x", "auth": "auth_query", "auth_query": "api_key"}, "sekret"
+        _endpoint({"url": "http://x", "auth": "auth_query", "auth_query": "api_key"}), "sekret"
     )
     assert error is None
     assert meta["final_url"] == "http://x?api_key=<redacted>"
@@ -2303,7 +2497,8 @@ def test_fetch_redacts_the_query_key_from_a_request_error(monkeypatch):
 
     monkeypatch.setattr(requests.Session, "request", explode)
     _doc, error, _meta = agent_fetch._fetch(
-        {"url": "http://x/health", "auth": "auth_query", "auth_query": "api_key"}, "sekret"
+        _endpoint({"url": "http://x/health", "auth": "auth_query", "auth_query": "api_key"}),
+        "sekret",
     )
     assert "sekret" not in error
     assert "<redacted>" in error
@@ -2312,7 +2507,7 @@ def test_fetch_redacts_the_query_key_from_a_request_error(monkeypatch):
 def test_fetch_debug_never_prints_the_api_key(agent, monkeypatch, capsys):
     _capture_request(agent, monkeypatch, response=_FakeResponse(body=b'{"ok": 1}'))
     agent_fetch._fetch(
-        {"url": "http://x", "auth": "auth_header", "auth_header": "X-API-Key"},
+        _endpoint({"url": "http://x", "auth": "auth_header", "auth_header": "X-API-Key"}),
         "topsecret",
         debug=True,
     )
@@ -2324,7 +2519,7 @@ def test_fetch_debug_never_prints_the_api_key(agent, monkeypatch, capsys):
 def test_fetch_debug_never_prints_the_query_api_key(agent, monkeypatch, capsys):
     _capture_request(agent, monkeypatch, response=_FakeResponse(body=b'{"ok": 1}'))
     agent_fetch._fetch(
-        {"url": "http://x", "auth": "auth_query", "auth_query": "api_key"},
+        _endpoint({"url": "http://x", "auth": "auth_query", "auth_query": "api_key"}),
         "topsecret",
         debug=True,
     )
@@ -2335,9 +2530,9 @@ def test_fetch_debug_never_prints_the_query_api_key(agent, monkeypatch, capsys):
 
 def test_cache_key_separates_endpoints_by_api_key_location():
     base = {"url": "http://x", "auth": "auth_header"}
-    assert agent_cache._cache_key({**base, "auth_header": "X-API-Key"}) != agent_cache._cache_key(
-        {**base, "auth_header": "PRIVATE-TOKEN"}
-    )
+    assert agent_cache._cache_key(
+        _endpoint({**base, "auth_header": "X-API-Key"})
+    ) != agent_cache._cache_key(_endpoint({**base, "auth_header": "PRIVATE-TOKEN"}))
 
 
 def test_resolve_summary_reads_paths_in_the_element_scope():
@@ -2383,7 +2578,7 @@ def test_extract_resolves_the_summary_per_wildcard_element():
         "label_path": "name",
         "summary": "{note}",
     }
-    results = agent_extract._extract(document, [spec], "u")
+    results = agent_extract._extract(document, _fields([spec]), "u")
     assert [r["summary_fields"] for r in results] == [{"note": "fine"}, {"note": "disk full"}]
     assert all(r["summary"] == "{note}" for r in results)
 
@@ -2391,20 +2586,20 @@ def test_extract_resolves_the_summary_per_wildcard_element():
 def test_extract_resolves_the_summary_from_the_root_without_a_wildcard():
     document = {"status": "DEGRADED", "message": "replica lag"}
     spec = {"path": "status", "service": "Health", "summary": "{message}"}
-    (result,) = agent_extract._extract(document, [spec], "u")
+    (result,) = agent_extract._extract(document, _fields([spec]), "u")
     assert result["summary_fields"] == {"message": "replica lag"}
 
 
 def test_retry_policy_reads_the_endpoint():
-    assert agent_fetch._retry_policy({}) == (0, 0.0)
-    assert agent_fetch._retry_policy({"retry": {"attempts": 3, "backoff": 1.5}}) == (3, 1.5)
+    assert _retry({}) == (0, 0.0)
+    assert _retry({"retry": {"attempts": 3, "backoff": 1.5}}) == (3, 1.5)
     # Junk is off, not a crash.
-    assert agent_fetch._retry_policy({"retry": {"attempts": 0}}) == (0, 0.0)
-    assert agent_fetch._retry_policy({"retry": {"attempts": True}}) == (0, 0.0)
-    assert agent_fetch._retry_policy({"retry": "yes"}) == (0, 0.0)
+    assert _retry({"retry": {"attempts": 0}}) == (0, 0.0)
+    assert _retry({"retry": {"attempts": True}}) == (0, 0.0)
+    assert _retry({"retry": "yes"}) == (0, 0.0)
     # A missing/negative backoff means "retry immediately", not "do not retry".
-    assert agent_fetch._retry_policy({"retry": {"attempts": 2}}) == (2, 0.0)
-    assert agent_fetch._retry_policy({"retry": {"attempts": 2, "backoff": -1}}) == (2, 0.0)
+    assert _retry({"retry": {"attempts": 2}}) == (2, 0.0)
+    assert _retry({"retry": {"attempts": 2, "backoff": -1}}) == (2, 0.0)
 
 
 def test_retryable_status_only_for_429_and_5xx():
@@ -2443,7 +2638,7 @@ def test_fetch_retries_a_connection_error_then_succeeds(agent, monkeypatch):
         [requests.exceptions.ConnectionError("reset"), _FakeResponse(body=b'{"ok": 1}')],
     )
     doc, error, meta = agent_fetch._fetch(
-        {"url": "http://x", "retry": {"attempts": 2, "backoff": 0}}, None
+        _endpoint({"url": "http://x", "retry": {"attempts": 2, "backoff": 0}}), None
     )
     assert error is None and doc == {"ok": 1}
     assert calls["n"] == 2
@@ -2454,7 +2649,7 @@ def test_fetch_retries_a_connection_error_then_succeeds(agent, monkeypatch):
 def test_fetch_gives_up_after_the_configured_retries(agent, monkeypatch):
     calls = _flaky_request(agent, monkeypatch, [requests.exceptions.ConnectionError("reset")])
     _doc, error, meta = agent_fetch._fetch(
-        {"url": "http://x", "retry": {"attempts": 2, "backoff": 0}}, None
+        _endpoint({"url": "http://x", "retry": {"attempts": 2, "backoff": 0}}), None
     )
     assert "Request failed" in error
     assert calls["n"] == 3  # the first attempt plus two retries
@@ -2463,7 +2658,7 @@ def test_fetch_gives_up_after_the_configured_retries(agent, monkeypatch):
 
 def test_fetch_without_a_retry_policy_attempts_once(agent, monkeypatch):
     calls = _flaky_request(agent, monkeypatch, [requests.exceptions.ConnectionError("reset")])
-    _doc, error, meta = agent_fetch._fetch({"url": "http://x"}, None)
+    _doc, error, meta = agent_fetch._fetch(_endpoint({"url": "http://x"}), None)
     assert error is not None
     assert calls["n"] == 1
     assert meta["attempts"] == 1
@@ -2476,14 +2671,14 @@ def test_fetch_retries_a_503_but_not_a_404(agent, monkeypatch):
         [_FakeResponse(status_code=503), _FakeResponse(body=b'{"ok": 1}')],
     )
     doc, error, _meta = agent_fetch._fetch(
-        {"url": "http://x", "retry": {"attempts": 2, "backoff": 0}}, None
+        _endpoint({"url": "http://x", "retry": {"attempts": 2, "backoff": 0}}), None
     )
     assert error is None and doc == {"ok": 1}
     assert calls["n"] == 2
 
     calls = _flaky_request(agent, monkeypatch, [_FakeResponse(status_code=404)])
     _doc, error, _meta = agent_fetch._fetch(
-        {"url": "http://x", "retry": {"attempts": 2, "backoff": 0}}, None
+        _endpoint({"url": "http://x", "retry": {"attempts": 2, "backoff": 0}}), None
     )
     assert "HTTP 404" in error
     assert calls["n"] == 1  # a 404 answers the same however often it is asked
@@ -2494,7 +2689,7 @@ def test_fetch_does_not_retry_a_non_json_body(agent, monkeypatch):
     # not a blip, so retrying only burns the check's time budget.
     calls = _flaky_request(agent, monkeypatch, [_FakeResponse(body=b"<html>")])
     _doc, error, _meta = agent_fetch._fetch(
-        {"url": "http://x", "retry": {"attempts": 3, "backoff": 0}}, None
+        _endpoint({"url": "http://x", "retry": {"attempts": 3, "backoff": 0}}), None
     )
     assert "not valid JSON" in error
     assert calls["n"] == 1
@@ -2505,11 +2700,13 @@ def test_fetch_does_not_retry_an_accepted_status(agent, monkeypatch):
     # the whole point - so it must not be retried away.
     calls = _flaky_request(agent, monkeypatch, [_FakeResponse(status_code=503, body=b'{"a": 1}')])
     doc, error, meta = agent_fetch._fetch(
-        {
-            "url": "http://x",
-            "accept_status": [503],
-            "retry": {"attempts": 3, "backoff": 0},
-        },
+        _endpoint(
+            {
+                "url": "http://x",
+                "accept_status": [503],
+                "retry": {"attempts": 3, "backoff": 0},
+            }
+        ),
         None,
     )
     assert error is None and doc == {"a": 1}
@@ -2524,7 +2721,7 @@ def test_fetch_backoff_doubles_and_is_capped(monkeypatch):
         raise requests.exceptions.ConnectionError("reset")
 
     monkeypatch.setattr(requests.Session, "request", always_fail)
-    agent_fetch._fetch({"url": "http://x", "retry": {"attempts": 5, "backoff": 4}}, None)
+    agent_fetch._fetch(_endpoint({"url": "http://x", "retry": {"attempts": 5, "backoff": 4}}), None)
     # 4, 8, 16 then capped: a check that sleeps for minutes is a worse failure
     # than the one it is papering over.
     assert sum(slept) <= agent_fetch._MAX_RETRY_SLEEP
@@ -2535,9 +2732,9 @@ def test_a_cache_hit_is_never_retried(agent, monkeypatch, tmp_path):
     # No request is made at all, so there is nothing to retry.
     monkeypatch.setattr(agent_cache, "_cache_dir", lambda: tmp_path)
     endpoint = {"url": "http://x", "cache_ttl": 300, "retry": {"attempts": 3, "backoff": 0}}
-    agent_cache._cache_write(endpoint, b'{"ok": 1}', {"status": 200, "elapsed": 0.1})
+    agent_cache._cache_write(_endpoint(endpoint), b'{"ok": 1}', {"status": 200, "elapsed": 0.1})
     calls = _flaky_request(agent, monkeypatch, [requests.exceptions.ConnectionError("x")])
-    doc, error, meta = agent_fetch._fetch(endpoint, None)
+    doc, error, meta = agent_fetch._fetch(_endpoint(endpoint), None)
     assert error is None and doc == {"ok": 1}
     assert calls["n"] == 0
     assert meta["from_cache"] is True
@@ -2550,8 +2747,10 @@ def test_a_cache_hit_reports_no_retries(monkeypatch, tmp_path):
     # thing the retry reporting exists to prevent, inverted.
     monkeypatch.setattr(agent_cache, "_cache_dir", lambda: tmp_path)
     endpoint = {"url": "http://x", "cache_ttl": 300}
-    agent_cache._cache_write(endpoint, b'{"ok": 1}', {"status": 200, "elapsed": 0.1, "attempts": 3})
-    _doc, error, meta = agent_fetch._fetch(endpoint, None)
+    agent_cache._cache_write(
+        _endpoint(endpoint), b'{"ok": 1}', {"status": 200, "elapsed": 0.1, "attempts": 3}
+    )
+    _doc, error, meta = agent_fetch._fetch(_endpoint(endpoint), None)
     assert error is None
     assert meta["from_cache"] is True
     assert meta["attempts"] == 1
@@ -2563,7 +2762,7 @@ def test_a_stale_attempts_count_is_never_stored(monkeypatch, tmp_path):
     # resurrect one either.
     monkeypatch.setattr(agent_cache, "_cache_dir", lambda: tmp_path)
     endpoint = {"url": "http://x", "cache_ttl": 300}
-    agent_cache._cache_write(endpoint, b"{}", {"status": 200, "attempts": 4})
+    agent_cache._cache_write(_endpoint(endpoint), b"{}", {"status": 200, "attempts": 4})
     import json as _json
 
     (path,) = list(tmp_path.glob("*.json"))
@@ -2575,11 +2774,15 @@ def test_cache_key_separates_endpoints_by_credential():
     # and a different key each; sharing one cache file would serve one tenant's
     # body for the other for the whole TTL.
     endpoint = {"url": "http://x", "auth": "auth_header", "auth_header": "X-API-Key"}
-    assert agent_cache._cache_key(endpoint, "key-a") != agent_cache._cache_key(endpoint, "key-b")
+    assert agent_cache._cache_key(_endpoint(endpoint), "key-a") != agent_cache._cache_key(
+        _endpoint(endpoint), "key-b"
+    )
     # The same credential is still the same entry, and the key itself never
     # appears in the filename.
-    assert agent_cache._cache_key(endpoint, "key-a") == agent_cache._cache_key(endpoint, "key-a")
-    assert "key-a" not in agent_cache._cache_key(endpoint, "key-a")
+    assert agent_cache._cache_key(_endpoint(endpoint), "key-a") == agent_cache._cache_key(
+        _endpoint(endpoint), "key-a"
+    )
+    assert "key-a" not in agent_cache._cache_key(_endpoint(endpoint), "key-a")
 
 
 def test_a_cached_body_is_not_served_to_a_different_credential(monkeypatch, tmp_path):
@@ -2590,9 +2793,9 @@ def test_a_cached_body_is_not_served_to_a_different_credential(monkeypatch, tmp_
         "auth": "auth_header",
         "auth_header": "X-API-Key",
     }
-    agent_cache._cache_write(endpoint, b'{"tenant": "a"}', {"status": 200}, "key-a")
-    assert agent_cache._cache_read(endpoint, 300, "key-a") is not None
-    assert agent_cache._cache_read(endpoint, 300, "key-b") is None
+    agent_cache._cache_write(_endpoint(endpoint), b'{"tenant": "a"}', {"status": 200}, "key-a")
+    assert agent_cache._cache_read(_endpoint(endpoint), 300, "key-a") is not None
+    assert agent_cache._cache_read(_endpoint(endpoint), 300, "key-b") is None
 
 
 class _FakePrepared:
@@ -2659,7 +2862,7 @@ def test_an_empty_wildcard_label_still_gets_an_inventory_row():
         "label_path": "name",
         "inventory": {"node": "software.applications.json_api.nodes"},
     }
-    results = agent_extract._extract(document, [spec], "u")
+    results = agent_extract._extract(document, _fields([spec]), "u")
     assert [r["inventory"]["row_key"] for r in results] == ["0", "n2"]
 
 
@@ -2667,19 +2870,21 @@ def test_an_empty_wildcard_label_still_gets_an_inventory_row():
 
 
 def test_service_prefix_needs_both_the_option_and_a_name():
-    assert agent_extract._service_prefix({"service_prefix": True, "name": "app1"}) == "app1"
-    assert agent_extract._service_prefix({"service_prefix": True, "name": "  app1  "}) == "app1"
+    assert agent_extract._service_prefix(_blob({"service_prefix": True, "name": "app1"})) == "app1"
+    assert (
+        agent_extract._service_prefix(_blob({"service_prefix": True, "name": "  app1  "})) == "app1"
+    )
     # Off, or on without a name: no prefix. A URL is deliberately never used -
     # it would carry a query string into every service description.
-    assert agent_extract._service_prefix({"name": "app1"}) == ""
-    assert agent_extract._service_prefix({"service_prefix": True}) == ""
-    assert agent_extract._service_prefix({"service_prefix": True, "name": "   "}) == ""
-    assert agent_extract._service_prefix({"service_prefix": True, "name": 5}) == ""
+    assert agent_extract._service_prefix(_blob({"name": "app1"})) == ""
+    assert agent_extract._service_prefix(_blob({"service_prefix": True})) == ""
+    assert agent_extract._service_prefix(_blob({"service_prefix": True, "name": "   "})) == ""
+    assert agent_extract._service_prefix(_blob({"service_prefix": True, "name": 5})) == ""
 
 
 def test_extract_prefixes_a_plain_field():
     results = agent_extract._extract(
-        {"status": "UP"}, [{"path": "status", "service": "Status"}], "u", None, "app1"
+        {"status": "UP"}, _fields([{"path": "status", "service": "Status"}]), "u", None, "app1"
     )
     assert [r["service"] for r in results] == ["app1 Status"]
 
@@ -2692,7 +2897,7 @@ def test_extract_prefixes_every_kind_of_service_name():
         {"path": "nodes[*].load", "service": "Load", "label_path": "name"},
         {"path": "nodes[*].load", "service": "Total load", "aggregate": "sum"},
     ]
-    results = agent_extract._extract(document, specs, "u", {"X-Version": "4.2"}, "app1")
+    results = agent_extract._extract(document, _fields(specs), "u", {"X-Version": "4.2"}, "app1")
     assert [r["service"] for r in results] == [
         "app1 Status",
         "app1 Version",
@@ -2705,7 +2910,9 @@ def test_extract_prefixes_every_kind_of_service_name():
 def test_extract_without_a_prefix_is_unchanged():
     document = {"nodes": [{"name": "n1", "load": 1}]}
     specs = [{"path": "nodes[*].load", "service": "Load", "label_path": "name"}]
-    assert [r["service"] for r in agent_extract._extract(document, specs, "u")] == ["Load n1"]
+    assert [r["service"] for r in agent_extract._extract(document, _fields(specs), "u")] == [
+        "Load n1"
+    ]
 
 
 def test_a_piggyback_service_is_prefixed_but_not_labelled():
@@ -2713,7 +2920,7 @@ def test_a_piggyback_service_is_prefixed_but_not_labelled():
     # which endpoint the service came from is still worth saying.
     document = {"nodes": [{"host": "n1", "load": 1}]}
     specs = [{"path": "nodes[*].load", "service": "Load", "piggyback_host": "host"}]
-    results = agent_extract._extract(document, specs, "u", None, "app1")
+    results = agent_extract._extract(document, _fields(specs), "u", None, "app1")
     assert [(r["service"], r["host"]) for r in results] == [("app1 Load", "n1")]
 
 
@@ -2730,7 +2937,7 @@ def test_a_failed_endpoint_keeps_the_prefixed_service_names(agent, monkeypatch):
         "extractions": [{"path": "status", "service": "Status"}],
     }
     results, _labels, record = agent._process_endpoint(
-        agent.parse_arguments(["--endpoint", "{}"]), 0, endpoint
+        agent.parse_arguments(["--endpoint", "{}"]), 0, _blob(endpoint)
     )
     assert [r["service"] for r in results] == ["app1 Status"]
     assert record["ok"] is False
@@ -2753,7 +2960,7 @@ def test_two_endpoints_extracting_the_same_field_stay_distinguishable(agent, mon
             "service_prefix": True,
             "extractions": [{"path": "status", "service": "Status"}],
         }
-        results, _labels, _record = agent._process_endpoint(args, index, endpoint)
+        results, _labels, _record = agent._process_endpoint(args, index, _blob(endpoint))
         names += [r["service"] for r in results]
     assert names == ["app1 Status", "app2 Status"]
 
@@ -2764,33 +2971,28 @@ REPORT = {"url": "http://a", "show_response": {"max_bytes": 2048, "headers": Tru
 
 
 def test_report_is_off_unless_configured():
-    assert agent_transport._report_spec({}) is None
-    assert agent_transport._report_spec({"show_response": None}) is None
+    assert _endpoint({}).show_response is None
+    assert _endpoint({"show_response": None}).show_response is None
     meta = {}
-    agent_transport._store_report({}, meta, b'{"a": 1}', None)
+    agent_transport._store_report(_endpoint({}), meta, b'{"a": 1}', None)
     assert meta == {}
 
 
 def test_reported_limit_is_clamped_to_the_hard_ceiling():
-    assert agent_transport._reported_limit({"max_bytes": 100}) == 100
-    assert (
-        agent_transport._reported_limit({"max_bytes": 10**9}) == agent_transport._MAX_REPORTED_BYTES
-    )
+    assert _reported_limit({"max_bytes": 100}) == 100
+    assert _reported_limit({"max_bytes": 10**9}) == agent_models._MAX_REPORTED_BYTES
     # Absent, zero or nonsense falls back to the default rather than to "all of it".
-    assert agent_transport._reported_limit({}) == agent_transport._DEFAULT_REPORTED_BYTES
-    assert (
-        agent_transport._reported_limit({"max_bytes": 0}) == agent_transport._DEFAULT_REPORTED_BYTES
-    )
-    assert (
-        agent_transport._reported_limit({"max_bytes": "big"})
-        == agent_transport._DEFAULT_REPORTED_BYTES
-    )
-    assert agent_transport._reported_limit({"max_bytes": -5}) == 1
+    assert _reported_limit({}) == agent_models._DEFAULT_REPORTED_BYTES
+    assert _reported_limit({"max_bytes": 0}) == agent_models._DEFAULT_REPORTED_BYTES
+    assert _reported_limit({"max_bytes": "big"}) == agent_models._DEFAULT_REPORTED_BYTES
+    assert _reported_limit({"max_bytes": -5}) == 1
 
 
 def test_store_report_truncates_and_says_so():
     meta = {}
-    agent_transport._store_report({"show_response": {"max_bytes": 4}}, meta, b"0123456789", None)
+    agent_transport._store_report(
+        _endpoint({"show_response": {"max_bytes": 4}}), meta, b"0123456789", None
+    )
     assert meta["body"] == "0123"
     assert meta["body_truncated"] is True
     # The full length is kept, so the service can say what was cut off.
@@ -2799,7 +3001,7 @@ def test_store_report_truncates_and_says_so():
 
 def test_store_report_keeps_a_short_body_whole():
     meta = {}
-    agent_transport._store_report(REPORT, meta, b'{"status": "UP"}', None)
+    agent_transport._store_report(_endpoint(REPORT), meta, b'{"status": "UP"}', None)
     assert meta["body"] == '{"status": "UP"}'
     assert meta["body_truncated"] is False
 
@@ -2808,7 +3010,9 @@ def test_a_body_cut_mid_character_still_decodes():
     # Truncation is by BYTES, so it can split a multi-byte character; that must
     # not throw away the whole report.
     meta = {}
-    agent_transport._store_report({"show_response": {"max_bytes": 2}}, meta, "äö".encode(), None)
+    agent_transport._store_report(
+        _endpoint({"show_response": {"max_bytes": 2}}), meta, "äö".encode(), None
+    )
     assert meta["body"].startswith("ä")
 
 
@@ -2816,7 +3020,7 @@ def test_the_reported_body_never_carries_the_secret():
     # An API that echoes the key it was given must not have it stored with the
     # check result - the whole class of bug behind the token-preview fix.
     meta = {}
-    agent_transport._store_report(REPORT, meta, b'{"token": "s3cret"}', "s3cret")
+    agent_transport._store_report(_endpoint(REPORT), meta, b'{"token": "s3cret"}', "s3cret")
     assert "s3cret" not in meta["body"]
     assert agent_transport._REDACTED in meta["body"]
 
@@ -2837,7 +3041,7 @@ def test_reported_headers_mask_credentials_and_the_secret():
 def test_headers_can_be_left_out_of_the_report():
     meta = {"headers": {"Content-Type": "application/json"}}
     agent_transport._store_report(
-        {"show_response": {"max_bytes": 99, "headers": False}}, meta, b"{}", None
+        _endpoint({"show_response": {"max_bytes": 99, "headers": False}}), meta, b"{}", None
     )
     assert "headers_reported" not in meta
     assert meta["body"] == "{}"
@@ -2845,7 +3049,7 @@ def test_headers_can_be_left_out_of_the_report():
 
 def test_fetch_reports_a_successful_response(agent, monkeypatch):
     _capture_request(agent, monkeypatch, _FakeResponse(b'{"s": "UP"}', headers={"X-Req": "42"}))
-    _document, error, meta = agent_fetch._fetch(REPORT, None)
+    _document, error, meta = agent_fetch._fetch(_endpoint(REPORT), None)
     assert error is None
     assert meta["body"] == '{"s": "UP"}'
     assert meta["headers_reported"] == {"X-Req": "42"}
@@ -2857,14 +3061,14 @@ def test_fetch_reports_the_body_of_a_rejected_response(agent, monkeypatch):
     _capture_request(
         agent, monkeypatch, _FakeResponse(b'{"error": "tenant disabled"}', status_code=403)
     )
-    _document, error, meta = agent_fetch._fetch(REPORT, None)
+    _document, error, meta = agent_fetch._fetch(_endpoint(REPORT), None)
     assert error.startswith("HTTP 403")
     assert meta["body"] == '{"error": "tenant disabled"}'
 
 
 def test_fetch_reports_a_body_that_is_not_json(agent, monkeypatch):
     _capture_request(agent, monkeypatch, _FakeResponse(b"<html>Gateway Timeout</html>"))
-    _document, error, meta = agent_fetch._fetch(REPORT, None)
+    _document, error, meta = agent_fetch._fetch(_endpoint(REPORT), None)
     assert "not valid JSON" in error
     assert meta["body"] == "<html>Gateway Timeout</html>"
 
@@ -2880,7 +3084,7 @@ def test_a_rejected_response_body_is_not_read_unless_it_is_reported(agent, monke
     # Reading it would cost time and memory for every failing endpoint of every
     # rule, to produce something nothing looks at.
     _capture_request(agent, monkeypatch, _UnreadableResponse(status_code=403))
-    _document, error, meta = agent_fetch._fetch({"url": "http://a"}, None)
+    _document, error, meta = agent_fetch._fetch(_endpoint({"url": "http://a"}), None)
     assert error.startswith("HTTP 403")
     assert "body" not in meta
 
@@ -2892,7 +3096,7 @@ def test_an_unreadable_error_body_does_not_change_the_endpoint_error(agent, monk
         "_read_reportable",
         lambda *_a: (_ for _ in ()).throw(requests.exceptions.ConnectionError("reset")),
     )
-    _document, error, meta = agent_fetch._fetch(REPORT, None)
+    _document, error, meta = agent_fetch._fetch(_endpoint(REPORT), None)
     assert error.startswith("HTTP 403")
     assert "body" not in meta
 
@@ -2903,7 +3107,7 @@ def test_an_error_body_is_only_read_up_to_the_reported_limit(agent, monkeypatch)
     # report must not pretend to know.
     _capture_request(agent, monkeypatch, _FakeResponse(b"x" * 100000, status_code=500))
     _document, error, meta = agent_fetch._fetch(
-        {"url": "http://a", "show_response": {"max_bytes": 16}}, None
+        _endpoint({"url": "http://a", "show_response": {"max_bytes": 16}}), None
     )
     assert error.startswith("HTTP 500")
     assert meta["body"] == "x" * 16
@@ -2921,13 +3125,13 @@ def test_read_reportable_stops_at_the_limit():
 def test_the_report_is_rebuilt_from_a_cached_body(agent, cache_dir, monkeypatch):
     endpoint = {**REPORT, "cache_ttl": 300}
     _capture_request(agent, monkeypatch, _FakeResponse(b'{"s": "UP"}'))
-    agent_fetch._fetch(endpoint, None)
+    agent_fetch._fetch(_endpoint(endpoint), None)
 
     def explode(*_args, **_kw):
         raise AssertionError("a cache hit must not touch the network")
 
     monkeypatch.setattr(agent_fetch, "_build_session", explode)
-    _document, error, meta = agent_fetch._fetch(endpoint, None)
+    _document, error, meta = agent_fetch._fetch(_endpoint(endpoint), None)
     assert (error, meta["from_cache"]) == (None, True)
     assert meta["body"] == '{"s": "UP"}'
 
@@ -2937,21 +3141,21 @@ def test_the_report_is_not_stored_in_the_cache_file(agent, cache_dir, monkeypatc
     # hit under the settings in force then, not the ones of a previous check.
     endpoint = {**REPORT, "cache_ttl": 300}
     _capture_request(agent, monkeypatch, _FakeResponse(b'{"s": "UP"}'))
-    agent_fetch._fetch(endpoint, None)
-    _body, cached = agent_cache._cache_read(endpoint, 300)
+    agent_fetch._fetch(_endpoint(endpoint), None)
+    _body, cached = agent_cache._cache_read(_endpoint(endpoint), 300)
     assert not {"body", "body_truncated", "body_size", "headers_reported"} & set(cached)
 
 
 def test_a_cached_body_is_reported_under_the_current_settings(agent, cache_dir, monkeypatch):
     endpoint = {**REPORT, "cache_ttl": 300}
     _capture_request(agent, monkeypatch, _FakeResponse(b'{"s": "UP"}'))
-    agent_fetch._fetch(endpoint, None)
+    agent_fetch._fetch(_endpoint(endpoint), None)
     monkeypatch.setattr(
         agent_fetch, "_build_session", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("live"))
     )
     # Same cached body, a rule that now reports only 4 bytes of it.
     tightened = {**endpoint, "show_response": {"max_bytes": 4, "headers": True}}
-    _document, _error, meta = agent_fetch._fetch(tightened, None)
+    _document, _error, meta = agent_fetch._fetch(_endpoint(tightened), None)
     assert (meta["body"], meta["body_truncated"]) == ('{"s"', True)
 
 
@@ -2972,7 +3176,9 @@ def test_the_endpoint_record_carries_the_report(agent, monkeypatch):
         ),
     )
     _results, _labels, record = agent._process_endpoint(
-        agent.parse_arguments(["--endpoint", "{}"]), 0, {"url": "http://x", "extractions": []}
+        agent.parse_arguments(["--endpoint", "{}"]),
+        0,
+        _blob({"url": "http://x", "extractions": []}),
     )
     assert record["body"] == '{"s": "UP"}'
     assert record["body_size"] == 11
@@ -2984,7 +3190,9 @@ def test_the_endpoint_record_reports_nothing_by_default(agent, monkeypatch):
         agent, "_fetch", lambda endpoint, secret, debug=False: ({"s": "UP"}, None, {"status": 200})
     )
     _results, _labels, record = agent._process_endpoint(
-        agent.parse_arguments(["--endpoint", "{}"]), 0, {"url": "http://x", "extractions": []}
+        agent.parse_arguments(["--endpoint", "{}"]),
+        0,
+        _blob({"url": "http://x", "extractions": []}),
     )
     assert record["body"] is None
     assert record["headers"] is None
@@ -2998,9 +3206,9 @@ def test_the_endpoint_record_says_whether_it_prefixes(agent, monkeypatch):
         agent, "_fetch", lambda endpoint, secret, debug=False: ({}, None, {"status": 200})
     )
     args = agent.parse_arguments(["--endpoint", "{}"])
-    _r, _l, plain = agent._process_endpoint(args, 0, {"url": "http://x", "name": "app1"})
+    _r, _l, plain = agent._process_endpoint(args, 0, _blob({"url": "http://x", "name": "app1"}))
     _r, _l, prefixed = agent._process_endpoint(
-        args, 1, {"url": "http://x", "name": "app1", "service_prefix": True}
+        args, 1, _blob({"url": "http://x", "name": "app1", "service_prefix": True})
     )
     assert plain["prefixed"] is False
     assert prefixed["prefixed"] is True
@@ -3013,7 +3221,7 @@ def test_a_failed_endpoint_still_says_whether_it_prefixes(agent, monkeypatch):
     _r, _l, record = agent._process_endpoint(
         agent.parse_arguments(["--endpoint", "{}"]),
         0,
-        {"url": "http://x", "name": "app1", "service_prefix": True},
+        _blob({"url": "http://x", "name": "app1", "service_prefix": True}),
     )
     assert (record["ok"], record["prefixed"]) == (False, True)
 
@@ -3022,12 +3230,12 @@ def test_a_failed_endpoint_still_says_whether_it_prefixes(agent, monkeypatch):
 
 
 def test_shared_service_reads_the_group_name():
-    assert agent_extract._shared_service({"group": "Health"}) == "Health"
-    assert agent_extract._shared_service({"group": "  Health  "}) == "Health"
-    assert agent_extract._shared_service({}) is None
-    assert agent_extract._shared_service({"group": ""}) is None
-    assert agent_extract._shared_service({"group": "   "}) is None
-    assert agent_extract._shared_service({"group": 5}) is None
+    assert _field({"group": "Health"}).group == "Health"
+    assert _field({"group": "  Health  "}).group == "Health"
+    assert _field({}).group is None
+    assert _field({"group": ""}).group is None
+    assert _field({"group": "   "}).group is None
+    assert _field({"group": 5}).group is None
 
 
 def test_grouped_fields_share_a_service_and_name_their_lines():
@@ -3037,14 +3245,14 @@ def test_grouped_fields_share_a_service_and_name_their_lines():
         {"path": "component", "service": "Component", "group": "Health"},
         {"path": "timestamp", "service": "Timestamp", "group": "Health"},
     ]
-    results = agent_extract._extract(document, specs, "u")
+    results = agent_extract._extract(document, _fields(specs), "u")
     assert {r["service"] for r in results} == {"Health"}
     assert [r["label"] for r in results] == ["Status", "Component", "Timestamp"]
 
 
 def test_an_ungrouped_field_carries_no_line_label():
     (result,) = agent_extract._extract(
-        {"status": "UP"}, [{"path": "status", "service": "Status"}], "u"
+        {"status": "UP"}, _fields([{"path": "status", "service": "Status"}]), "u"
     )
     assert (result["service"], result["label"]) == ("Status", None)
 
@@ -3052,7 +3260,7 @@ def test_an_ungrouped_field_carries_no_line_label():
 def test_a_grouped_wildcard_fans_out_into_lines_not_services():
     document = {"nodes": [{"name": "n1", "load": 1}, {"name": "n2", "load": 2}]}
     specs = [{"path": "nodes[*].load", "service": "Load", "label_path": "name", "group": "Nodes"}]
-    results = agent_extract._extract(document, specs, "u")
+    results = agent_extract._extract(document, _fields(specs), "u")
     assert {r["service"] for r in results} == {"Nodes"}
     assert [r["label"] for r in results] == ["Load n1", "Load n2"]
 
@@ -3063,7 +3271,7 @@ def test_a_grouped_header_and_aggregate_keep_the_shared_service():
         {"path": "@header.x-version", "service": "Version", "group": "Health"},
         {"path": "nodes[*].load", "service": "Total", "aggregate": "sum", "group": "Health"},
     ]
-    results = agent_extract._extract(document, specs, "u", {"X-Version": "4.2"}, "")
+    results = agent_extract._extract(document, _fields(specs), "u", {"X-Version": "4.2"}, "")
     assert {r["service"] for r in results} == {"Health"}
     assert [r["label"] for r in results] == ["Version", "Total"]
 
@@ -3072,7 +3280,7 @@ def test_the_endpoint_prefix_applies_to_the_shared_service():
     # The prefix names the SERVICE, so it lands on the group - not on every line
     # inside it, which would repeat the endpoint name three times per service.
     specs = [{"path": "status", "service": "Status", "group": "Health"}]
-    (result,) = agent_extract._extract({"status": "UP"}, specs, "u", None, "app1")
+    (result,) = agent_extract._extract({"status": "UP"}, _fields(specs), "u", None, "app1")
     assert (result["service"], result["label"]) == ("app1 Health", "Status")
 
 
@@ -3091,7 +3299,7 @@ def test_a_failed_endpoint_keeps_its_shared_services(agent, monkeypatch):
         ],
     }
     results, _labels, _record = agent._process_endpoint(
-        agent.parse_arguments(["--endpoint", "{}"]), 0, endpoint
+        agent.parse_arguments(["--endpoint", "{}"]), 0, _blob(endpoint)
     )
     assert [(r["service"], r["label"]) for r in results] == [
         ("Health", "Status"),
@@ -3112,15 +3320,15 @@ CONTEXT_DOC = {
 
 
 def test_context_is_off_unless_configured():
-    assert agent_extract._context_spec({}) is None
-    assert agent_extract._context_spec({"field_context": None}) is None
+    assert _endpoint({}).field_context is None
+    assert _endpoint({"field_context": None}).field_context is None
     assert agent_extract._context_text(None, CONTEXT_DOC, "cluster.version") is None
 
 
 def test_context_of_a_wildcard_element_is_that_element():
     spec = {"source": "element", "max_bytes": 4096}
     element = CONTEXT_DOC["services"][1]
-    text = agent_extract._context_text(spec, CONTEXT_DOC, "services[*].status", element)
+    text = agent_extract._context_text(_context(spec), CONTEXT_DOC, "services[*].status", element)
     assert json.loads(text) == element
     # Only that element: the sibling service is not dragged along.
     assert "web" not in text
@@ -3128,25 +3336,29 @@ def test_context_of_a_wildcard_element_is_that_element():
 
 def test_context_of_a_plain_path_is_the_object_holding_it():
     spec = {"source": "element", "max_bytes": 4096}
-    text = agent_extract._context_text(spec, CONTEXT_DOC, "cluster.version")
+    text = agent_extract._context_text(_context(spec), CONTEXT_DOC, "cluster.version")
     assert json.loads(text) == {"region": "eu", "version": "2.4.0"}
 
 
 def test_context_of_a_top_level_path_is_the_whole_document():
     # The container of a top-level field IS the response.
     spec = {"source": "element", "max_bytes": 9999}
-    text = agent_extract._context_text(spec, CONTEXT_DOC, "cluster")
+    text = agent_extract._context_text(_context(spec), CONTEXT_DOC, "cluster")
     assert json.loads(text) == CONTEXT_DOC
 
 
 def test_context_of_an_aggregation_or_header_falls_back_to_the_response():
     spec = {"source": "element", "max_bytes": 9999}
     assert (
-        json.loads(agent_extract._context_text(spec, CONTEXT_DOC, "services[*].name"))
+        json.loads(agent_extract._context_text(_context(spec), CONTEXT_DOC, "services[*].name"))
         == CONTEXT_DOC
     )
     assert (
-        json.loads(agent_extract._context_text(spec, CONTEXT_DOC, "@header.X-RateLimit-Remaining"))
+        json.loads(
+            agent_extract._context_text(
+                _context(spec), CONTEXT_DOC, "@header.X-RateLimit-Remaining"
+            )
+        )
         == CONTEXT_DOC
     )
 
@@ -3155,13 +3367,13 @@ def test_context_source_response_always_reports_the_document():
     spec = {"source": "response", "max_bytes": 9999}
     element = CONTEXT_DOC["services"][1]
     assert json.loads(
-        agent_extract._context_text(spec, CONTEXT_DOC, "services[*].status", element)
+        agent_extract._context_text(_context(spec), CONTEXT_DOC, "services[*].status", element)
     ) == (CONTEXT_DOC)
 
 
 def test_context_is_capped_and_says_so():
     spec = {"source": "response", "max_bytes": 20}
-    text = agent_extract._context_text(spec, CONTEXT_DOC, "cluster")
+    text = agent_extract._context_text(_context(spec), CONTEXT_DOC, "cluster")
     assert "truncated at 20 of" in text
     # The cap applies to the JSON itself; the note is what is added on top.
     assert len(text.split("\n... (truncated")[0].encode()) == 20
@@ -3171,11 +3383,13 @@ def test_context_limit_falls_back_and_is_clamped():
     big = {"items": [{"name": f"item-{i}"} for i in range(200)]}
     # Absent / zero / nonsense means the default budget, never "all of it".
     for spec in ({"source": "response"}, {"source": "response", "max_bytes": 0}):
-        text = agent_extract._context_text(spec, big, "items")
-        assert f"truncated at {agent_extract._DEFAULT_CONTEXT_BYTES} of" in text
+        text = agent_extract._context_text(_context(spec), big, "items")
+        assert f"truncated at {agent_models._DEFAULT_CONTEXT_BYTES} of" in text
     # And the rule's own ceiling cannot be exceeded either.
-    huge = agent_extract._context_text({"source": "response", "max_bytes": 10**9}, big, "items")
-    assert f"truncated at {agent_transport._MAX_REPORTED_BYTES} of" not in huge
+    huge = agent_extract._context_text(
+        _context({"source": "response", "max_bytes": 10**9}), big, "items"
+    )
+    assert f"truncated at {agent_models._MAX_REPORTED_BYTES} of" not in huge
     assert "truncated" not in huge
 
 
@@ -3183,21 +3397,24 @@ def test_context_never_carries_the_secret():
     # Same rule as the raw response: an API echoing the key must not store it
     # with the check result - and here it would be stored on every field service.
     spec = {"source": "response", "max_bytes": 4096}
-    text = agent_extract._context_text(spec, {"echo": "s3cret"}, "echo", None, "s3cret")
+    text = agent_extract._context_text(_context(spec), {"echo": "s3cret"}, "echo", None, "s3cret")
     assert "s3cret" not in text
 
 
 def test_extract_attaches_the_context_to_every_result():
     specs = [{"path": "services[*].status", "service": "Svc", "label_path": "name"}]
     results = agent_extract._extract(
-        CONTEXT_DOC, specs, "http://test/h", context={"source": "element", "max_bytes": 4096}
+        CONTEXT_DOC,
+        _fields(specs),
+        "http://test/h",
+        context=_context({"source": "element", "max_bytes": 4096}),
     )
     assert [json.loads(r["context"])["name"] for r in results] == ["web", "payments"]
 
 
 def test_extract_without_the_setting_attaches_nothing():
     specs = [{"path": "services[*].status", "service": "Svc"}]
-    results = agent_extract._extract(CONTEXT_DOC, specs, "http://test/h")
+    results = agent_extract._extract(CONTEXT_DOC, _fields(specs), "http://test/h")
     assert all(r["context"] is None for r in results)
 
 
@@ -3257,7 +3474,7 @@ def test_pagination_merges_every_page_into_the_first(agent, monkeypatch):
             "http://api/jobs?page=2": _page([{"id": 3}], None),
         },
     )
-    doc, error, meta = agent_fetch._fetch(PAGINATED, None)
+    doc, error, meta = agent_fetch._fetch(_endpoint(PAGINATED), None)
     assert error is None
     # The whole collection, in page order - and the rest of the document stays
     # the first page's, so a 'total' next to it still resolves.
@@ -3270,7 +3487,7 @@ def test_pagination_reports_the_bytes_of_every_page(agent, monkeypatch):
     first = _page([{"id": 1}], "http://api/jobs?page=2")
     second = _page([{"id": 2}], None)
     _paged(agent, monkeypatch, {"http://api/jobs": first, "http://api/jobs?page=2": second})
-    _doc, error, meta = agent_fetch._fetch(PAGINATED, None)
+    _doc, error, meta = agent_fetch._fetch(_endpoint(PAGINATED), None)
     assert error is None
     # Response size is a cost the operator watches; one page of it is not it.
     assert meta["size"] == len(first) + len(second)
@@ -3285,7 +3502,9 @@ def test_pagination_resolves_a_relative_next_link(agent, monkeypatch):
             "http://api/v1/jobs?page=2": _page([{"id": 2}], None),
         },
     )
-    doc, error, _meta = agent_fetch._fetch({**PAGINATED, "url": "http://api/v1/jobs"}, None)
+    doc, error, _meta = agent_fetch._fetch(
+        _endpoint({**PAGINATED, "url": "http://api/v1/jobs"}), None
+    )
     assert error is None and len(doc["items"]) == 2
     assert seen[1] == "http://api/v1/jobs?page=2"
 
@@ -3311,10 +3530,12 @@ def test_pagination_follows_the_link_header(agent, monkeypatch):
         },
     )
     doc, error, meta = agent_fetch._fetch(
-        {
-            "url": "http://api/jobs",
-            "pagination": {"next": ["link_header", None], "items": "items"},
-        },
+        _endpoint(
+            {
+                "url": "http://api/jobs",
+                "pagination": {"next": ["link_header", None], "items": "items"},
+            }
+        ),
         None,
     )
     assert error is None and [job["id"] for job in doc["items"]] == [1, 2]
@@ -3338,10 +3559,12 @@ def test_pagination_resolves_a_relative_link_header(agent, monkeypatch):
         },
     )
     doc, error, _meta = agent_fetch._fetch(
-        {
-            "url": "http://api/v1/jobs",
-            "pagination": {"next": ["link_header", None], "items": "items"},
-        },
+        _endpoint(
+            {
+                "url": "http://api/v1/jobs",
+                "pagination": {"next": ["link_header", None], "items": "items"},
+            }
+        ),
         None,
     )
     assert error is None and [job["id"] for job in doc["items"]] == [1, 2]
@@ -3350,7 +3573,7 @@ def test_pagination_resolves_a_relative_link_header(agent, monkeypatch):
 
 def test_pagination_without_a_next_link_reads_one_page(agent, monkeypatch):
     _paged(agent, monkeypatch, {"http://api/jobs": _page([{"id": 1}], None)})
-    _doc, error, meta = agent_fetch._fetch(PAGINATED, None)
+    _doc, error, meta = agent_fetch._fetch(_endpoint(PAGINATED), None)
     # One page, and nothing was left behind: the collection is complete, which is
     # what the absent 'stopped' reason says.
     assert error is None
@@ -3368,7 +3591,7 @@ def test_pagination_stops_at_the_page_limit_and_says_so(agent, monkeypatch):
         },
     )
     doc, error, meta = agent_fetch._fetch(
-        {**PAGINATED, "pagination": {**PAGINATED["pagination"], "max_pages": 2}}, None
+        _endpoint({**PAGINATED, "pagination": {**PAGINATED["pagination"], "max_pages": 2}}), None
     )
     assert error is None and len(doc["items"]) == 2
     assert len(seen) == 2
@@ -3386,7 +3609,7 @@ def test_pagination_at_exactly_the_page_limit_is_complete(agent, monkeypatch):
         },
     )
     _doc, error, meta = agent_fetch._fetch(
-        {**PAGINATED, "pagination": {**PAGINATED["pagination"], "max_pages": 2}}, None
+        _endpoint({**PAGINATED, "pagination": {**PAGINATED["pagination"], "max_pages": 2}}), None
     )
     # An API with as many pages as the limit was read WHOLE: a truncation note
     # has to mean something was actually left behind, or it is noise.
@@ -3404,7 +3627,7 @@ def test_pagination_stops_at_the_element_limit(agent, monkeypatch):
         },
     )
     doc, error, meta = agent_fetch._fetch(
-        {**PAGINATED, "pagination": {**PAGINATED["pagination"], "max_elements": 3}}, None
+        _endpoint({**PAGINATED, "pagination": {**PAGINATED["pagination"], "max_elements": 3}}), None
     )
     # Checked BETWEEN pages, so a page is never cut in half - the collection can
     # end slightly above the cap rather than mid-page.
@@ -3421,7 +3644,7 @@ def test_pagination_refuses_a_link_to_another_host(agent, monkeypatch):
             "http://evil.example/jobs?page=2": _page([{"id": 2}], None),
         },
     )
-    doc, error, meta = agent_fetch._fetch(PAGINATED, None)
+    doc, error, meta = agent_fetch._fetch(_endpoint(PAGINATED), None)
     # The response body must not decide where an authenticated request from the
     # Checkmk server goes - the SSRF shape 'follow redirects' also closes.
     assert error is None and len(doc["items"]) == 1
@@ -3446,7 +3669,7 @@ def test_pagination_resolves_a_relative_link_against_the_redirected_url(agent, m
         },
         redirects={"http://api/jobs": "http://api/v2/jobs"},
     )
-    doc, error, _meta = agent_fetch._fetch(PAGINATED, None)
+    doc, error, _meta = agent_fetch._fetch(_endpoint(PAGINATED), None)
     assert error is None and [job["id"] for job in doc["items"]] == [1, 2]
     assert seen == ["http://api/jobs", "http://api/v2/jobs?page=2"]
 
@@ -3465,7 +3688,7 @@ def test_pagination_follows_links_to_the_host_it_was_redirected_to(agent, monkey
         },
         redirects={"http://api/jobs": "http://eu.api/jobs"},
     )
-    doc, error, meta = agent_fetch._fetch(PAGINATED, None)
+    doc, error, meta = agent_fetch._fetch(_endpoint(PAGINATED), None)
     assert error is None and len(doc["items"]) == 2
     assert meta["pagination_stopped"] is None
     assert seen[1] == "http://eu.api/jobs?page=2"
@@ -3483,7 +3706,7 @@ def test_a_redirect_does_not_widen_pagination_to_a_third_host(agent, monkeypatch
         },
         redirects={"http://api/jobs": "http://eu.api/jobs"},
     )
-    doc, error, meta = agent_fetch._fetch(PAGINATED, None)
+    doc, error, meta = agent_fetch._fetch(_endpoint(PAGINATED), None)
     assert error is None and len(doc["items"]) == 1
     assert seen == ["http://api/jobs"]
     assert "another host (evil.example)" in meta["pagination_stopped"]
@@ -3491,7 +3714,7 @@ def test_a_redirect_does_not_widen_pagination_to_a_third_host(agent, monkeypatch
 
 def test_pagination_refuses_a_non_http_link(agent, monkeypatch):
     _paged(agent, monkeypatch, {"http://api/jobs": _page([{"id": 1}], "file:///etc/passwd")})
-    _doc, error, meta = agent_fetch._fetch(PAGINATED, None)
+    _doc, error, meta = agent_fetch._fetch(_endpoint(PAGINATED), None)
     assert error is None
     assert "not an http(s) URL" in meta["pagination_stopped"]
 
@@ -3507,7 +3730,7 @@ def test_pagination_stops_when_the_api_repeats_a_page(agent, monkeypatch):
             "http://api/jobs?page=2": _page([{"id": 2}], "http://api/jobs?page=2"),
         },
     )
-    doc, error, meta = agent_fetch._fetch(PAGINATED, None)
+    doc, error, meta = agent_fetch._fetch(_endpoint(PAGINATED), None)
     assert error is None and len(doc["items"]) == 2
     assert len(seen) == 2
     assert "pagination loop" in meta["pagination_stopped"]
@@ -3523,7 +3746,7 @@ def test_a_page_that_fails_fails_the_endpoint(agent, monkeypatch):
         },
         status={"http://api/jobs?page=2": 500},
     )
-    doc, error, _meta = agent_fetch._fetch(PAGINATED, None)
+    doc, error, _meta = agent_fetch._fetch(_endpoint(PAGINATED), None)
     # Half a collection looks exactly like a shrinking one, so it is never
     # reported as if it were whole: the endpoint's services carry the error.
     assert doc is None
@@ -3547,7 +3770,7 @@ def test_a_failed_page_is_retried_like_any_transient_failure(monkeypatch):
     monkeypatch.setattr(requests.Session, "request", fake_request)
     monkeypatch.setattr(time, "sleep", lambda _seconds: None)
     doc, error, meta = agent_fetch._fetch(
-        {**PAGINATED, "retry": {"attempts": 1, "backoff": 0}}, None
+        _endpoint({**PAGINATED, "retry": {"attempts": 1, "backoff": 0}}), None
     )
     # The whole endpoint is re-fetched from page one, which is the only way to
     # rebuild a collection that is merged in order.
@@ -3564,7 +3787,7 @@ def test_a_page_that_is_not_json_fails_the_endpoint(agent, monkeypatch):
             "http://api/jobs?page=2": b"<html>nope</html>",
         },
     )
-    _doc, error, _meta = agent_fetch._fetch(PAGINATED, None)
+    _doc, error, _meta = agent_fetch._fetch(_endpoint(PAGINATED), None)
     assert error.startswith("Page 2 is not valid JSON")
 
 
@@ -3577,7 +3800,7 @@ def test_a_page_without_the_collection_fails_the_endpoint(agent, monkeypatch):
             "http://api/jobs?page=2": json.dumps({"links": {"next": None}}).encode(),
         },
     )
-    _doc, error, _meta = agent_fetch._fetch(PAGINATED, None)
+    _doc, error, _meta = agent_fetch._fetch(_endpoint(PAGINATED), None)
     # Skipping it would under-count exactly the way unfollowed pagination does.
     assert error == "Page 2 has no collection at 'items'"
 
@@ -3591,19 +3814,19 @@ def test_a_page_whose_collection_is_another_kind_fails_the_endpoint(agent, monke
             "http://api/jobs?page=2": json.dumps({"items": {"a": 1}}).encode(),
         },
     )
-    _doc, error, _meta = agent_fetch._fetch(PAGINATED, None)
+    _doc, error, _meta = agent_fetch._fetch(_endpoint(PAGINATED), None)
     assert "cannot be merged" in error and "dict" in error and "list" in error
 
 
 def test_pagination_without_the_collection_in_the_response_fails(agent, monkeypatch):
     _paged(agent, monkeypatch, {"http://api/jobs": json.dumps({"jobs": []}).encode()})
-    _doc, error, _meta = agent_fetch._fetch(PAGINATED, None)
+    _doc, error, _meta = agent_fetch._fetch(_endpoint(PAGINATED), None)
     assert error == "Pagination: the response has no collection at 'items'"
 
 
 def test_pagination_over_a_scalar_fails(agent, monkeypatch):
     _paged(agent, monkeypatch, {"http://api/jobs": json.dumps({"items": 7}).encode()})
-    _doc, error, _meta = agent_fetch._fetch(PAGINATED, None)
+    _doc, error, _meta = agent_fetch._fetch(_endpoint(PAGINATED), None)
     assert "not a collection" in error
 
 
@@ -3621,10 +3844,12 @@ def test_pagination_merges_an_object_by_key(agent, monkeypatch):
         },
     )
     doc, error, meta = agent_fetch._fetch(
-        {
-            "url": "http://api/comp",
-            "pagination": {"next": ["body", "next"], "items": "components"},
-        },
+        _endpoint(
+            {
+                "url": "http://api/comp",
+                "pagination": {"next": ["body", "next"], "items": "components"},
+            }
+        ),
         None,
     )
     # A JSON object pages by key rather than by position, and '[*]' already
@@ -3646,11 +3871,13 @@ def test_pagination_over_a_root_array(agent, monkeypatch):
         },
     )
     doc, error, _meta = agent_fetch._fetch(
-        {
-            "url": "http://api/jobs",
-            # '$' is how a response that IS the array says so.
-            "pagination": {"next": ["link_header", None], "items": "$"},
-        },
+        _endpoint(
+            {
+                "url": "http://api/jobs",
+                # '$' is how a response that IS the array says so.
+                "pagination": {"next": ["link_header", None], "items": "$"},
+            }
+        ),
         None,
     )
     assert error is None and [job["id"] for job in doc] == [1, 2]
@@ -3670,14 +3897,16 @@ def test_pagination_sends_every_page_the_same_request(monkeypatch):
 
     monkeypatch.setattr(requests.Session, "request", fake_request)
     _doc, error, _meta = agent_fetch._fetch(
-        {
-            **PAGINATED,
-            "method": "POST",
-            "body": '{"q": 1}',
-            "headers": [["X-Api", "v1"]],
-            "timeout": 7.0,
-            "verify_cert": False,
-        },
+        _endpoint(
+            {
+                **PAGINATED,
+                "method": "POST",
+                "body": '{"q": 1}',
+                "headers": [["X-Api", "v1"]],
+                "timeout": 7.0,
+                "verify_cert": False,
+            }
+        ),
         None,
     )
     assert error is None and len(sent) == 2
@@ -3691,16 +3920,16 @@ def test_pagination_sends_every_page_the_same_request(monkeypatch):
 def test_pagination_page_count_is_clamped_to_the_agents_own_ceiling():
     # The ruleset's range is 1-100, but a hand-written blob is not bound by it:
     # the agent never makes more requests than this for one endpoint.
-    assert agent_pagination._pagination_limits({"max_pages": 10**6}) == (
-        agent_pagination._MAX_PAGES,
+    assert _pagination_limits({"max_pages": 10**6}) == (
+        agent_models._MAX_PAGES,
         None,
     )
-    assert agent_pagination._pagination_limits({}) == (agent_pagination._DEFAULT_MAX_PAGES, None)
-    assert agent_pagination._pagination_limits({"max_pages": 0, "max_elements": 0}) == (
-        agent_pagination._DEFAULT_MAX_PAGES,
+    assert _pagination_limits({}) == (agent_models._DEFAULT_MAX_PAGES, None)
+    assert _pagination_limits({"max_pages": 0, "max_elements": 0}) == (
+        agent_models._DEFAULT_MAX_PAGES,
         None,
     )
-    assert agent_pagination._pagination_limits({"max_pages": 3, "max_elements": 50}) == (3, 50)
+    assert _pagination_limits({"max_pages": 3, "max_elements": 50}) == (3, 50)
 
 
 def test_pagination_is_reported_as_misconfigured_rather_than_ignored(agent, monkeypatch):
@@ -3708,7 +3937,7 @@ def test_pagination_is_reported_as_misconfigured_rather_than_ignored(agent, monk
     # Pagination asked for without saying where the next page is: the services
     # would otherwise describe one page while the rule claims to follow them all.
     _doc, error, _meta = agent_fetch._fetch(
-        {"url": "http://api/jobs", "pagination": {"items": "items"}}, None
+        _endpoint({"url": "http://api/jobs", "pagination": {"items": "items"}}), None
     )
     assert "without a next-page link" in error
 
@@ -3726,7 +3955,7 @@ def test_the_cache_stores_the_merged_collection(agent, monkeypatch, tmp_path):
         },
     )
     endpoint = {**PAGINATED, "cache_ttl": 300.0}
-    _doc, error, _meta = agent_fetch._fetch(endpoint, None)
+    _doc, error, _meta = agent_fetch._fetch(_endpoint(endpoint), None)
     assert error is None
 
     # Caching the first page would serve a collection that shrinks for the whole
@@ -3735,7 +3964,7 @@ def test_the_cache_stores_the_merged_collection(agent, monkeypatch, tmp_path):
         raise AssertionError("a cache hit must not make a request")
 
     monkeypatch.setattr(requests.Session, "request", boom)
-    doc, error, meta = agent_fetch._fetch(endpoint, None)
+    doc, error, meta = agent_fetch._fetch(_endpoint(endpoint), None)
     assert error is None and [job["id"] for job in doc["items"]] == [1, 2]
     assert meta["from_cache"] is True and meta["pages"] == 2
 
@@ -3744,8 +3973,10 @@ def test_the_pagination_settings_are_part_of_the_cache_identity():
     other = {**PAGINATED, "pagination": {**PAGINATED["pagination"], "items": "data.items"}}
     # A changed collection path or page limit changes what the cached (merged)
     # body contains, so it must not be answered from the old cache file.
-    assert agent_cache._cache_key(PAGINATED) != agent_cache._cache_key(other)
-    assert agent_cache._cache_key(PAGINATED) != agent_cache._cache_key({"url": PAGINATED["url"]})
+    assert agent_cache._cache_key(_endpoint(PAGINATED)) != agent_cache._cache_key(_endpoint(other))
+    assert agent_cache._cache_key(_endpoint(PAGINATED)) != agent_cache._cache_key(
+        _endpoint({"url": PAGINATED["url"]})
+    )
 
 
 def test_an_aggregation_counts_the_whole_merged_collection(agent, monkeypatch):
@@ -3757,11 +3988,11 @@ def test_an_aggregation_counts_the_whole_merged_collection(agent, monkeypatch):
             "http://api/jobs?page=2": _page([{"id": 3}], None),
         },
     )
-    document, error, _meta = agent_fetch._fetch(PAGINATED, None)
+    document, error, _meta = agent_fetch._fetch(_endpoint(PAGINATED), None)
     assert error is None
     results = agent_extract._extract(
         document,
-        [{"path": "items", "service": "Queue", "aggregate": "count"}],
+        _fields([{"path": "items", "service": "Queue", "aggregate": "count"}]),
         "http://api/jobs",
     )
     # The whole point: 'count' over a queue that pages at 2 reports the queue,
@@ -3799,7 +4030,9 @@ def test_page_numbers_are_counted_until_an_empty_page(agent, monkeypatch):
             "http://api/jobs?page=3": _items(),
         },
     )
-    doc, error, meta = agent_fetch._fetch(_counted("page_number", parameter="page"), None)
+    doc, error, meta = agent_fetch._fetch(
+        _endpoint(_counted("page_number", parameter="page")), None
+    )
     assert error is None
     assert [job["id"] for job in doc["items"]] == [1, 2, 3]
     # The first page is asked for with the parameter too, and the empty page is
@@ -3815,7 +4048,9 @@ def test_page_numbers_start_where_the_api_does(agent, monkeypatch):
         monkeypatch,
         {"http://api/jobs?p=0": _items(1), "http://api/jobs?p=1": _items()},
     )
-    _doc, error, _meta = agent_fetch._fetch(_counted("page_number", parameter="p", start=0), None)
+    _doc, error, _meta = agent_fetch._fetch(
+        _endpoint(_counted("page_number", parameter="p", start=0)), None
+    )
     assert error is None and seen == ["http://api/jobs?p=0", "http://api/jobs?p=1"]
 
 
@@ -3829,7 +4064,10 @@ def test_a_short_page_is_the_last_one(agent, monkeypatch):
         },
     )
     doc, error, meta = agent_fetch._fetch(
-        _counted("page_number", parameter="page", page_size=2, size_parameter="per_page"), None
+        _endpoint(
+            _counted("page_number", parameter="page", page_size=2, size_parameter="per_page")
+        ),
+        None,
     )
     assert error is None and len(doc["items"]) == 3
     # Fewer than asked for: no request for a third page that would be empty.
@@ -3845,7 +4083,7 @@ def test_a_page_size_without_a_parameter_still_ends_on_a_short_page(agent, monke
         {"http://api/jobs?page=1": _items(1, 2), "http://api/jobs?page=2": _items(3)},
     )
     _doc, error, _meta = agent_fetch._fetch(
-        _counted("page_number", parameter="page", page_size=2), None
+        _endpoint(_counted("page_number", parameter="page", page_size=2)), None
     )
     assert error is None and seen == ["http://api/jobs?page=1", "http://api/jobs?page=2"]
 
@@ -3860,7 +4098,7 @@ def test_a_stated_total_ends_it_without_an_empty_page(agent, monkeypatch):
         {"http://api/jobs?page=1": page(1, 2), "http://api/jobs?page=2": page(3)},
     )
     doc, error, meta = agent_fetch._fetch(
-        _counted("page_number", parameter="page", total="meta.total"), None
+        _endpoint(_counted("page_number", parameter="page", total="meta.total")), None
     )
     assert error is None and len(doc["items"]) == 3
     assert len(seen) == 2 and meta["pagination_stopped"] is None
@@ -3880,7 +4118,7 @@ def test_a_total_that_is_not_a_number_decides_nothing(agent, monkeypatch):
         },
     )
     _doc, error, meta = agent_fetch._fetch(
-        _counted("page_number", parameter="page", total="total"), None
+        _endpoint(_counted("page_number", parameter="page", total="total")), None
     )
     # The empty page still ends it.
     assert error is None and len(seen) == 3 and meta["elements"] == 2
@@ -3899,7 +4137,7 @@ def test_offsets_advance_by_the_elements_received(agent, monkeypatch):
             "http://api/jobs?offset=6": _items(),
         },
     )
-    doc, error, meta = agent_fetch._fetch(_counted("offset", parameter="offset"), None)
+    doc, error, meta = agent_fetch._fetch(_endpoint(_counted("offset", parameter="offset")), None)
     assert error is None
     assert [job["id"] for job in doc["items"]] == [1, 2, 3, 4, 5, 6]
     assert seen[-1] == "http://api/jobs?offset=6"
@@ -3916,7 +4154,7 @@ def test_offsets_send_the_page_size_on_every_page(agent, monkeypatch):
         },
     )
     doc, error, _meta = agent_fetch._fetch(
-        _counted("offset", parameter="offset", size_parameter="limit", page_size=2), None
+        _endpoint(_counted("offset", parameter="offset", size_parameter="limit", page_size=2)), None
     )
     # The first page too, so every page is asked for at the size the short-page
     # test measures against.
@@ -3934,10 +4172,12 @@ def test_the_counting_parameters_replace_those_in_the_url(agent, monkeypatch):
         },
     )
     _doc, error, _meta = agent_fetch._fetch(
-        {
-            **_counted("page_number", parameter="page"),
-            "url": "http://api/jobs?page=7&state=open&sort=a%20b",
-        },
+        _endpoint(
+            {
+                **_counted("page_number", parameter="page"),
+                "url": "http://api/jobs?page=7&state=open&sort=a%20b",
+            }
+        ),
         None,
     )
     # The rule's own 'page=7' is replaced rather than sent twice, and every other
@@ -3957,7 +4197,7 @@ def test_counted_pages_stop_at_the_page_limit_and_say_so(agent, monkeypatch):
     )
     endpoint = _counted("page_number", parameter="page")
     endpoint["pagination"]["max_pages"] = 2
-    doc, error, meta = agent_fetch._fetch(endpoint, None)
+    doc, error, meta = agent_fetch._fetch(_endpoint(endpoint), None)
     # The second page was full and nothing said it was the last, so a third may
     # exist: the endpoint's own service reports the collection as incomplete.
     assert error is None and len(doc["items"]) == 2
@@ -3971,7 +4211,7 @@ def test_counted_pages_at_exactly_the_page_limit_are_complete_given_a_total(agen
     _paged(agent, monkeypatch, {f"http://api/jobs?page={n}": page(n) for n in (1, 2)})
     endpoint = _counted("page_number", parameter="page", total="total")
     endpoint["pagination"]["max_pages"] = 2
-    _doc, error, meta = agent_fetch._fetch(endpoint, None)
+    _doc, error, meta = agent_fetch._fetch(_endpoint(endpoint), None)
     # The total says the second page was the last - a truncation note has to
     # mean something was left behind.
     assert error is None and meta["pagination_stopped"] is None
@@ -3985,7 +4225,7 @@ def test_counted_pages_stop_at_the_element_limit(agent, monkeypatch):
     )
     endpoint = _counted("page_number", parameter="page")
     endpoint["pagination"]["max_elements"] = 3
-    doc, error, meta = agent_fetch._fetch(endpoint, None)
+    doc, error, meta = agent_fetch._fetch(_endpoint(endpoint), None)
     assert error is None and len(doc["items"]) == 4
     assert "element limit (3)" in meta["pagination_stopped"]
 
@@ -4000,7 +4240,7 @@ def test_an_api_that_ignores_the_parameter_is_not_read_twice(monkeypatch):
         return _FakeResponse(body=_items(1, 2), url=url)
 
     monkeypatch.setattr(requests.Session, "request", fake_request)
-    doc, error, meta = agent_fetch._fetch(_counted("page_number", parameter="pg"), None)
+    doc, error, meta = agent_fetch._fetch(_endpoint(_counted("page_number", parameter="pg")), None)
     # Not ten copies of page one merged into a collection ten times too long:
     # the repeat is not merged, and the collection is reported as incomplete.
     assert error is None and [job["id"] for job in doc["items"]] == [1, 2]
@@ -4024,7 +4264,7 @@ def test_a_capped_page_size_is_not_mistaken_for_the_last_page(agent, monkeypatch
         },
     )
     doc, error, meta = agent_fetch._fetch(
-        _counted("offset", parameter="offset", page_size=5, size_parameter="limit"), None
+        _endpoint(_counted("offset", parameter="offset", page_size=5, size_parameter="limit")), None
     )
     assert error is None
     assert [job["id"] for job in doc["items"]] == [1, 2, 3, 4, 5]
@@ -4043,7 +4283,7 @@ def test_a_first_page_short_of_the_page_size_asks_once_more(agent, monkeypatch):
         {"http://api/jobs?page=1": _items(1), "http://api/jobs?page=2": _items()},
     )
     doc, error, meta = agent_fetch._fetch(
-        _counted("page_number", parameter="page", page_size=5), None
+        _endpoint(_counted("page_number", parameter="page", page_size=5)), None
     )
     assert error is None and len(doc["items"]) == 1
     assert len(seen) == 2 and meta["pagination_stopped"] is None
@@ -4060,7 +4300,9 @@ def test_a_counted_page_past_the_end_may_answer_no_such_page(agent, monkeypatch,
         {"http://api/jobs?page=1": _items(1, 2), "http://api/jobs?page=2": _items(3, 4)},
         status={"http://api/jobs?page=3": status},
     )
-    doc, error, meta = agent_fetch._fetch(_counted("page_number", parameter="page"), None)
+    doc, error, meta = agent_fetch._fetch(
+        _endpoint(_counted("page_number", parameter="page")), None
+    )
     # The endpoint works, and the collection is whole - not UNKNOWN.
     assert error is None
     assert [job["id"] for job in doc["items"]] == [1, 2, 3, 4]
@@ -4080,7 +4322,9 @@ def test_other_failures_of_a_counted_page_still_fail_the_endpoint(agent, monkeyp
         {"http://api/jobs?page=1": _items(1), "http://api/jobs?page=2": _items(2)},
         status={"http://api/jobs?page=2": status},
     )
-    doc, error, _meta = agent_fetch._fetch(_counted("page_number", parameter="page"), None)
+    doc, error, _meta = agent_fetch._fetch(
+        _endpoint(_counted("page_number", parameter="page")), None
+    )
     assert doc is None and error == f"Page 2 failed: HTTP {status}"
 
 
@@ -4088,7 +4332,7 @@ def test_a_404_past_a_link_still_fails_the_endpoint(agent, monkeypatch):
     # A next link is the API's own promise of a page, so a 404 behind one is
     # broken, not the end.
     _paged(agent, monkeypatch, {"http://api/jobs": _page([{"id": 1}], "http://api/jobs?page=2")})
-    doc, error, _meta = agent_fetch._fetch(PAGINATED, None)
+    doc, error, _meta = agent_fetch._fetch(_endpoint(PAGINATED), None)
     assert doc is None and error == "Page 2 failed: HTTP 404"
 
 
@@ -4110,7 +4354,9 @@ def test_a_counted_page_past_the_end_may_carry_no_collection(agent, monkeypatch,
             "http://api/jobs?page=2": json.dumps(body).encode(),
         },
     )
-    doc, error, meta = agent_fetch._fetch(_counted("page_number", parameter="page"), None)
+    doc, error, meta = agent_fetch._fetch(
+        _endpoint(_counted("page_number", parameter="page")), None
+    )
     assert error is None and [job["id"] for job in doc["items"]] == [1, 2]
     assert meta["pages"] == 1 and meta["pagination_stopped"] is None
     assert meta["pagination_end"] == end
@@ -4127,7 +4373,9 @@ def test_a_counted_page_with_the_wrong_kind_of_content_still_fails(agent, monkey
             "http://api/jobs?page=2": json.dumps({"items": {"a": 1}}).encode(),
         },
     )
-    doc, error, _meta = agent_fetch._fetch(_counted("page_number", parameter="page"), None)
+    doc, error, _meta = agent_fetch._fetch(
+        _endpoint(_counted("page_number", parameter="page")), None
+    )
     assert doc is None and error.startswith("Page 2 cannot be merged")
 
 
@@ -4141,7 +4389,9 @@ def test_a_repeat_after_a_working_page_is_the_end(monkeypatch):
         return _FakeResponse(body=_items(2 * n - 1, 2 * n), url=url)
 
     monkeypatch.setattr(requests.Session, "request", fake_request)
-    doc, error, meta = agent_fetch._fetch(_counted("page_number", parameter="page"), None)
+    doc, error, meta = agent_fetch._fetch(
+        _endpoint(_counted("page_number", parameter="page")), None
+    )
     # Page 2 differed from page 1, so the parameter is read: the repeat is the
     # end, not merged twice and not WARN on every check.
     assert error is None and [job["id"] for job in doc["items"]] == [1, 2, 3, 4]
@@ -4163,13 +4413,15 @@ def test_offsets_start_where_the_api_does(agent, monkeypatch):
         },
     )
     doc, error, _meta = agent_fetch._fetch(
-        {
-            "url": "http://api/Users",
-            "pagination": {
-                "next": ["offset", {"parameter": "startIndex", "start": 1}],
-                "items": "items",
-            },
-        },
+        _endpoint(
+            {
+                "url": "http://api/Users",
+                "pagination": {
+                    "next": ["offset", {"parameter": "startIndex", "start": 1}],
+                    "items": "items",
+                },
+            }
+        ),
         None,
     )
     assert error is None and [job["id"] for job in doc["items"]] == [1, 2, 3]
@@ -4184,7 +4436,7 @@ def test_an_offset_without_a_start_starts_at_zero():
             "url": "http://api/jobs",
             "pagination": {"next": ["offset", settings], "items": "items"},
         }
-        assert agent_pagination._first_page_url(endpoint) == "http://api/jobs?offset=0"
+        assert agent_pagination._first_page_url(_endpoint(endpoint)) == "http://api/jobs?offset=0"
     page = {
         "url": "http://api/jobs",
         "pagination": {
@@ -4192,7 +4444,7 @@ def test_an_offset_without_a_start_starts_at_zero():
             "items": "items",
         },
     }
-    assert agent_pagination._first_page_url(page) == "http://api/jobs?page=1"
+    assert agent_pagination._first_page_url(_endpoint(page)) == "http://api/jobs?page=1"
 
 
 def test_counted_pages_follow_the_redirected_url(agent, monkeypatch):
@@ -4205,7 +4457,9 @@ def test_counted_pages_follow_the_redirected_url(agent, monkeypatch):
         },
         redirects={"http://api/jobs?page=1": "http://api/v2/jobs?page=1"},
     )
-    doc, error, _meta = agent_fetch._fetch(_counted("page_number", parameter="page"), None)
+    doc, error, _meta = agent_fetch._fetch(
+        _endpoint(_counted("page_number", parameter="page")), None
+    )
     # Counted from where the first page was served, not from the URL the rule
     # names - the same rule the link modes follow.
     assert error is None and len(doc["items"]) == 1
@@ -4228,7 +4482,7 @@ def test_counted_pages_do_not_repeat_the_api_key_parameter(monkeypatch):
         "auth": "auth_query",
         "auth_query": "api_key",
     }
-    _doc, error, _meta = agent_fetch._fetch(endpoint, "s3cret")
+    _doc, error, _meta = agent_fetch._fetch(_endpoint(endpoint), "s3cret")
     assert error is None
     # requests adds the key to every page; building page 2 from the served URL
     # must not put it into the URL a second time (or leak it into debug output).
@@ -4242,7 +4496,9 @@ def test_a_failed_counted_page_fails_the_endpoint(agent, monkeypatch):
         {"http://api/jobs?page=1": _items(1), "http://api/jobs?page=2": _items(2)},
         status={"http://api/jobs?page=2": 500},
     )
-    doc, error, _meta = agent_fetch._fetch(_counted("page_number", parameter="page"), None)
+    doc, error, _meta = agent_fetch._fetch(
+        _endpoint(_counted("page_number", parameter="page")), None
+    )
     assert doc is None and error == "Page 2 failed: HTTP 500"
 
 
@@ -4257,10 +4513,12 @@ def test_counted_pagination_merges_an_object_by_key(agent, monkeypatch):
         },
     )
     doc, error, _meta = agent_fetch._fetch(
-        {
-            "url": "http://api/c",
-            "pagination": {"next": ["offset", {"parameter": "offset"}], "items": "c"},
-        },
+        _endpoint(
+            {
+                "url": "http://api/c",
+                "pagination": {"next": ["offset", {"parameter": "offset"}], "items": "c"},
+            }
+        ),
         None,
     )
     assert error is None and sorted(doc["c"]) == ["db", "mq", "web"]
@@ -4269,10 +4527,12 @@ def test_counted_pagination_merges_an_object_by_key(agent, monkeypatch):
 def test_counted_settings_without_a_parameter_are_misconfigured(agent, monkeypatch):
     _paged(agent, monkeypatch, {"http://api/jobs": _items(1)})
     _doc, error, _meta = agent_fetch._fetch(
-        {
-            "url": "http://api/jobs",
-            "pagination": {"next": ["page_number", {"parameter": ""}], "items": "items"},
-        },
+        _endpoint(
+            {
+                "url": "http://api/jobs",
+                "pagination": {"next": ["page_number", {"parameter": ""}], "items": "items"},
+            }
+        ),
         None,
     )
     assert "without a next-page link" in error
@@ -4282,9 +4542,11 @@ def test_the_rules_url_still_names_the_counted_endpoint():
     # The first page's URL carries the counting parameter, but the service item
     # is the rule's URL: turning pagination on must not rename the service.
     endpoint = _counted("page_number", parameter="page")
-    assert agent_pagination._first_page_url(endpoint) == "http://api/jobs?page=1"
-    assert agent_pagination._first_page_url({"url": "http://api/jobs"}) == "http://api/jobs"
-    assert agent_pagination._first_page_url(PAGINATED) == "http://api/jobs"
+    assert agent_pagination._first_page_url(_endpoint(endpoint)) == "http://api/jobs?page=1"
+    assert (
+        agent_pagination._first_page_url(_endpoint({"url": "http://api/jobs"})) == "http://api/jobs"
+    )
+    assert agent_pagination._first_page_url(_endpoint(PAGINATED)) == "http://api/jobs"
 
 
 def test_the_value_range_travels_with_the_result():
@@ -4295,7 +4557,9 @@ def test_the_value_range_travels_with_the_result():
         {"path": "status", "service": "Health"},
     ]
 
-    by_service = {r["service"]: r for r in agent_extract._extract(DOC, specs, "http://test/h")}
+    by_service = {
+        r["service"]: r for r in agent_extract._extract(DOC, _fields(specs), "http://test/h")
+    }
 
     assert by_service["Count"]["value_range"] == {"min": 0, "max": 100}
     assert by_service["Health"]["value_range"] is None
@@ -4310,7 +4574,9 @@ def test_the_metric_name_travels_with_the_result():
         {"path": "status", "service": "Health"},
     ]
 
-    by_service = {r["service"]: r for r in agent_extract._extract(DOC, specs, "http://test/h")}
+    by_service = {
+        r["service"]: r for r in agent_extract._extract(DOC, _fields(specs), "http://test/h")
+    }
 
     assert by_service["Count"]["metric_name"] == "queue_depth"
     assert by_service["Health"]["metric_name"] is None
