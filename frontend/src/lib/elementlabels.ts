@@ -77,17 +77,27 @@ export interface LabelledResolution {
  * shown as '1' — the one place the preview may differ, and only for an API that
  * names its elements by a float. */
 function pyRepr(value: Json): string {
-  if (value === null) return 'None'
-  if (value === true) return 'True'
-  if (value === false) return 'False'
-  if (typeof value === 'number') return String(value)
+  if (value === null) {
+    return 'None'
+  }
+  if (value === true) {
+    return 'True'
+  }
+  if (value === false) {
+    return 'False'
+  }
+  if (typeof value === 'number') {
+    return String(value)
+  }
   if (typeof value === 'string') {
     // repr() picks double quotes only when the text has a ' and no ".
     const quote = value.includes("'") && !value.includes('"') ? '"' : "'"
     const body = value.replace(/\\/g, '\\\\').replace(quote === "'" ? /'/g : /"/g, `\\${quote}`)
     return `${quote}${body}${quote}`
   }
-  if (Array.isArray(value)) return `[${value.map(pyRepr).join(', ')}]`
+  if (Array.isArray(value)) {
+    return `[${value.map(pyRepr).join(', ')}]`
+  }
   return `{${Object.entries(value)
     .map(([k, v]) => `${pyRepr(k)}: ${pyRepr(v)}`)
     .join(', ')}}`
@@ -104,10 +114,14 @@ function walk(node: Json, steps: Step[]): { value: Json } | undefined {
   for (const step of steps) {
     if (step.kind === 'key') {
       // Own keys only: `in` would also find 'constructor', 'toString', ...
-      if (!isRecord(current) || !Object.hasOwn(current, step.key)) return undefined
+      if (!isRecord(current) || !Object.hasOwn(current, step.key)) {
+        return undefined
+      }
       current = current[step.key]!
     } else if (step.kind === 'index') {
-      if (!Array.isArray(current) || step.index >= current.length) return undefined
+      if (!Array.isArray(current) || step.index >= current.length) {
+        return undefined
+      }
       current = current[step.index]!
     } else {
       return undefined
@@ -128,18 +142,26 @@ const AGENT_TOKEN = /\['([^']*)'\]|\["([^"]*)"\]|\[(\d+)\]|([^.[\]]+)/g
 /** The agent's _resolve_path, token for token: {value} when found. */
 function resolveAsAgent(node: Json, path: string): { value: Json } | undefined {
   let cleaned = path.trim()
-  if (cleaned.startsWith('$.')) cleaned = cleaned.slice(2)
-  else if (cleaned.startsWith('$')) cleaned = cleaned.slice(1)
+  if (cleaned.startsWith('$.')) {
+    cleaned = cleaned.slice(2)
+  }
+  else if (cleaned.startsWith('$')) {
+    cleaned = cleaned.slice(1)
+  }
   let current = node
   for (const m of cleaned.matchAll(AGENT_TOKEN)) {
     if (m[3] !== undefined) {
       const index = Number(m[3])
-      if (!Array.isArray(current) || index >= current.length) return undefined
+      if (!Array.isArray(current) || index >= current.length) {
+        return undefined
+      }
       current = current[index]!
     } else {
       // Tested against undefined, not for truthiness: [''] is a key too.
       const key = m[1] ?? m[2] ?? m[4]!
-      if (!isRecord(current) || !Object.hasOwn(current, key)) return undefined
+      if (!isRecord(current) || !Object.hasOwn(current, key)) {
+        return undefined
+      }
       current = current[key]!
     }
   }
@@ -148,8 +170,12 @@ function resolveAsAgent(node: Json, path: string): { value: Json } | undefined {
 
 /** (default label, element) pairs for a wildcard-expandable container, or null. */
 function pairsOf(container: Json): Array<[string, Json]> | null {
-  if (Array.isArray(container)) return container.map((element, index) => [String(index), element])
-  if (isRecord(container)) return Object.entries(container)
+  if (Array.isArray(container)) {
+    return container.map((element, index) => [String(index), element])
+  }
+  if (isRecord(container)) {
+    return Object.entries(container)
+  }
   return null
 }
 
@@ -167,9 +193,15 @@ const HOST_NAME_INVALID = /[^-0-9A-Za-z_.]/g
 
 /** The agent's _label_value: a JSON scalar as text, null for null/object/list. */
 function labelValue(value: Json): string | null {
-  if (typeof value === 'boolean') return value ? 'true' : 'false'
-  if (typeof value === 'number') return String(value)
-  if (typeof value === 'string') return value
+  if (typeof value === 'boolean') {
+    return value ? 'true' : 'false'
+  }
+  if (typeof value === 'number') {
+    return String(value)
+  }
+  if (typeof value === 'string') {
+    return value
+  }
   return null
 }
 
@@ -177,11 +209,17 @@ function labelValue(value: Json): string | null {
  * field is missing, not a scalar, or sanitises to nothing - the element then
  * stays on the polling host. */
 export function piggybackHost(element: Json, hostPath: string): string | null {
-  if (!hostPath.trim()) return null
+  if (!hostPath.trim()) {
+    return null
+  }
   const found = resolveAsAgent(element, hostPath.trim())
-  if (!found) return null
+  if (!found) {
+    return null
+  }
   const text = labelValue(found.value)
-  if (text === null) return null
+  if (text === null) {
+    return null
+  }
   const cleaned = text
     .trim()
     .replace(HOST_NAME_INVALID, '_')
@@ -208,12 +246,17 @@ export function resolveLabelled(
 ): LabelledResolution {
   const issues = noIssues()
   const steps = tokenizePath(path)
-  if (steps === null) return { values: [], issues }
+  if (steps === null) {
+    return { values: [], issues }
+  }
   // One group of plain steps per wildcard level, plus the trailing value path.
   const groups: Step[][] = [[]]
   for (const step of steps) {
-    if (step.kind === 'wildcard') groups.push([])
-    else groups[groups.length - 1]!.push(step)
+    if (step.kind === 'wildcard') {
+      groups.push([])
+    } else {
+      groups[groups.length - 1]!.push(step)
+    }
   }
   // An empty label path is no label path (the agent tests it for truthiness).
 
@@ -224,33 +267,45 @@ export function resolveLabelled(
   const expand = (node: Json, level: number, parts: string[], positions: string[]): void => {
     if (level === groups.length - 1) {
       const found = walk(node, groups[level]!)
-      if (!found) return
+      if (!found) {
+        return
+      }
       // Resolved against the LEAF element, as the agent does.
       const host = hostPath ? piggybackHost(node, hostPath) : null
-      if (hostPath && host === null) onPollingHost.push(positions.join(' / '))
+      if (hostPath && host === null) {
+        onPollingHost.push(positions.join(' / '))
+      }
       values.push({ label: parts.join(' / '), value: found.value, host })
       return
     }
     const container = walk(node, groups[level]!)
     const pairs = container ? pairsOf(container.value) : null
-    if (pairs === null) return
+    if (pairs === null) {
+      return
+    }
     const at = (position: string): string => [...positions, position].join(' / ')
     // The texts of the labels the browser has rounded (see isImprecise).
     const rounded = new Set<string>()
     const labels = pairs.map(([position, element]) => {
-      if (!labelPath) return position
+      if (!labelPath) {
+        return position
+      }
       const found = resolveAsAgent(element, labelPath)
       if (!found) {
         issues.missing.push(at(position))
         return position
       }
-      if (found.value !== null && typeof found.value === 'object') issues.nonScalar.push(at(position))
+      if (found.value !== null && typeof found.value === 'object') {
+        issues.nonScalar.push(at(position))
+      }
       if (isImprecise(found.value)) {
         issues.imprecise.push(at(position))
         rounded.add(pyStr(found.value))
       }
       const text = pyStr(found.value)
-      if (text === '') issues.empty.push(at(position))
+      if (text === '') {
+        issues.empty.push(at(position))
+      }
       return text
     })
     const byLabel = new Map<string, number[]>()
@@ -279,7 +334,9 @@ export function resolveLabelled(
   // repeat once, under duplicates, rather than twice.
   const emptyRepeats = new Set(issues.duplicates.filter((d) => d.label === '').flatMap((d) => d.elements))
   issues.empty = issues.empty.filter((e) => !emptyRepeats.has(e))
-  if (hostPath) restrictToPollingHost(issues, onPollingHost)
+  if (hostPath) {
+    restrictToPollingHost(issues, onPollingHost)
+  }
   return { values, issues }
 }
 
@@ -294,7 +351,9 @@ function restrictToPollingHost(issues: LabelIssues, leaves: string[]): void {
     leaves.some((leaf) => leaf === element || leaf.startsWith(`${element} / `))
   issues.duplicates = issues.duplicates.flatMap((dup) => {
     const kept = dup.elements.flatMap((element, i) => (concerns(element) ? [i] : []))
-    if (kept.length < 2) return []
+    if (kept.length < 2) {
+      return []
+    }
     return [
       {
         label: dup.label,

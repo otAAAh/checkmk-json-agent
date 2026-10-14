@@ -46,7 +46,9 @@ describe('resolveLabelled — the shared cases', () => {
 
     expect(values.map((v) => v.label)).toEqual(testCase.labels)
     expect(issues).toEqual(testCase.issues)
-    if (testCase.hosts) expect(values.map((v) => v.host)).toEqual(testCase.hosts)
+    if (testCase.hosts) {
+      expect(values.map((v) => v.host)).toEqual(testCase.hosts)
+    }
   })
 
   it.each(fixture.cases.map((c) => [c.name, c] as const))(

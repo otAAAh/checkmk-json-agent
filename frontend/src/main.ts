@@ -14,5 +14,5 @@ import './style.css'
 // static table populated at import — no registry init call is needed (that was a
 // later/master API). Importing FormEdit is enough for it to render.
 
-const JsonExplorer = defineCustomElement(App, { shadowRoot: false })
-customElements.define('cmk-json-explorer', JsonExplorer)
+const jsonExplorerElement = defineCustomElement(App, { shadowRoot: false })
+customElements.define('cmk-json-explorer', jsonExplorerElement)

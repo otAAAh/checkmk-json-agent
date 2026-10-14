@@ -70,10 +70,18 @@ function stateChoiceKind(value: unknown): StateKind | null {
     return serviceStateToKind(value)
   }
   const title = (titleOf(value) ?? '').toUpperCase()
-  if (title.includes('WARN')) return 'warn'
-  if (title.includes('CRIT')) return 'crit'
-  if (title.includes('UNKNOWN')) return 'none'
-  if (title.includes('OK')) return 'ok'
+  if (title.includes('WARN')) {
+    return 'warn'
+  }
+  if (title.includes('CRIT')) {
+    return 'crit'
+  }
+  if (title.includes('UNKNOWN')) {
+    return 'none'
+  }
+  if (title.includes('OK')) {
+    return 'ok'
+  }
   return null
 }
 
@@ -157,8 +165,12 @@ function inventoryOnly(x: ExtractionValue): boolean {
 /** Infer the match mode from the cfg keys (the mode string is a hashed ident, so
  * we key off the non-hashed sub-fields instead). */
 function matchMode(cfg: Record<string, unknown>): 'must_match' | 'state_map' | null {
-  if (typeof cfg.pattern === 'string') return 'must_match'
-  if (['ok', 'warn', 'crit'].some((k) => typeof cfg[k] === 'string' && cfg[k])) return 'state_map'
+  if (typeof cfg.pattern === 'string') {
+    return 'must_match'
+  }
+  if (['ok', 'warn', 'crit'].some((k) => typeof cfg[k] === 'string' && cfg[k])) {
+    return 'state_map'
+  }
   return null
 }
 
@@ -224,18 +236,26 @@ function evalCalc(expr: string, value: number): number | null {
     } else if (c >= '0' && c <= '9') {
       // A decimal number: leading digits, optional single '.' with more digits.
       let j = i + 1
-      while (j < expr.length && expr[j]! >= '0' && expr[j]! <= '9') j += 1
+      while (j < expr.length && expr[j]! >= '0' && expr[j]! <= '9') {
+        j += 1
+      }
       if (j < expr.length && expr[j] === '.') {
         j += 1
-        while (j < expr.length && expr[j]! >= '0' && expr[j]! <= '9') j += 1
+        while (j < expr.length && expr[j]! >= '0' && expr[j]! <= '9') {
+          j += 1
+        }
       }
       tokens.push({ t: 'num', v: Number(expr.slice(i, j)) })
       i = j
     } else if (c === '.') {
       // A number starting with '.', e.g. `.5`.
       let j = i + 1
-      while (j < expr.length && expr[j]! >= '0' && expr[j]! <= '9') j += 1
-      if (j === i + 1) return null // a lone '.'
+      while (j < expr.length && expr[j]! >= '0' && expr[j]! <= '9') {
+        j += 1
+      }
+      if (j === i + 1) { // a lone '.'
+        return null
+      }
       tokens.push({ t: 'num', v: Number(expr.slice(i, j)) })
       i = j
     } else if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')) {
@@ -244,10 +264,15 @@ function evalCalc(expr: string, value: number): number | null {
       let j = i + 1
       while (j < expr.length) {
         const d = expr[j]!
-        if ((d >= 'a' && d <= 'z') || (d >= 'A' && d <= 'Z')) j += 1
-        else break
+        if ((d >= 'a' && d <= 'z') || (d >= 'A' && d <= 'Z')) {
+          j += 1
+        } else {
+          break
+        }
       }
-      if (expr.slice(i, j) !== 'value') return null
+      if (expr.slice(i, j) !== 'value') {
+        return null
+      }
       tokens.push({ t: 'value' })
       i = j
     } else {
@@ -281,7 +306,9 @@ function evalCalc(expr: string, value: number): number | null {
   // factor := ('+' | '-') factor | '(' expr ')' | number | value
   function parseFactor(): number {
     const tok = peek()
-    if (!tok) throw new Error('unexpected end')
+    if (!tok) {
+      throw new Error('unexpected end')
+    }
     if (tok.t === 'op' && (tok.v === '+' || tok.v === '-')) {
       p += 1
       const operand = parseFactor()
@@ -291,7 +318,9 @@ function evalCalc(expr: string, value: number): number | null {
       p += 1
       const inner = parseExpr()
       const close = peek()
-      if (!close || close.t !== 'op' || close.v !== ')') throw new Error('missing )')
+      if (!close || close.t !== 'op' || close.v !== ')') {
+        throw new Error('missing )')
+      }
       p += 1
       return inner
     }
@@ -308,7 +337,9 @@ function evalCalc(expr: string, value: number): number | null {
 
   try {
     const result = parseExpr()
-    if (p !== tokens.length) return null // trailing tokens left unparsed
+    if (p !== tokens.length) { // trailing tokens left unparsed
+      return null
+    }
     return Number.isFinite(result) ? result : null
   } catch {
     return null
@@ -329,23 +360,35 @@ function evalState(value: Json | undefined, x: ExtractionValue): StateKind {
   if (typeof value === 'number') {
     const upper = levelsPair(x.levels_upper)
     if (upper) {
-      if (value >= upper[1]) return 'crit'
-      if (value >= upper[0]) return 'warn'
+      if (value >= upper[1]) {
+        return 'crit'
+      }
+      if (value >= upper[0]) {
+        return 'warn'
+      }
     }
     const lower = levelsPair(x.levels_lower)
     if (lower) {
-      if (value <= lower[1]) return 'crit'
-      if (value <= lower[0]) return 'warn'
+      if (value <= lower[1]) {
+        return 'crit'
+      }
+      if (value <= lower[0]) {
+        return 'warn'
+      }
     }
     return upper || lower ? 'ok' : 'none'
   }
   if (typeof value === 'string') {
     const parsed = parseMatch(x.match)
-    if (!parsed) return 'none'
+    if (!parsed) {
+      return 'none'
+    }
     const { cfg } = parsed
     const mode = matchMode(cfg)
     if (mode === 'must_match' && typeof cfg.pattern === 'string') {
-      if (fullMatch(value, cfg.pattern)) return 'ok'
+      if (fullMatch(value, cfg.pattern)) {
+        return 'ok'
+      }
       return stateChoiceKind(cfg.state_no_match) ?? 'crit'
     }
     if (mode === 'state_map') {
@@ -447,8 +490,12 @@ function definedSummary(x: ExtractionValue): string[] {
 }
 
 function fmtValue(value: Json | undefined): string {
-  if (value === undefined) return _t('(not found in sample)')
-  if (value === null) return 'null'
+  if (value === undefined) {
+    return _t('(not found in sample)')
+  }
+  if (value === null) {
+    return 'null'
+  }
   return typeof value === 'object' ? JSON.stringify(value) : String(value)
 }
 

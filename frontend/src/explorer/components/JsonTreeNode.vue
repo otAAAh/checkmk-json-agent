@@ -72,7 +72,7 @@ function hostLabel(): void {
 
 <template>
   <li class="je-json-tree-node">
-    <span class="je-json-tree-node__leaf" v-if="node.kind === 'leaf'">
+    <span v-if="node.kind === 'leaf'" class="je-json-tree-node__leaf">
       <span
         class="je-json-tree-node__dot"
         :class="{ 'je-json-tree-node__dot--on': selected }"
