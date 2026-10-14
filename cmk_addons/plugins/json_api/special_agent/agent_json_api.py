@@ -110,8 +110,10 @@ def parse_arguments(argv: Sequence[str]) -> argparse.Namespace:
         "--debug",
         action="store_true",
         help="Write request/response diagnostics to stderr (never into the section on "
-        "stdout). Intended for running the program by hand - e.g. the call copied out "
-        "of 'cmk -D <host>' - while building or debugging a rule.",
+        "stdout), and let an unexpected error escape with its traceback instead of "
+        "reporting it on the endpoint's services. Intended for running the program by "
+        "hand - e.g. the call copied out of 'cmk -D <host>' - while building or "
+        "debugging a rule.",
     )
     for index in range(len(known.endpoint)):
         _add_secret_option(
@@ -277,6 +279,8 @@ def _process_endpoint(
     try:
         secret = _reveal_secret(args, f"secret_{index}") if endpoint.get("auth") else None
     except Exception as exc:  # e.g. a stale/missing password-store reference
+        if debug:
+            raise
         return _fail(f"Secret resolution failed: {exc}")
 
     try:
@@ -305,6 +309,10 @@ def _process_endpoint(
                 _debug(debug, f"  host label json_api/{key} = {value}")
         return (results, host_labels, _endpoint_record(endpoint, url, True, None, meta))
     except Exception as exc:  # malformed endpoint blob, unexpected extraction error, ...
+        # The usual Checkmk '--debug' contract: let the error through with its
+        # traceback. Unattended, it costs only this endpoint's services.
+        if debug:
+            raise
         return _fail(f"Endpoint processing failed: {exc}")
 
 
