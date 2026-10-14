@@ -41,6 +41,23 @@ Both are now upgraded on the way to the agent.
 **Effect:** such a rule starts producing services on the next discovery, and an
 *expected* regex goes CRIT again when the value does not match.
 
+### A field named like an endpoint's own service is renamed
+
+Only affects a field whose service name equals an endpoint's status service: a
+field named `API frontend` next to an endpoint named `frontend` (both `JSON API
+frontend`), or a field named `API` on an endpoint that prefixes its field
+services (both `JSON <name> API`). Checkmk kept only one of the two.
+
+**Effect:** the field's service is now discovered as `… (2)`, like a duplicated
+field. Rename the field in the rule if you prefer another name.
+
+### The Explorer needs permission to edit rules
+
+The *Generic JSON API* entry under *Setup → Quick setups* and its pages now
+require the *Rule sets* permission (`wato.rulesets`), not just Setup access. The
+wizard ends in a new rule, and its preview can use the password store, so it is
+for the users who may create one.
+
 ## [0.24.0]
 
 ### A timestamp field with format `auto` now reads Go's default time layout
