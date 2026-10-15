@@ -32,7 +32,7 @@ frontend:
 # `make format lint` passes and the pipeline still fails. 'gui' ships in the
 # Explorer MKP, so it is production code and is checked like the rest.
 RUFF_SOURCES = cmk_addons scripts tests gui
-# mypy skips 'tests': disallow_untyped_defs is on globally and the suite is
+# mypy skips 'tests': it runs in strict mode (pyproject.toml) and the suite is
 # deliberately untyped, so including it would mean annotating every test.
 MYPY_SOURCES = cmk_addons scripts gui
 

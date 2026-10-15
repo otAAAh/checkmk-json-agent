@@ -16,6 +16,7 @@ from .transport import (
     _MAX_RESPONSE_BYTES,
     _REDACTED,
     RequestMeta,
+    RequestOptions,
     _auth_header_name,
     _auth_params,
     _build_session,
@@ -181,10 +182,8 @@ def _attempt(
             _debug(debug, f"  query parameter {next(iter(params))}: {_REDACTED}")
         if body is not None:
             _debug(debug, f"  body: {body}")
-    # Collected rather than passed inline: a paginated endpoint sends the same
-    # request again at the next page's URL, and every setting - authentication,
-    # headers, TLS, timeout - has to be the first page's.
-    request_kwargs: dict[str, object] = {
+    # Collected rather than passed inline: see RequestOptions.
+    request_kwargs: RequestOptions = {
         "params": params,
         "data": body,
         "headers": headers,

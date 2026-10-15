@@ -22,14 +22,15 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
-      # Dev tooling is pinned in requirements-dev.txt (Dependabot-tracked). The
-      # runtime deps (cmk.*, requests) stay covered by mypy's ignore_missing_imports.
+      # Dev tooling is pinned in requirements-dev.txt (Dependabot-tracked). cmk.*
+      # stays covered by mypy's ignore_missing_imports; requests is typed through
+      # the pinned types-requests stubs.
       - run: pip install -r requirements-dev.txt
       # 'gui' ships in the Explorer MKP, so it is production code and is checked
       # like the rest. Keep these paths in lock-step with RUFF_SOURCES /
       # MYPY_SOURCES in the Makefile, so `make format lint typecheck` cannot pass
       # while CI fails. mypy omits 'tests' on purpose: the suite is deliberately
-      # untyped and disallow_untyped_defs is on globally.
+      # untyped and mypy runs in strict mode (pyproject.toml).
       - name: Format check
         run: ruff format --check cmk_addons scripts tests gui
       - name: Lint

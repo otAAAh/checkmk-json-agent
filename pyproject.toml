@@ -37,9 +37,9 @@ select = ["E", "F", "I", "UP", "B", "SIM", "C4"]
 
 [tool.mypy]
 python_version = "3.12"
-warn_unused_ignores = true
-warn_redundant_casts = true
-disallow_untyped_defs = true
+# Strict for everything mypy checks (the plugin, scripts and the Explorer GUI),
+# with the two exceptions below for the GUI.
+strict = true
 # The cmk.* plugin APIs are only present inside a Checkmk site.
 ignore_missing_imports = true
 # The plugin ships several same-named modules (agent_based/json_api.py,
@@ -48,3 +48,12 @@ ignore_missing_imports = true
 # of colliding on the bare "json_api" module name.
 namespace_packages = true
 explicit_package_bases = true
+
+# The Explorer subclasses Checkmk's GUI classes (AjaxPage, WatoMode,
+# ABCMainModule) and returns its _() translations. CI type-checks without
+# Checkmk installed, so those are Any there; these two checks can only report
+# that, not a mistake in this code.
+[[tool.mypy.overrides]]
+module = "gui.*"
+disallow_subclassing_any = false
+warn_return_any = false

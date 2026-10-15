@@ -27,6 +27,7 @@ import subprocess
 import sys
 import tomllib
 from pathlib import Path
+from typing import Any
 
 REPO = Path(__file__).resolve().parent.parent
 CHANGELOG = REPO / "CHANGELOG.md"
@@ -64,13 +65,13 @@ _SECTION_OF = {ctype: section for section, types in _SECTIONS for ctype in types
 
 
 @functools.lru_cache(maxsize=1)
-def _pyproject() -> dict:
+def _pyproject() -> dict[str, Any]:  # parsed TOML
     return tomllib.loads((REPO / "pyproject.toml").read_text())
 
 
 def _repo_url() -> str:
     """The project's GitHub URL, from pyproject, for commit/PR links."""
-    return _pyproject()["tool"]["mkp"]["download_url"].rstrip("/")
+    return str(_pyproject()["tool"]["mkp"]["download_url"]).rstrip("/")
 
 
 def _git(*args: str) -> str:
@@ -84,7 +85,7 @@ def _git(*args: str) -> str:
 
 
 def _project_version() -> str:
-    return _pyproject()["project"]["version"]
+    return str(_pyproject()["project"]["version"])
 
 
 def _version_tags() -> list[str]:
