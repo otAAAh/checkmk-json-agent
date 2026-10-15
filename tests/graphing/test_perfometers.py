@@ -117,7 +117,7 @@ def _first_match(perfometers_module, service_metrics: dict[str, set[str]]) -> st
             {
                 "json_api_response_time": set(),
                 "json_api_response_size": set(),
-                "json_api_cert_expiry": {"crit"},
+                "json_api_cert_remaining_validity": {"crit"},
             },
             "json_api_response_time",
         ),
@@ -179,7 +179,7 @@ def test_every_field_metric_has_a_bar(perfometers, graphing):
     assert check_units._AGE_METRIC in covered
     # The endpoint's other two metrics are deliberately uncovered: they share a
     # service with the response time, which already has the bar.
-    assert {"json_api_response_size", "json_api_cert_expiry"} & covered == set()
+    assert {"json_api_response_size", "json_api_cert_remaining_validity"} & covered == set()
 
 
 def test_the_perfometer_names_are_unique(perfometers):

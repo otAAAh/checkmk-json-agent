@@ -15,8 +15,8 @@ description:
  exposed as a metric; it is only checked against levels once you configure them.
 
  For an {HTTPS} endpoint with certificate verification enabled, the TLS
- certificate's remaining validity is also reported, in days, as a metric with
- optional lower levels. It is read from the connection the agent already makes,
+ certificate's remaining validity is also reported, in seconds, as a metric
+ with optional lower levels. It is read from the connection the agent already makes,
  so it costs no extra request and needs no second check against the same URL.
  When it cannot be read - plain HTTP, verification turned off, or a connection
  reused from the pool - nothing about the certificate is reported; that is

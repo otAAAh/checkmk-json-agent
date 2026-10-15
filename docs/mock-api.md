@@ -25,7 +25,7 @@ python3 dev/mock_api.py --tls --proxy      # + HTTPS on 8643, a proxy on 8644
 | `--port` | `8642` | HTTP port |
 | `--tls` | off | Also serve HTTPS, with a throwaway CA it creates on start |
 | `--tls-port` | `8643` | HTTPS port |
-| `--tls-days` | `20` | Validity of the server certificate, in days. 20 is inside the default 30/7 days certificate levels, so the endpoint service goes WARN |
+| `--tls-days` | `20` | Validity of the server certificate, in days. 20 is inside the 30 / 7 days the certificate levels suggest, so with those levels set the endpoint service goes WARN |
 | `--tls-dir` | a new temp dir | Where the CA, server and client certificates are written. The paths are printed on start |
 | `--proxy` | off | Also run a forward proxy |
 | `--proxy-port` | `8644` | Proxy port |

@@ -3,6 +3,7 @@
 """Tests for the metric definitions and their consistency with the check."""
 
 import pytest
+from cmk.graphing.v1 import metrics
 from cmk.rulesets.v1.form_specs.validators import ValidationError
 
 from cmk_addons.plugins.json_api.check_lib import units as check_units
@@ -39,9 +40,25 @@ def test_expected_metrics_are_defined(graphing):
         # The endpoint's own service.
         "json_api_response_time",
         "json_api_response_size",
-        # Remaining validity of the endpoint's TLS certificate, in days.
+        # Remaining validity of the endpoint's TLS certificate, in seconds.
+        "json_api_cert_remaining_validity",
+        # ... and the retired one in days, kept for its recorded history.
         "json_api_cert_expiry",
     }
+
+
+def test_the_certificate_metric_is_a_time_in_seconds(graphing):
+    # Like Checkmk's own certificate checks; the graph scales it to days.
+    metric = graphing.metric_json_api_cert_remaining_validity
+    assert isinstance(metric.unit.notation, metrics.TimeNotation)
+
+
+def test_the_retired_certificate_metric_keeps_its_days(graphing):
+    # Its history was recorded in days; read as seconds it would claim a
+    # certificate expires in under a minute.
+    notation = graphing.metric_json_api_cert_expiry.unit.notation
+    assert isinstance(notation, metrics.DecimalNotation)
+    assert notation.symbol == "days"
 
 
 def test_every_unit_metric_has_a_definition(graphing):

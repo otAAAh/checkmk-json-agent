@@ -71,17 +71,6 @@ def _rate_metric_name(unit: str | None) -> str:
     return _UNIT_RATE_METRIC.get(unit, "json_api_rate")
 
 
-def _render_days(days: float) -> str:
-    """A number of days, negative (already expired) included.
-
-    Whole days read as '42 days'; a fraction keeps one decimal so the last day
-    before expiry does not render as '0 days'.
-    """
-    rounded = round(days, 1)
-    shown = int(rounded) if rounded.is_integer() else rounded
-    return f"{shown} days"
-
-
 # The unit chosen in the rule also decides how the value is *rendered* in the
 # summary/details (and the levels line), so "1572864" with unit=bytes reads as
 # "1.50 MiB" like the graph does - not just as a bare number. Units without a

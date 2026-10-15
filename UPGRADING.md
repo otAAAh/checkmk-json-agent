@@ -14,6 +14,27 @@ GitHub Release body, so these notes travel with the release people actually read
 
 ## [0.24.1]
 
+### The certificate's remaining validity is measured in seconds
+
+The endpoint service (`JSON API <name>`) used to record the TLS
+certificate's remaining validity in days, as the metric `json_api_cert_expiry`.
+It is now recorded in seconds, like Checkmk's own certificate checks, as the new
+metric `json_api_cert_remaining_validity`, and the summary reads
+"42 days 0 hours" instead of "42 days".
+
+**Effect on graphs:** the new metric starts with an empty graph. The history of
+`json_api_cert_expiry` is kept as it was, in days, but the service no longer
+shows that graph, since nothing writes the metric any more. The metric has a
+new name so that no graph ever mixes days and seconds.
+
+**Effect on levels:** in the *Generic JSON API endpoint* rule, the
+*Lower levels for the TLS certificate's remaining validity* are now entered as
+a time span (days and hours) instead of a number of days. An existing rule is
+converted automatically the next time it is opened and saved in Setup, or when
+`cmk-update-config` runs. Until then the check reads the old levels and
+converts them from days itself, so a rule nobody opens keeps alerting at the
+same remaining validity as before.
+
 ### Levels edited in the special-agent rule apply without a re-discovery
 
 Discovery used to copy a field's levels and string matching from the

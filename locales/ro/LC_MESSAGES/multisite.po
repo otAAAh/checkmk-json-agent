@@ -6,7 +6,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: checkmk-json-agent\n"
 "Report-Msgid-Bugs-To: https://github.com/otAAAh/checkmk-json-agent/issues\n"
-"POT-Creation-Date: 2026-10-14 14:46+0200\n"
+"POT-Creation-Date: 2026-10-15 06:47+0200\n"
 "PO-Revision-Date: 2026-07-06 12:00+0000\n"
 "Last-Translator: checkmk-json-agent contributors\n"
 "Language-Team: Romanian\n"
@@ -358,7 +358,7 @@ msgstr ""
 "suplimentare'."
 
 #: cmk_addons/plugins/json_api/forms/endpoint.py:113
-#: cmk_addons/plugins/json_api/rulesets/check_parameters.py:165
+#: cmk_addons/plugins/json_api/rulesets/check_parameters.py:170
 msgid "Endpoint"
 msgstr "Endpoint"
 
@@ -929,7 +929,7 @@ msgid "Field to monitor"
 msgstr "Câmp de monitorizat"
 
 #: cmk_addons/plugins/json_api/forms/extraction.py:238
-#: cmk_addons/plugins/json_api/rulesets/check_parameters.py:157
+#: cmk_addons/plugins/json_api/rulesets/check_parameters.py:162
 msgid "Service name"
 msgstr "Nume serviciu"
 
@@ -1669,7 +1669,7 @@ msgstr ""
 "etichetei (de ex. 'status'). Implicit 'true' (o etichetă de apartenență). "
 "Ignorat fără metacaracter."
 
-#: cmk_addons/plugins/json_api/forms/metrics.py:59
+#: cmk_addons/plugins/json_api/forms/metrics.py:60
 msgid ""
 "A metric name must consist of letters, digits and underscores only, and "
 "start with a letter or a digit."
@@ -1677,7 +1677,7 @@ msgstr ""
 "Un nume de metrică poate conține doar litere, cifre și liniuțe de subliniere "
 "și trebuie să înceapă cu o literă sau o cifră."
 
-#: cmk_addons/plugins/json_api/forms/metrics.py:66
+#: cmk_addons/plugins/json_api/forms/metrics.py:67
 #, python-format
 msgid ""
 "'%s' is one of this plugin's own metrics. A field given that name inherits "
@@ -1691,7 +1691,7 @@ msgstr ""
 "afișat în octeți. Alegeți un nume propriu sau lăsați câmpul gol pentru a-l "
 "obține automat pe cel corect."
 
-#: cmk_addons/plugins/json_api/forms/metrics.py:170
+#: cmk_addons/plugins/json_api/forms/metrics.py:171
 #, python-format
 msgid ""
 "The fields %s of the shared service '%s' would all be recorded as the metric "
@@ -2135,15 +2135,15 @@ msgstr ""
 "propriile servicii."
 
 #: cmk_addons/plugins/json_api/rulesets/special_agent.py:126
-#: cmk_addons/plugins/json_api/rulesets/check_parameters.py:154
+#: cmk_addons/plugins/json_api/rulesets/check_parameters.py:159
 msgid "Generic JSON API"
 msgstr "API JSON generic"
 
-#: cmk_addons/plugins/json_api/rulesets/check_parameters.py:69
+#: cmk_addons/plugins/json_api/rulesets/check_parameters.py:70
 msgid "Upper levels for the response time"
 msgstr "Niveluri superioare pentru timpul de răspuns"
 
-#: cmk_addons/plugins/json_api/rulesets/check_parameters.py:71
+#: cmk_addons/plugins/json_api/rulesets/check_parameters.py:72
 msgid ""
 "How long the request to this endpoint may take. Measured from sending the "
 "request to having read the whole response body. Without levels the response "
@@ -2153,31 +2153,31 @@ msgstr ""
 "cererii până la citirea completă a corpului răspunsului. Fără niveluri, "
 "timpul de răspuns este doar înregistrat ca metrică."
 
-#: cmk_addons/plugins/json_api/rulesets/check_parameters.py:86
+#: cmk_addons/plugins/json_api/rulesets/check_parameters.py:89
 msgid "Lower levels for the TLS certificate's remaining validity"
 msgstr "Praguri inferioare pentru valabilitatea rămasă a certificatului TLS"
 
-#: cmk_addons/plugins/json_api/rulesets/check_parameters.py:88
+#: cmk_addons/plugins/json_api/rulesets/check_parameters.py:91
 msgid ""
-"How many days the endpoint's TLS certificate must still be valid for. Read "
-"from the connection the agent already makes, so no second check against the "
-"same URL is needed. Only available for HTTPS endpoints with certificate "
+"How long the endpoint's TLS certificate must still be valid for. Read from "
+"the connection the agent already makes, so no second check against the same "
+"URL is needed. Only available for HTTPS endpoints with certificate "
 "verification enabled; otherwise the certificate is not reported and these "
 "levels never apply. Without levels the remaining validity is only recorded "
 "as a metric."
 msgstr ""
-"Câte zile trebuie să mai fie valid certificatul TLS al endpointului. Este "
+"Cât timp trebuie să mai fie valid certificatul TLS al endpointului. Este "
 "citit din conexiunea pe care agentul o stabilește oricum, deci nu este "
 "nevoie de o a doua verificare pe același URL. Disponibil numai pentru "
 "endpointuri HTTPS cu verificarea certificatului activată; în caz contrar "
 "certificatul nu este raportat și aceste praguri nu se aplică niciodată. Fără "
 "praguri, valabilitatea rămasă este înregistrată doar ca metrică."
 
-#: cmk_addons/plugins/json_api/rulesets/check_parameters.py:104
+#: cmk_addons/plugins/json_api/rulesets/check_parameters.py:109
 msgid "State when the request needed a retry"
 msgstr "Starea când cererea a avut nevoie de o reîncercare"
 
-#: cmk_addons/plugins/json_api/rulesets/check_parameters.py:106
+#: cmk_addons/plugins/json_api/rulesets/check_parameters.py:111
 msgid ""
 "Applies when the endpoint's retry policy absorbed a failed attempt: the "
 "request did succeed, but not on the first try. OK by default - a retry doing "
@@ -2192,11 +2192,11 @@ msgstr ""
 "reîncercările să nu transforme în tăcere un API care se degradează într-un "
 "serviciu permanent verde."
 
-#: cmk_addons/plugins/json_api/rulesets/check_parameters.py:119
+#: cmk_addons/plugins/json_api/rulesets/check_parameters.py:124
 msgid "State when the collection was read incompletely"
 msgstr "Starea când colecția a fost citită incomplet"
 
-#: cmk_addons/plugins/json_api/rulesets/check_parameters.py:121
+#: cmk_addons/plugins/json_api/rulesets/check_parameters.py:126
 msgid ""
 "Applies when the endpoint follows the API's pagination and a further page "
 "existed that was not read - a page or element limit was reached, or the API "
@@ -2217,11 +2217,11 @@ msgstr ""
 "paginilor trebuie să prevină. Coborâți-o la OK pentru un punct final la care "
 "citirea primelor N pagini este intenționată."
 
-#: cmk_addons/plugins/json_api/rulesets/check_parameters.py:139
+#: cmk_addons/plugins/json_api/rulesets/check_parameters.py:144
 msgid "State when the endpoint cannot be read"
 msgstr "Starea când endpointul nu poate fi citit"
 
-#: cmk_addons/plugins/json_api/rulesets/check_parameters.py:141
+#: cmk_addons/plugins/json_api/rulesets/check_parameters.py:146
 msgid ""
 "Applies when the request fails outright: connection refused, a TLS error, a "
 "timeout, an HTTP status that is not accepted, or a response that is not JSON."
@@ -2229,7 +2229,7 @@ msgstr ""
 "Se aplică atunci când cererea eșuează complet: conexiune refuzată, o eroare "
 "TLS, un timeout, un stare HTTP neacceptată sau un răspuns care nu este JSON."
 
-#: cmk_addons/plugins/json_api/rulesets/check_parameters.py:162
+#: cmk_addons/plugins/json_api/rulesets/check_parameters.py:167
 msgid "Generic JSON API endpoint"
 msgstr "Endpoint API JSON generic"
 
@@ -2310,6 +2310,10 @@ msgid "Response size"
 msgstr "Dimensiunea răspunsului"
 
 #: cmk_addons/plugins/json_api/graphing/json_api.py:160
+msgid "Certificate remaining validity"
+msgstr "Valabilitatea rămasă a certificatului"
+
+#: cmk_addons/plugins/json_api/graphing/json_api.py:174
 msgid "Certificate expires in"
 msgstr "Certificatul expiră în"
 

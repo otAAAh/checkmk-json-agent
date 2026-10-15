@@ -28,7 +28,6 @@ from cmk.rulesets.v1.form_specs import (
     DefaultValue,
     DictElement,
     Dictionary,
-    Float,
     InputHint,
     LevelDirection,
     ServiceState,
@@ -39,6 +38,7 @@ from cmk.rulesets.v1.form_specs import (
 from cmk.rulesets.v1.rule_specs import CheckParameters, HostAndItemCondition, Topic
 
 from ..lib import levels_lower, levels_upper, string_match
+from ..migrations import migrate_endpoint_params as _migrate_endpoint_params
 
 
 def _parameter_form() -> Dictionary:
@@ -62,6 +62,7 @@ def _parameter_form() -> Dictionary:
 
 def _endpoint_parameter_form() -> Dictionary:
     return Dictionary(
+        migrate=_migrate_endpoint_params,
         elements={
             "response_time_levels": DictElement(
                 required=False,
@@ -80,12 +81,14 @@ def _endpoint_parameter_form() -> Dictionary:
                     prefill_fixed_levels=InputHint((2.0, 5.0)),
                 ),
             ),
-            "cert_expiry_levels": DictElement(
+            # In seconds; the days earlier versions stored under the old
+            # 'cert_expiry_levels' key are carried over by this form's migrate.
+            "cert_validity_levels": DictElement(
                 required=False,
                 parameter_form=SimpleLevels(
                     title=Title("Lower levels for the TLS certificate's remaining validity"),
                     help_text=Help(
-                        "How many days the endpoint's TLS certificate must still be "
+                        "How long the endpoint's TLS certificate must still be "
                         "valid for. Read from the connection the agent already makes, "
                         "so no second check against the same URL is needed. Only "
                         "available for HTTPS endpoints with certificate verification "
@@ -93,9 +96,11 @@ def _endpoint_parameter_form() -> Dictionary:
                         "levels never apply. Without levels the remaining validity is "
                         "only recorded as a metric."
                     ),
-                    form_spec_template=Float(unit_symbol="days"),
+                    form_spec_template=TimeSpan(
+                        displayed_magnitudes=[TimeMagnitude.DAY, TimeMagnitude.HOUR]
+                    ),
                     level_direction=LevelDirection.LOWER,
-                    prefill_fixed_levels=InputHint((30.0, 7.0)),
+                    prefill_fixed_levels=InputHint((30 * 86400.0, 7 * 86400.0)),
                 ),
             ),
             "state_retried": DictElement(
