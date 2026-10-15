@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: GPL-2.0-only
 // The preview grades the number the site will grade only if it computes `calc`
 // the way the check does. The check plugin's _apply_calc
-// (cmk_addons/plugins/json_api/agent_based/json_api.py) and the ruleset's
-// _validate_calc (rulesets/special_agent.py) decide; the arithmetic cases below
+// (cmk_addons/plugins/json_api/check_lib/calc.py) and the ruleset's
+// _validate_calc (forms/extraction.py) decide; the arithmetic cases below
 // are ported from test_apply_calc_* in tests/agent_based/test_json_api.py, so a
 // change on either side shows up as a disagreement here.
 import { describe, expect, it } from 'vitest'
@@ -106,9 +106,34 @@ describe('evalCalc — precedence and grammar', () => {
     },
   )
 
-  it('leaves the second operand unresolved - the preview has no second path', () => {
-    // _apply_calc binds `other` to the second path's value and refuses when it
-    // is missing; the preview never has it, so it refuses too.
+})
+
+// _apply_calc (check_lib/calc.py) binds `other` to the second path's value and
+// raises "the second path did not resolve to a number" when it is None - which
+// _value_results reports as UNKNOWN, not as a default of 0 or 1.
+describe('evalCalc — the second operand', () => {
+  it('computes with other, the used/total case the help text names', () => {
+    expect(evalCalc('value / other * 100', 25, 200)).toBe(12.5)
+    expect(evalCalc('(other - value) / other', 1, 4)).toBe(0.75)
+  })
+
+  it('is unresolved when other is missing, as the check is', () => {
     expect(evalCalc('value / other * 100', 25)).toBeNull()
+    expect(evalCalc('value / other * 100', 25, null)).toBeNull()
+    // Evaluated, not skipped, even where it cannot change the result.
+    expect(evalCalc('value + 0 * other', 25)).toBeNull()
+  })
+
+  it('treats other = 0 as the division by zero it is', () => {
+    expect(evalCalc('value / other', 25, 0)).toBeNull()
+  })
+
+  it('ignores other in an expression that does not name it', () => {
+    expect(evalCalc('value * 2', 3, 100)).toBe(6)
+  })
+
+  it('accepts no other name for it', () => {
+    expect(evalCalc('value / others', 1, 2)).toBeNull()
+    expect(evalCalc('value / Other', 1, 2)).toBeNull()
   })
 })

@@ -25,6 +25,7 @@ import { evalCalc } from '../../lib/calc'
 import { labelWarnings, resolveLabelled, type LabelledValue } from '../../lib/elementlabels'
 import { labelKeyOf, type Json } from '../../lib/jsonpaths'
 import {
+  calcOther,
   elementCount,
   formatJson,
   hasFilter,
@@ -315,8 +316,10 @@ const reviews = computed<EndpointReview[]>(() =>
           // Transform the value when `calc` is set and it is numeric. On a bad
           // expression evalCalc returns null: leave the value shown and mark the
           // preview unresolved rather than crashing.
+          // `other` comes from the second path, resolved in this value's own
+          // element, as the agent does; unresolved, the check goes UNKNOWN.
           if (calc !== null && typeof value === 'number') {
-            const transformed = evalCalc(calc, value)
+            const transformed = evalCalc(calc, value, calcOther(m.element, x.calc_path))
             if (transformed === null) {
               return { service, line: elementLine, path, value, defined, state: 'none' as StateKind, labels }
             }

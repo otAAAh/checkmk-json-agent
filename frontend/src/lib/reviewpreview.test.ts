@@ -9,8 +9,11 @@
 // agent's side).
 import { describe, expect, it } from 'vitest'
 
+import { evalCalc } from './calc'
+import { resolveLabelled } from './elementlabels'
 import type { Json } from './jsonpaths'
 import {
+  calcOther,
   elementCount,
   formatJson,
   hasCondition,
@@ -22,6 +25,47 @@ import {
   valueAsKind,
   type HostLabelTexts,
 } from './reviewpreview'
+
+// The agent's _resolve_calc_other (special_agent/extract.py) resolves calc_path
+// in the value's scope - each '[*]' element, else the document - and the check
+// keeps only a finite non-boolean number of it (check_lib/section.py
+// _optional_number); anything else leaves `other` None, which _apply_calc
+// refuses (UNKNOWN).
+describe('calcOther', () => {
+  it('resolves the second path in the scope it is given', () => {
+    expect(calcOther({ used: 1, total: 4 }, 'total')).toBe(4)
+    expect(calcOther({ quota: { total: 8 } }, '$.quota.total')).toBe(8)
+    expect(calcOther({ limits: [10, 20] }, 'limits[1]')).toBe(20)
+  })
+
+  it('compares each element against its own total, as the agent does', () => {
+    const doc = { total: 1000, disks: [{ used: 1, total: 4 }, { used: 3, total: 4 }] }
+    const percents = resolveLabelled(doc, 'disks[*].used', '').values.map((m) =>
+      evalCalc('value / other * 100', m.value as number, calcOther(m.element, 'total')),
+    )
+    expect(percents).toEqual([25, 75])
+  })
+
+  it('takes the document root as the scope of a path without a wildcard', () => {
+    const doc = { used: 30, total: 120 }
+    const [m] = resolveLabelled(doc, 'used', '').values
+    expect(evalCalc('value / other * 100', 30, calcOther(m!.element, 'total'))).toBe(25)
+  })
+
+  it('is null without a path, also a blank one', () => {
+    expect(calcOther({ total: 4 }, undefined)).toBeNull()
+    expect(calcOther({ total: 4 }, '')).toBeNull()
+    expect(calcOther({ total: 4 }, '   ')).toBeNull()
+  })
+
+  it('is null where the path does not resolve, or not to a number', () => {
+    expect(calcOther({ total: 4 }, 'missing')).toBeNull()
+    expect(calcOther({ total: '4' }, 'total')).toBeNull()
+    expect(calcOther({ total: true }, 'total')).toBeNull()
+    expect(calcOther({ total: null }, 'total')).toBeNull()
+    expect(calcOther({ total: [4] }, 'total')).toBeNull()
+  })
+})
 
 describe('formatJson', () => {
   it('shows scalars plainly and collections as JSON', () => {
