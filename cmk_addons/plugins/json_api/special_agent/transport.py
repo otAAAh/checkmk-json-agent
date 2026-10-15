@@ -12,6 +12,25 @@ import requests
 from .models import Endpoint, Proxy, ResponseReport
 
 
+class RequestOptions(TypedDict):
+    """The keyword arguments of every request made for one endpoint.
+
+    Collected once, because a paginated endpoint sends the same request again at
+    each next page's URL and every setting - authentication, headers, TLS, the
+    timeout - has to be the first page's. Typed after ``requests.Session.request``
+    so a setting of the wrong type is a type error, not a runtime surprise.
+    """
+
+    params: dict[str, str] | None
+    data: str | None
+    headers: dict[str, str]
+    verify: bool | str
+    cert: str | tuple[str, str] | None
+    allow_redirects: bool
+    timeout: float
+    stream: bool
+
+
 class RequestMeta(TypedDict, total=False):
     """What one endpoint's request did, as its own service reports it.
 
@@ -149,10 +168,13 @@ class _Session(requests.Session):
     def rebuild_auth(
         self, prepared_request: requests.PreparedRequest, response: requests.Response
     ) -> None:
-        super().rebuild_auth(prepared_request, response)
+        # requests ships these two untyped.
+        super().rebuild_auth(prepared_request, response)  # type: ignore[no-untyped-call]
         if not self._secret_header:
             return
-        if self.should_strip_auth(response.request.url, prepared_request.url):
+        if self.should_strip_auth(  # type: ignore[no-untyped-call]
+            response.request.url, prepared_request.url
+        ):
             # Headers are a case-insensitive mapping, so the configured spelling
             # need not match what was actually sent.
             prepared_request.headers.pop(self._secret_header, None)

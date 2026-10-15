@@ -14,6 +14,7 @@ from .paths import _HEADER_PREFIX, _resolve_header, _resolve_path
 from .transport import (
     _MAX_RESPONSE_BYTES,
     RequestMeta,
+    RequestOptions,
     _debug,
     _read_capped,
     _ResponseTooLarge,
@@ -217,7 +218,7 @@ def _merge_page(container: object, addition: object) -> str | None:
 def _follow_pagination(
     session: requests.Session,
     method: str,
-    request_kwargs: dict[str, object],
+    request_kwargs: RequestOptions,
     accepted: frozenset[int],
     endpoint: Endpoint,
     spec: Pagination,
@@ -305,8 +306,8 @@ def _follow_pagination(
     # once more. The collection is complete - this is not 'pagination_stopped' -
     # but it is an inference the operator should be able to see.
     ended: str | None = None
-    params = request_kwargs.get("params")
-    auth_names = tuple(params) if isinstance(params, dict) else ()
+    params = request_kwargs["params"]
+    auth_names = tuple(params) if params is not None else ()
 
     while True:
         if counted is not None:

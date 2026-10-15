@@ -35,6 +35,7 @@ import sys
 import tarfile
 import tomllib
 from pathlib import Path
+from typing import Any
 
 REPO = Path(__file__).resolve().parent.parent
 # Repo dir that maps onto the site's local/lib/python3/cmk_addons/plugins:
@@ -54,7 +55,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import pofile  # noqa: E402  (local module, resolved via the path insert above)
 
 
-def _load_metadata() -> tuple[dict, dict]:
+def _load_metadata() -> tuple[dict[str, Any], dict[str, Any]]:
     data = tomllib.loads((REPO / "pyproject.toml").read_text())
     return data["project"], data["tool"]["mkp"]
 
@@ -145,7 +146,7 @@ def _manifest(
     author: str,
     download_url: str,
     files: dict[str, list[str]],
-) -> dict:
+) -> dict[str, object]:
     return {
         "title": title,
         "name": name,
@@ -160,7 +161,9 @@ def _manifest(
     }
 
 
-def _write_mkp(name: str, version: str, manifest: dict, part_tars: list[tuple[str, bytes]]) -> Path:
+def _write_mkp(
+    name: str, version: str, manifest: dict[str, object], part_tars: list[tuple[str, bytes]]
+) -> Path:
     """Assemble the outer .mkp: info/info.json plus the given inner part tars."""
     parts = [
         ("info", (pprint.pformat(manifest) + "\n").encode()),

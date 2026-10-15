@@ -374,10 +374,13 @@ class _RedirectSafeSession(requests.Session):
     def rebuild_auth(
         self, prepared_request: requests.PreparedRequest, response: requests.Response
     ) -> None:
-        super().rebuild_auth(prepared_request, response)
+        # requests ships these two untyped.
+        super().rebuild_auth(prepared_request, response)  # type: ignore[no-untyped-call]
         if not self._secret_header:
             return
-        if self.should_strip_auth(response.request.url, prepared_request.url):
+        if self.should_strip_auth(  # type: ignore[no-untyped-call]
+            response.request.url, prepared_request.url
+        ):
             # Headers are a case-insensitive mapping, so the configured spelling
             # need not match what was actually sent.
             prepared_request.headers.pop(self._secret_header, None)
