@@ -181,12 +181,30 @@ describe('evalState — numbers', () => {
     expect(evalState(9.999, lower, titles)).toBe('crit')
   })
 
-  it('has no state to preview without levels', () => {
-    expect(evalState(50, {}, titles)).toBe('none')
+  // _value_results: no levels and no match - the service just shows the value.
+  it('is OK without levels or a match rule', () => {
+    expect(evalState(50, {}, titles)).toBe('ok')
   })
 
-  it('does not grade a number by a match rule', () => {
-    expect(evalState(1, { match: ['h', { pattern: '1' }] }, titles)).toBe('none')
+  // Without levels, a match rule decides for a number too: _value_results
+  // matches _render_value(value), i.e. the number as JSON writes it.
+  it('grades a number by a match rule when it has no levels', () => {
+    expect(evalState(1, { match: ['h', { pattern: '1' }] }, titles)).toBe('ok')
+    expect(evalState(2, { match: ['h', { pattern: '1' }] }, titles)).toBe('crit')
+  })
+
+  // With levels, the levels decide and the match rule is not applied.
+  it('ignores a match rule when levels decide', () => {
+    const x = { levels_upper: ['fixed', [80, 90]], match: ['h', { pattern: 'nope' }] }
+    expect(evalState(50, x, titles)).toBe('ok')
+  })
+
+  // check_lib/values.py _as_number: a numeric string is a number, a boolean is not.
+  it('applies levels to a numeric string', () => {
+    const upper = { levels_upper: ['fixed', [80, 90]] }
+    expect(evalState('85', upper, titles)).toBe('warn')
+    expect(evalState(' 95.5 ', upper, titles)).toBe('crit')
+    expect(evalState('1e1', upper, titles)).toBe('ok')
   })
 })
 
@@ -217,8 +235,21 @@ describe('evalState — strings', () => {
     expect(evalState('???', strict, titles)).toBe('crit')
   })
 
-  it('has no state to preview without a match rule', () => {
-    expect(evalState('UP', {}, titles)).toBe('none')
+  it('is OK without a match rule or levels', () => {
+    expect(evalState('UP', {}, titles)).toBe('ok')
+  })
+
+  // _value_results' misconfigured_levels: levels on a value that is not a
+  // number are a misconfiguration - WARN, and a match result is raised to at
+  // least WARN, never lowered.
+  it('is WARN for levels on a string', () => {
+    expect(evalState('UP', { levels_upper: ['fixed', [1, 2]] }, titles)).toBe('warn')
+  })
+
+  it('raises a match result to at least WARN when levels sit on a string', () => {
+    const levels = { levels_upper: ['fixed', [1, 2]] }
+    expect(evalState('UP', { ...levels, ...mustMatch({}) }, titles)).toBe('warn')
+    expect(evalState('DOWN', { ...levels, ...mustMatch({}) }, titles)).toBe('crit')
   })
 
   // _evaluate_match (agent_based/json_api.py) over a StateMap with no pattern
@@ -248,10 +279,30 @@ describe('evalState — strings', () => {
 })
 
 describe('evalState — other values', () => {
-  it('has no state for a missing value, a boolean, null or a collection', () => {
-    const x = { levels_upper: ['fixed', [1, 2]], match: ['h', { pattern: 'x' }] }
-    for (const value of [undefined, true, null, [1], { a: 1 }]) {
-      expect(evalState(value, x, titles)).toBe('none')
+  it('has no state for a missing value', () => {
+    expect(evalState(undefined, {}, titles)).toBe('none')
+  })
+
+  // _render_value writes true/false/null as JSON does, so they can be matched.
+  it('matches a boolean or null as JSON writes it', () => {
+    expect(evalState(true, { match: ['h', { pattern: 'true' }] }, titles)).toBe('ok')
+    expect(evalState(null, { match: ['h', { pattern: 'null' }] }, titles)).toBe('ok')
+    expect(evalState(false, { match: ['h', { pattern: 'true' }] }, titles)).toBe('crit')
+  })
+
+  it('treats a boolean as not a number, so levels on it are WARN', () => {
+    expect(evalState(true, { levels_upper: ['fixed', [1, 2]] }, titles)).toBe('warn')
+  })
+
+  it('is OK for any value without levels or a match rule', () => {
+    for (const value of [true, null, [1], { a: 1 }]) {
+      expect(evalState(value, {}, titles)).toBe('ok')
     }
+  })
+
+  // Python renders a collection as its repr ("{'a': 1}"), which the preview
+  // does not imitate - so a match over one has no previewed state.
+  it('has no state for a match over a collection', () => {
+    expect(evalState({ a: 1 }, { match: ['h', { pattern: 'x' }] }, titles)).toBe('none')
   })
 })
