@@ -610,7 +610,7 @@ def check_json_api(item: str, params: Mapping[str, object], section: Section) ->
             continue  # an inventory-only field of a shared service
         # Effective parameters: a check-parameters rule wins per key; where a key
         # is absent the value the agent rule embedded in the section applies.
-        # (Services discovered before 0.24.1 still carry the agent rule's values
+        # (Services discovered before 0.25.0 still carry the agent rule's values
         # as discovered parameters, which win the same way until re-discovered.)
         levels_upper = (
             _coerce_levels(params["levels_upper"])

@@ -3,6 +3,35 @@
 All notable changes to this project, one section per released version.
 Generated from the git history by `scripts/gen_changelog.py`.
 
+## [0.25.0] - 2026-10-15
+
+### Features
+
+- The certificate's remaining validity is measured in seconds ([#271](https://github.com/otAAAh/checkmk-json-agent/pull/271)) ([`93f29a2`](https://github.com/otAAAh/checkmk-json-agent/commit/93f29a2))
+
+### Fixes
+
+- The wizard's review preview grades every value in the check's order ([#273](https://github.com/otAAAh/checkmk-json-agent/pull/273)) ([`4fcf8b8`](https://github.com/otAAAh/checkmk-json-agent/commit/4fcf8b8))
+- The wizard's review preview grades like the check ([#272](https://github.com/otAAAh/checkmk-json-agent/pull/272)) ([`f5f2f5d`](https://github.com/otAAAh/checkmk-json-agent/commit/f5f2f5d))
+- The Explorer preview sends a blank API-key header name as X-API-Key, like its redirect guard ([#269](https://github.com/otAAAh/checkmk-json-agent/pull/269)) ([`cb570af`](https://github.com/otAAAh/checkmk-json-agent/commit/cb570af))
+- A transform that does not parse makes the service UNKNOWN instead of crashing ([#268](https://github.com/otAAAh/checkmk-json-agent/pull/268)) ([`55014f3`](https://github.com/otAAAh/checkmk-json-agent/commit/55014f3))
+- The Explorer's Conditions step has its folder chooser on Checkmk 3.0 ([#267](https://github.com/otAAAh/checkmk-json-agent/pull/267)) ([`fc9ce75`](https://github.com/otAAAh/checkmk-json-agent/commit/fc9ce75))
+- Pre-release cleanups - debug redaction, preview size cap, empty rule, metric title ([#259](https://github.com/otAAAh/checkmk-json-agent/pull/259)) ([`5c324bc`](https://github.com/otAAAh/checkmk-json-agent/commit/5c324bc))
+- Review findings - Checkmk form specs, private cache writes, Explorer errors and permissions ([#258](https://github.com/otAAAh/checkmk-json-agent/pull/258)) ([`3b039e0`](https://github.com/otAAAh/checkmk-json-agent/commit/3b039e0))
+- Review findings - Explorer password/CSRF guards, live agent-rule levels, legacy rule upgrade, --debug ([#256](https://github.com/otAAAh/checkmk-json-agent/pull/256)) ([`893ce8c`](https://github.com/otAAAh/checkmk-json-agent/commit/893ce8c))
+
+### Other
+
+- Mypy runs in strict mode, with types for requests ([#270](https://github.com/otAAAh/checkmk-json-agent/pull/270)) ([`8b4e06a`](https://github.com/otAAAh/checkmk-json-agent/commit/8b4e06a))
+- The special-agent rule's sections live in a forms/ package ([#266](https://github.com/otAAAh/checkmk-json-agent/pull/266)) ([`6f2cb01`](https://github.com/otAAAh/checkmk-json-agent/commit/6f2cb01))
+- The check plugin is typed and its helpers live in check_lib/ ([#265](https://github.com/otAAAh/checkmk-json-agent/pull/265)) ([`748dbde`](https://github.com/otAAAh/checkmk-json-agent/commit/748dbde))
+- The Explorer GUI reads its connection into typed values and has no Any left ([#264](https://github.com/otAAAh/checkmk-json-agent/pull/264)) ([`6aa0d59`](https://github.com/otAAAh/checkmk-json-agent/commit/6aa0d59))
+- The review step's calc, state and host-label logic lives in lib/ with tests ([#263](https://github.com/otAAAh/checkmk-json-agent/pull/263)) ([`d274127`](https://github.com/otAAAh/checkmk-json-agent/commit/d274127))
+- Dev: the mock API covers every connection setting, with a usage guide ([#262](https://github.com/otAAAh/checkmk-json-agent/pull/262)) ([`16c51a4`](https://github.com/otAAAh/checkmk-json-agent/commit/16c51a4))
+- The agent reads each '--endpoint' blob once into typed models ([#261](https://github.com/otAAAh/checkmk-json-agent/pull/261)) ([`d11d076`](https://github.com/otAAAh/checkmk-json-agent/commit/d11d076))
+- Lint the wizard with Checkmk's ESLint rules ([#260](https://github.com/otAAAh/checkmk-json-agent/pull/260)) ([`b314ba4`](https://github.com/otAAAh/checkmk-json-agent/commit/b314ba4))
+- Bridge-check tests current 2.5 and 3.0 community images ([#255](https://github.com/otAAAh/checkmk-json-agent/pull/255)) ([`f71894b`](https://github.com/otAAAh/checkmk-json-agent/commit/f71894b))
+
 ## [0.24.0] - 2026-10-13
 
 ### Features
