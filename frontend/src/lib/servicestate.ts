@@ -108,23 +108,30 @@ export function parseMatch(match: unknown): { mode: string; cfg: Record<string, 
 }
 
 /** Infer the match mode from the cfg keys (the mode string is a hashed ident, so
- * we key off the non-hashed sub-fields instead). */
-export function matchMode(cfg: Record<string, unknown>): 'must_match' | 'state_map' | null {
-  if (typeof cfg.pattern === 'string') {
-    return 'must_match'
-  }
-  if (['ok', 'warn', 'crit'].some((k) => typeof cfg[k] === 'string' && cfg[k])) {
-    return 'state_map'
-  }
-  return null
+ * we key off the non-hashed sub-fields instead).
+ *
+ * must_match's `pattern` is a required field (lib.py string_match), so a cfg
+ * without one is a state map - also one with none of its OK/WARN/CRIT patterns
+ * set. The check reads that as StateMap(None, None, None) (check_lib/section.py
+ * _coerce_match), and _evaluate_match then lands on its `state_no_match`. */
+export function matchMode(cfg: Record<string, unknown>): 'must_match' | 'state_map' {
+  return typeof cfg.pattern === 'string' ? 'must_match' : 'state_map'
 }
 
-/** Whether `value` fully matches `pattern` (anchored); false on a bad regex. */
-export function fullMatch(value: string, pattern: string): boolean {
+/** Whether `value` fully matches `pattern` (anchored); null when the pattern
+ * does not compile.
+ *
+ * Null rather than false because the check does not treat a bad pattern as a
+ * miss: re.fullmatch raises re.error and _value_results turns that into UNKNOWN
+ * ("Invalid match pattern"). The dialects differ at the edges - Python's
+ * `(?P<name>…)` is not JavaScript, and some JavaScript is not Python - so a
+ * pattern only one side compiles previews differently; the common syntax is
+ * shared. */
+export function fullMatch(value: string, pattern: string): boolean | null {
   try {
     return new RegExp(`^(?:${pattern})$`).test(value)
   } catch {
-    return false
+    return null
   }
 }
 
@@ -162,26 +169,37 @@ export function evalState(value: Json | undefined, x: ExtractionValue, titles: C
     }
     const { cfg } = parsed
     const mode = matchMode(cfg)
+    // A pattern that does not compile is UNKNOWN on the site (see fullMatch),
+    // which previews as 'none'.
     if (mode === 'must_match' && typeof cfg.pattern === 'string') {
-      if (fullMatch(value, cfg.pattern)) {
+      const matched = fullMatch(value, cfg.pattern)
+      if (matched === null) {
+        return 'none'
+      }
+      if (matched) {
         return 'ok'
       }
       return stateChoiceKind(cfg.state_no_match, titles) ?? 'crit'
     }
-    if (mode === 'state_map') {
-      for (const [key, kind] of [
-        ['ok', 'ok'],
-        ['warn', 'warn'],
-        ['crit', 'crit'],
-      ] as const) {
-        const pat = cfg[key]
-        if (typeof pat === 'string' && pat && fullMatch(value, pat)) {
+    // Tried in _evaluate_match's order, and lazily like it: a broken WARN
+    // pattern is never compiled - so never an error - once OK has matched.
+    for (const [key, kind] of [
+      ['ok', 'ok'],
+      ['warn', 'warn'],
+      ['crit', 'crit'],
+    ] as const) {
+      const pat = cfg[key]
+      if (typeof pat === 'string' && pat) {
+        const matched = fullMatch(value, pat)
+        if (matched === null) {
+          return 'none'
+        }
+        if (matched) {
           return kind
         }
       }
-      return stateChoiceKind(cfg.state_no_match, titles) ?? 'ok'
     }
-    return 'none'
+    return stateChoiceKind(cfg.state_no_match, titles) ?? 'ok'
   }
   return 'none'
 }

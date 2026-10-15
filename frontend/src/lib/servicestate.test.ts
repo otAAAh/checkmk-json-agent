@@ -119,7 +119,14 @@ describe('levelsPair / parseMatch / matchMode', () => {
   it('tells the modes apart by their sub-fields, since the mode is hashed', () => {
     expect(matchMode({ pattern: '', state_no_match: 'h-crit' })).toBe('must_match')
     expect(matchMode({ ok: 'UP', warn: '', crit: '' })).toBe('state_map')
-    expect(matchMode({ ok: '', warn: '', crit: '' })).toBeNull()
+  })
+
+  it('reads a cfg without a pattern as a state map, also with no pattern set', () => {
+    // must_match's pattern is required (lib.py string_match); the check reads
+    // the rest as StateMap(None, None, None) (check_lib/section.py _coerce_match).
+    expect(matchMode({ ok: '', warn: '', crit: '' })).toBe('state_map')
+    expect(matchMode({ state_no_match: 'h-warn' })).toBe('state_map')
+    expect(matchMode({})).toBe('state_map')
   })
 })
 
@@ -135,8 +142,9 @@ describe('fullMatch', () => {
     expect(fullMatch('DOWN', 'UP|DOWN')).toBe(true)
   })
 
-  it('is false on a pattern that does not compile', () => {
-    expect(fullMatch('x', '(')).toBe(false)
+  it('is null, not a miss, on a pattern that does not compile', () => {
+    expect(fullMatch('x', '(')).toBeNull()
+    expect(fullMatch('(', '(')).toBeNull()
   })
 })
 
@@ -209,9 +217,33 @@ describe('evalState — strings', () => {
     expect(evalState('???', strict, titles)).toBe('crit')
   })
 
-  it('has no state to preview without a usable match rule', () => {
+  it('has no state to preview without a match rule', () => {
     expect(evalState('UP', {}, titles)).toBe('none')
-    expect(evalState('UP', { match: ['h-map', { ok: '' }] }, titles)).toBe('none')
+  })
+
+  // _evaluate_match (agent_based/json_api.py) over a StateMap with no pattern
+  // set tries nothing and returns its state_no_match - OK unless told otherwise.
+  it('a state map with no pattern set is its no-match state, as on the site', () => {
+    expect(evalState('UP', { match: ['h-map', { ok: '' }] }, titles)).toBe('ok')
+    expect(evalState('UP', { match: ['h-map', { ok: '', warn: '', crit: '' }] }, titles)).toBe('ok')
+    expect(evalState('UP', { match: ['h-map', { state_no_match: 'h-warn' }] }, titles)).toBe('warn')
+  })
+
+  // _value_results (agent_based/json_api.py) catches the re.error that
+  // _evaluate_match raises and yields State.UNKNOWN "Invalid match pattern" -
+  // UNKNOWN previews as 'none', never as the no-match state.
+  it('a pattern that does not compile is UNKNOWN, not a miss', () => {
+    expect(evalState('UP', mustMatch({ pattern: '(' }), titles)).toBe('none')
+    expect(evalState('UP', mustMatch({ pattern: '(', state_no_match: 'h-ok' }), titles)).toBe('none')
+    expect(evalState('UP', { match: ['h-map', { ok: '[' }] }, titles)).toBe('none')
+  })
+
+  it('a state map only fails on a broken pattern it actually tries', () => {
+    // re.fullmatch compiles lazily: once OK matched, the WARN pattern is never
+    // compiled, so it cannot raise.
+    const map = { match: ['h-map', { ok: 'UP', warn: '(', crit: 'DOWN' }] }
+    expect(evalState('UP', map, titles)).toBe('ok')
+    expect(evalState('DOWN', map, titles)).toBe('none')
   })
 })
 
