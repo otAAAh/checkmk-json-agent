@@ -135,71 +135,122 @@ export function fullMatch(value: string, pattern: string): boolean | null {
   }
 }
 
-/** Evaluate a value against the extraction's thresholds / match rule. */
-export function evalState(value: Json | undefined, x: ExtractionValue, titles: ChoiceTitles): StateKind {
+/** The value as the check reads a number (check_lib/values.py _as_number): a
+ * finite number or a numeric string, never a boolean. The string forms are
+ * Python's float() for what a JSON API sends: optional sign, digits with an
+ * optional fraction and exponent, surrounding whitespace. */
+export function asNumber(value: Json | undefined): number | null {
   if (typeof value === 'number') {
+    return Number.isFinite(value) ? value : null
+  }
+  if (typeof value === 'string' && /^\s*[+-]?(\d+\.?\d*|\.\d+)([eE][+-]?\d+)?\s*$/.test(value)) {
+    const number = Number(value)
+    return Number.isFinite(number) ? number : null
+  }
+  return null
+}
+
+/** The value as the check writes it out for string matching
+ * (check_lib/values.py _render_value): as JSON would - 'true', 'null' - and a
+ * string as itself. Null for a collection: Python renders it as its own repr
+ * ("{'a': 1}"), which the preview does not imitate. */
+export function renderValue(value: Json): string | null {
+  if (typeof value === 'boolean') {
+    return value ? 'true' : 'false'
+  }
+  if (value === null) {
+    return 'null'
+  }
+  if (typeof value === 'string' || typeof value === 'number') {
+    return String(value)
+  }
+  return null
+}
+
+const SEVERITY: Record<StateKind, number> = { none: 3, ok: 0, warn: 1, crit: 2 }
+
+/** Evaluate a value against the extraction's thresholds / match rule, in the
+ * order _value_results (agent_based/json_api.py) decides:
+ *
+ * 1. a number with levels: the levels decide (a match rule is not applied);
+ * 2. otherwise a match rule decides - over the value as JSON writes it, so a
+ *    number, true or null can be matched too - raised to at least WARN when
+ *    levels are configured on a value that is not a number;
+ * 3. otherwise levels on a value that is not a number are WARN;
+ * 4. otherwise the service just shows the value: OK.
+ */
+export function evalState(value: Json | undefined, x: ExtractionValue, titles: ChoiceTitles): StateKind {
+  if (value === undefined) {
+    return 'none'
+  }
+  const number = asNumber(value)
+  const upper = levelsPair(x.levels_upper)
+  const lower = levelsPair(x.levels_lower)
+  if (number !== null && (upper || lower)) {
     // Checkmk's check_levels (cmk/agent_based/v2/_check_levels.py,
     // _check_fixed_levels) is inclusive upwards and STRICT downwards: a value
     // exactly on an upper threshold is already WARN/CRIT, one exactly on a lower
     // threshold is still OK/WARN.
-    const upper = levelsPair(x.levels_upper)
-    if (upper) {
-      if (value >= upper[1]) {
-        return 'crit'
-      }
-      if (value >= upper[0]) {
-        return 'warn'
-      }
+    if (upper && number >= upper[1]) {
+      return 'crit'
     }
-    const lower = levelsPair(x.levels_lower)
-    if (lower) {
-      if (value < lower[1]) {
-        return 'crit'
-      }
-      if (value < lower[0]) {
-        return 'warn'
-      }
+    if (upper && number >= upper[0]) {
+      return 'warn'
     }
-    return upper || lower ? 'ok' : 'none'
+    if (lower && number < lower[1]) {
+      return 'crit'
+    }
+    if (lower && number < lower[0]) {
+      return 'warn'
+    }
+    return 'ok'
   }
-  if (typeof value === 'string') {
-    const parsed = parseMatch(x.match)
-    if (!parsed) {
+  const misconfiguredLevels = Boolean(upper || lower)
+  const parsed = parseMatch(x.match)
+  if (parsed) {
+    const text = renderValue(value)
+    if (text === null) {
       return 'none'
     }
-    const { cfg } = parsed
-    const mode = matchMode(cfg)
-    // A pattern that does not compile is UNKNOWN on the site (see fullMatch),
-    // which previews as 'none'.
-    if (mode === 'must_match' && typeof cfg.pattern === 'string') {
-      const matched = fullMatch(value, cfg.pattern)
+    const matched = matchState(text, parsed.cfg, titles)
+    if (matched === 'none' || !misconfiguredLevels) {
+      return matched
+    }
+    return SEVERITY[matched] >= SEVERITY.warn ? matched : 'warn'
+  }
+  return misconfiguredLevels ? 'warn' : 'ok'
+}
+
+/** The state a match rule gives `text` (_evaluate_match); 'none' when a
+ * pattern it tries does not compile, which is UNKNOWN on the site. */
+function matchState(text: string, cfg: Record<string, unknown>, titles: ChoiceTitles): StateKind {
+  if (matchMode(cfg) === 'must_match' && typeof cfg.pattern === 'string') {
+    const matched = fullMatch(text, cfg.pattern)
+    if (matched === null) {
+      return 'none'
+    }
+    if (matched) {
+      return 'ok'
+    }
+    return stateChoiceKind(cfg.state_no_match, titles) ?? 'crit'
+  }
+  // Tried in _evaluate_match's order, and lazily like it: a broken WARN
+  // pattern is never compiled - so never an error - once OK has matched.
+  for (const [key, kind] of [
+    ['ok', 'ok'],
+    ['warn', 'warn'],
+    ['crit', 'crit'],
+  ] as const) {
+    const pat = cfg[key]
+    if (typeof pat === 'string' && pat) {
+      const matched = fullMatch(text, pat)
       if (matched === null) {
         return 'none'
       }
       if (matched) {
-        return 'ok'
-      }
-      return stateChoiceKind(cfg.state_no_match, titles) ?? 'crit'
-    }
-    // Tried in _evaluate_match's order, and lazily like it: a broken WARN
-    // pattern is never compiled - so never an error - once OK has matched.
-    for (const [key, kind] of [
-      ['ok', 'ok'],
-      ['warn', 'warn'],
-      ['crit', 'crit'],
-    ] as const) {
-      const pat = cfg[key]
-      if (typeof pat === 'string' && pat) {
-        const matched = fullMatch(value, pat)
-        if (matched === null) {
-          return 'none'
-        }
-        if (matched) {
-          return kind
-        }
+        return kind
       }
     }
-    return stateChoiceKind(cfg.state_no_match, titles) ?? 'ok'
   }
-  return 'none'
+  return stateChoiceKind(cfg.state_no_match, titles) ?? 'ok'
 }
