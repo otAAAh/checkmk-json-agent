@@ -58,6 +58,43 @@ describe('evalCalc — precedence and grammar', () => {
     expect(evalCalc('value * 2.', 4)).toBe(8)
   })
 
+  // _apply_calc (check_lib/calc.py) gets its literals from ast.parse and takes
+  // every int or float Constant (not bool, not complex); each value below is
+  // what ast.literal_eval reads for the same text.
+  it.each([
+    ['1e3', 1000],
+    ['1E-3', 0.001],
+    ['1.5e+2', 150],
+    ['.5e2', 50],
+    ['5.e2', 500],
+    ['1e1_0', 1e10],
+    ['1_000', 1000],
+    ['0x1F', 31],
+    ['0x_1f', 31],
+    ['0o17', 15],
+    ['0b11', 3],
+    ['00', 0],
+    ['0_0', 0],
+    ['012.5', 12.5],
+    ['012e1', 120],
+  ])('reads the Python literal %s as %s', (literal, expected) => {
+    expect(evalCalc(`value * ${literal}`, 1)).toBe(expected)
+  })
+
+  // ast.parse raises SyntaxError on these (now a ValueError -> UNKNOWN), and
+  // `1j` parses to a complex Constant that _apply_calc refuses.
+  it.each(['012', '1_', '1__0', '1e', '0x', '0x1G', '0b12', '1j', '2value', '1._5'])(
+    'refuses %s, which Python does not read as an int or float',
+    (literal) => {
+      expect(evalCalc(`value * ${literal}`, 1)).toBeNull()
+    },
+  )
+
+  it('treats a literal too large for a double as non-finite, as the check does', () => {
+    // 1e400 is inf in Python too; _value_results reports a non-finite result.
+    expect(evalCalc('value * 1e400', 1)).toBeNull()
+  })
+
   it('ignores whitespace, including newlines and tabs', () => {
     expect(evalCalc(' value\t*\n2 ', 3)).toBe(6)
   })

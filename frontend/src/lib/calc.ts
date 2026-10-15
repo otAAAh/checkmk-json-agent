@@ -22,6 +22,45 @@ function isLetter(c: string | undefined): boolean {
   return c !== undefined && ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z'))
 }
 
+// Python's numeric literals, as ast.parse reads them (the Python reference's
+// "Integer literals" / "Floating-point literals"): '_' between digits, a float
+// with a point and/or an exponent, hex/octal/binary integers, and a decimal
+// integer that may not start with 0 unless it is all zeros. Each is tried at the
+// literal's first character; the float first, so '1e3' is not read as '1'.
+const DIGITS = '[0-9](?:_?[0-9])*'
+const EXPONENT = `[eE][+-]?${DIGITS}`
+const NUMBER_LITERALS = [
+  new RegExp(`(?:(?:${DIGITS})?\\.${DIGITS}|${DIGITS}\\.)(?:${EXPONENT})?|${DIGITS}${EXPONENT}`, 'y'),
+  /0[xX](?:_?[0-9a-fA-F])+|0[oO](?:_?[0-7])+|0[bB](?:_?[01])+/y,
+  /[1-9](?:_?[0-9])*|0+(?:_?0)*/y,
+]
+
+/** The numeric literal starting at `expr[start]`, or null where Python's
+ * tokenizer raises a SyntaxError (which _apply_calc turns into UNKNOWN).
+ *
+ * A literal running straight into a letter, digit or '_' is such an error -
+ * '012', '1_', '0x1G', '2value' - and so is the imaginary '1j', which parses
+ * but is no int or float and is refused by _apply_calc. A float too large for
+ * a double is inf on both sides and caught as non-finite. */
+function numberLiteral(expr: string, start: number): { value: number; end: number } | null {
+  for (const pattern of NUMBER_LITERALS) {
+    pattern.lastIndex = start
+    const match = pattern.exec(expr)
+    if (match === null) {
+      continue
+    }
+    const end = start + match[0].length
+    const next = expr[end]
+    if (isDigit(next) || isLetter(next) || next === '_') {
+      return null
+    }
+    // Number() reads every one of these forms once the '_' are gone, the
+    // 0x/0o/0b prefixes included.
+    return { value: Number(match[0].replaceAll('_', '')), end }
+  }
+  return null
+}
+
 /** Split `expr` into numbers / `value` / operators / parens, or null on
  * anything outside the grammar. */
 function tokenize(expr: string): Token[] | null {
@@ -34,31 +73,13 @@ function tokenize(expr: string): Token[] | null {
     } else if (c === '+' || c === '-' || c === '*' || c === '/' || c === '(' || c === ')') {
       tokens.push({ t: 'op', v: c })
       i += 1
-    } else if (isDigit(c)) {
-      // A decimal number: leading digits, optional single '.' with more digits.
-      let j = i + 1
-      while (isDigit(expr[j])) {
-        j += 1
+    } else if (isDigit(c) || (c === '.' && isDigit(expr[i + 1]))) {
+      const literal = numberLiteral(expr, i)
+      if (literal === null) {
+        return null
       }
-      if (expr[j] === '.') {
-        j += 1
-        while (isDigit(expr[j])) {
-          j += 1
-        }
-      }
-      tokens.push({ t: 'num', v: Number(expr.slice(i, j)) })
-      i = j
-    } else if (c === '.') {
-      // A number starting with '.', e.g. `.5`.
-      let j = i + 1
-      while (isDigit(expr[j])) {
-        j += 1
-      }
-      if (j === i + 1) {
-        return null // a lone '.'
-      }
-      tokens.push({ t: 'num', v: Number(expr.slice(i, j)) })
-      i = j
+      tokens.push({ t: 'num', v: literal.value })
+      i = literal.end
     } else if (isLetter(c)) {
       // The only identifier allowed is `value`; anything else (function names,
       // other variables) is rejected.
@@ -81,7 +102,8 @@ function tokenize(expr: string): Token[] | null {
 /**
  * Safely evaluate an arithmetic `calc` expression over the variable `value`.
  *
- * Mirrors the special-agent grammar: decimal numbers, the identifier `value`,
+ * Mirrors the special-agent grammar: Python's int and float literals (see
+ * numberLiteral), the identifier `value`,
  * parentheses, binary `+ - * /` (with `*`/`/` binding tighter than `+`/`-`) and
  * unary `+`/`-`. A hand-written recursive-descent parser is used deliberately —
  * NO `eval`/`new Function` — so nothing outside the grammar can run. Returns the
