@@ -75,9 +75,19 @@ describe('resolveLabelled — edges', () => {
     expect(issues.missing).toEqual(['0'])
   })
 
+  it('hands out the leaf element each value was found in', () => {
+    // _expand_wildcards (special_agent/paths.py) returns the leaf element per
+    // value; the agent resolves labels, host and calc_path against it.
+    const doc = { racks: [{ disks: [{ used: 1, total: 4 }, { used: 2, total: 8 }] }] }
+    expect(resolveLabelled(doc, 'racks[*].disks[*].used', '').values.map((v) => v.element)).toEqual([
+      { used: 1, total: 4 },
+      { used: 2, total: 8 },
+    ])
+  })
+
   it('reports nothing for a path without a wildcard', () => {
     const { values, issues } = resolveLabelled({ status: 'UP' }, 'status', 'name')
-    expect(values).toEqual([{ label: '', value: 'UP', host: null }])
+    expect(values).toEqual([{ label: '', value: 'UP', host: null, element: { status: 'UP' } }])
     expect(hasLabelIssues(issues)).toBe(false)
   })
 })

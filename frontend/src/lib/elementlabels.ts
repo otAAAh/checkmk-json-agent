@@ -32,6 +32,10 @@ export interface LabelledValue {
    * resolves; null otherwise - and then its service stays on the polling host
    * under the labelled name. */
   host: string | null
+  /** The leaf element the value was found in - the document itself for a path
+   * without '[*]'. The agent resolves an element's host, labels and the
+   * transform's second path ('other') against this node, not the root. */
+  element: Json
 }
 
 /** A label value shared by several elements of ONE container. */
@@ -140,7 +144,7 @@ function walk(node: Json, steps: Step[]): { value: Json } | undefined {
 const AGENT_TOKEN = /\['([^']*)'\]|\["([^"]*)"\]|\[(\d+)\]|([^.[\]]+)/g
 
 /** The agent's _resolve_path, token for token: {value} when found. */
-function resolveAsAgent(node: Json, path: string): { value: Json } | undefined {
+export function resolveAsAgent(node: Json, path: string): { value: Json } | undefined {
   let cleaned = path.trim()
   if (cleaned.startsWith('$.')) {
     cleaned = cleaned.slice(2)
@@ -275,7 +279,7 @@ export function resolveLabelled(
       if (hostPath && host === null) {
         onPollingHost.push(positions.join(' / '))
       }
-      values.push({ label: parts.join(' / '), value: found.value, host })
+      values.push({ label: parts.join(' / '), value: found.value, host, element: node })
       return
     }
     const container = walk(node, groups[level]!)

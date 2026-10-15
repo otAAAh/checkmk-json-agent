@@ -13,6 +13,7 @@
 // component so it can be unit-tested and type-checked on a bare clone; the
 // component's translated words come in as parameters.
 
+import { resolveAsAgent } from './elementlabels'
 import { labelKeyOf, resolvePath, type Json } from './jsonpaths'
 import type { ExtractionValue, FilterValue, LabelValue } from './rulevalue'
 
@@ -25,6 +26,22 @@ export function formatJson(value: Json | undefined, notFound: string): string {
     return 'null'
   }
   return typeof value === 'object' ? JSON.stringify(value) : String(value)
+}
+
+/** The transform's second operand (`other`) for one value, or null.
+ *
+ * The agent's _resolve_calc_other (special_agent/extract.py) resolves the
+ * extraction's `calc_path` in the value's own scope - the '[*]' leaf element, or
+ * the document without a wildcard (`LabelledValue.element` is exactly that) -
+ * with the same _resolve_path as every other path; a blank path is no path
+ * (models._stripped). The check then keeps only a finite, non-boolean number
+ * (check_lib/section.py _optional_number): a numeric STRING is no operand. */
+export function calcOther(scope: Json, calcPath: unknown): number | null {
+  if (typeof calcPath !== 'string' || !calcPath.trim()) {
+    return null
+  }
+  const found = resolveAsAgent(scope, calcPath)
+  return typeof found?.value === 'number' && Number.isFinite(found.value) ? found.value : null
 }
 
 /** Infer the 'Interpret the value as' choice from the serialized value.
