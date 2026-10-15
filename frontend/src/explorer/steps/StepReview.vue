@@ -113,7 +113,8 @@ function definedSummary(x: ExtractionValue): string[] {
   }
   const lower = levelsPair(x.levels_lower)
   if (lower) {
-    parts.push(_t('WARN ≤ %{w} / CRIT ≤ %{c}', { w: String(lower[0]), c: String(lower[1]) }))
+    // Strictly below: check_levels leaves a value ON a lower threshold alone.
+    parts.push(_t('WARN < %{w} / CRIT < %{c}',{ w: String(lower[0]), c: String(lower[1]) }))
   }
   const parsed = parseMatch(x.match)
   if (parsed) {

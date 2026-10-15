@@ -131,6 +131,10 @@ export function fullMatch(value: string, pattern: string): boolean {
 /** Evaluate a value against the extraction's thresholds / match rule. */
 export function evalState(value: Json | undefined, x: ExtractionValue, titles: ChoiceTitles): StateKind {
   if (typeof value === 'number') {
+    // Checkmk's check_levels (cmk/agent_based/v2/_check_levels.py,
+    // _check_fixed_levels) is inclusive upwards and STRICT downwards: a value
+    // exactly on an upper threshold is already WARN/CRIT, one exactly on a lower
+    // threshold is still OK/WARN.
     const upper = levelsPair(x.levels_upper)
     if (upper) {
       if (value >= upper[1]) {
@@ -142,10 +146,10 @@ export function evalState(value: Json | undefined, x: ExtractionValue, titles: C
     }
     const lower = levelsPair(x.levels_lower)
     if (lower) {
-      if (value <= lower[1]) {
+      if (value < lower[1]) {
         return 'crit'
       }
-      if (value <= lower[0]) {
+      if (value < lower[0]) {
         return 'warn'
       }
     }

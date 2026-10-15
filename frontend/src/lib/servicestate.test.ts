@@ -156,6 +156,23 @@ describe('evalState — numbers', () => {
     expect(evalState(5, lower, titles)).toBe('crit')
   })
 
+  // _check_fixed_levels in cmk/agent_based/v2/_check_levels.py: `value >=
+  // crit_level` / `value >= warn_level` upwards, `value < crit_level` /
+  // `value < warn_level` downwards. The boundaries are where the two differ.
+  it('is inclusive on the upper thresholds, as check_levels is', () => {
+    expect(evalState(79.999, upper, titles)).toBe('ok')
+    expect(evalState(80, upper, titles)).toBe('warn')
+    expect(evalState(89.999, upper, titles)).toBe('warn')
+    expect(evalState(90, upper, titles)).toBe('crit')
+  })
+
+  it('is strict on the lower thresholds, as check_levels is', () => {
+    expect(evalState(20, lower, titles)).toBe('ok')
+    expect(evalState(19.999, lower, titles)).toBe('warn')
+    expect(evalState(10, lower, titles)).toBe('warn')
+    expect(evalState(9.999, lower, titles)).toBe('crit')
+  })
+
   it('has no state to preview without levels', () => {
     expect(evalState(50, {}, titles)).toBe('none')
   })
