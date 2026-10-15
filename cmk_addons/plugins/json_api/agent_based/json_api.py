@@ -71,9 +71,9 @@ from ..check_lib.units import (
     _fmt_number,
     _rate_metric_name,
     _rate_render_func,
-    _render_days,
 )
 from ..check_lib.values import _as_number, _render_value
+from ..migrations import migrate_endpoint_params
 
 # Checkmk label keys we create are namespaced so they never collide with the
 # built-in ``cmk/...`` labels or another plugin's.
@@ -819,15 +819,19 @@ def check_json_api_endpoint(
         yield Result(state=State.OK, notice=f"Response size: {render.bytes(endpoint.size)}")
         yield Metric("json_api_response_size", endpoint.size)
     if endpoint.cert_expiry is not None:
-        # Days rather than seconds: it is what a certificate policy is written in
-        # ("renew 30 days out"), so it is what the levels ask for. LOWER levels -
-        # the alert is about running out of time.
+        # In seconds, like Checkmk's own certificate checks. LOWER levels - the
+        # alert is about running out of time. time_offset, not timespan: an
+        # expired certificate has a negative remaining validity, which timespan
+        # refuses. The levels go through the ruleset's migrate first, because a
+        # rule nobody has opened since the update still holds them in days.
         yield from check_levels(
-            (endpoint.cert_expiry - time.time()) / 86400.0,
-            levels_lower=_coerce_levels(params.get("cert_expiry_levels")),
-            metric_name="json_api_cert_expiry",
+            endpoint.cert_expiry - time.time(),
+            levels_lower=_coerce_levels(
+                migrate_endpoint_params(dict(params)).get("cert_validity_levels")
+            ),
+            metric_name="json_api_cert_remaining_validity",
             label="Certificate expires in",
-            render_func=_render_days,
+            render_func=render.time_offset,
             notice_only=True,
         )
 

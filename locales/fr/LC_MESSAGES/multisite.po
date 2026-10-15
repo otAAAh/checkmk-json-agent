@@ -6,7 +6,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: checkmk-json-agent\n"
 "Report-Msgid-Bugs-To: https://github.com/otAAAh/checkmk-json-agent/issues\n"
-"POT-Creation-Date: 2026-10-14 14:46+0200\n"
+"POT-Creation-Date: 2026-10-15 06:47+0200\n"
 "PO-Revision-Date: 2026-07-06 12:00+0000\n"
 "Last-Translator: checkmk-json-agent contributors\n"
 "Language-Team: French\n"
@@ -357,7 +357,7 @@ msgstr ""
 "'En-têtes de requête supplémentaires'."
 
 #: cmk_addons/plugins/json_api/forms/endpoint.py:113
-#: cmk_addons/plugins/json_api/rulesets/check_parameters.py:165
+#: cmk_addons/plugins/json_api/rulesets/check_parameters.py:170
 msgid "Endpoint"
 msgstr "Point de terminaison"
 
@@ -931,7 +931,7 @@ msgid "Field to monitor"
 msgstr "Champ à surveiller"
 
 #: cmk_addons/plugins/json_api/forms/extraction.py:238
-#: cmk_addons/plugins/json_api/rulesets/check_parameters.py:157
+#: cmk_addons/plugins/json_api/rulesets/check_parameters.py:162
 msgid "Service name"
 msgstr "Nom du service"
 
@@ -1678,7 +1678,7 @@ msgstr ""
 "l'étiquette (par exemple 'status'). Par défaut 'true' (une étiquette "
 "d'appartenance). Ignoré sans caractère générique."
 
-#: cmk_addons/plugins/json_api/forms/metrics.py:59
+#: cmk_addons/plugins/json_api/forms/metrics.py:60
 msgid ""
 "A metric name must consist of letters, digits and underscores only, and "
 "start with a letter or a digit."
@@ -1686,7 +1686,7 @@ msgstr ""
 "Un nom de métrique ne peut contenir que des lettres, des chiffres et des "
 "tirets bas, et doit commencer par une lettre ou un chiffre."
 
-#: cmk_addons/plugins/json_api/forms/metrics.py:66
+#: cmk_addons/plugins/json_api/forms/metrics.py:67
 #, python-format
 msgid ""
 "'%s' is one of this plugin's own metrics. A field given that name inherits "
@@ -1700,7 +1700,7 @@ msgstr ""
 "affiché en octets. Choisissez un nom à vous, ou laissez ce champ vide pour "
 "obtenir automatiquement le bon."
 
-#: cmk_addons/plugins/json_api/forms/metrics.py:170
+#: cmk_addons/plugins/json_api/forms/metrics.py:171
 #, python-format
 msgid ""
 "The fields %s of the shared service '%s' would all be recorded as the metric "
@@ -2149,15 +2149,15 @@ msgstr ""
 "n'affecte que ses propres services."
 
 #: cmk_addons/plugins/json_api/rulesets/special_agent.py:126
-#: cmk_addons/plugins/json_api/rulesets/check_parameters.py:154
+#: cmk_addons/plugins/json_api/rulesets/check_parameters.py:159
 msgid "Generic JSON API"
 msgstr "API JSON générique"
 
-#: cmk_addons/plugins/json_api/rulesets/check_parameters.py:69
+#: cmk_addons/plugins/json_api/rulesets/check_parameters.py:70
 msgid "Upper levels for the response time"
 msgstr "Seuils supérieurs pour le temps de réponse"
 
-#: cmk_addons/plugins/json_api/rulesets/check_parameters.py:71
+#: cmk_addons/plugins/json_api/rulesets/check_parameters.py:72
 msgid ""
 "How long the request to this endpoint may take. Measured from sending the "
 "request to having read the whole response body. Without levels the response "
@@ -2167,32 +2167,32 @@ msgstr ""
 "l'envoi de la requête à la lecture complète du corps de la réponse. Sans "
 "seuils, le temps de réponse n'est enregistré que comme métrique."
 
-#: cmk_addons/plugins/json_api/rulesets/check_parameters.py:86
+#: cmk_addons/plugins/json_api/rulesets/check_parameters.py:89
 msgid "Lower levels for the TLS certificate's remaining validity"
 msgstr "Seuils inférieurs pour la validité restante du certificat TLS"
 
-#: cmk_addons/plugins/json_api/rulesets/check_parameters.py:88
+#: cmk_addons/plugins/json_api/rulesets/check_parameters.py:91
 msgid ""
-"How many days the endpoint's TLS certificate must still be valid for. Read "
-"from the connection the agent already makes, so no second check against the "
-"same URL is needed. Only available for HTTPS endpoints with certificate "
+"How long the endpoint's TLS certificate must still be valid for. Read from "
+"the connection the agent already makes, so no second check against the same "
+"URL is needed. Only available for HTTPS endpoints with certificate "
 "verification enabled; otherwise the certificate is not reported and these "
 "levels never apply. Without levels the remaining validity is only recorded "
 "as a metric."
 msgstr ""
-"Nombre de jours pendant lesquels le certificat TLS du point de terminaison "
-"doit encore être valide. Il est lu depuis la connexion que l'agent établit "
-"de toute façon, aucune seconde vérification sur la même URL n'est donc "
-"nécessaire. Disponible uniquement pour les points de terminaison HTTPS avec "
-"la vérification du certificat activée ; sinon le certificat n'est pas "
-"signalé et ces seuils ne s'appliquent jamais. Sans seuils, la validité "
-"restante est seulement enregistrée comme métrique."
+"Durée pendant laquelle le certificat TLS du point de terminaison doit encore "
+"être valide. Il est lu depuis la connexion que l'agent établit de toute "
+"façon, aucune seconde vérification sur la même URL n'est donc nécessaire. "
+"Disponible uniquement pour les points de terminaison HTTPS avec la "
+"vérification du certificat activée ; sinon le certificat n'est pas signalé "
+"et ces seuils ne s'appliquent jamais. Sans seuils, la validité restante est "
+"seulement enregistrée comme métrique."
 
-#: cmk_addons/plugins/json_api/rulesets/check_parameters.py:104
+#: cmk_addons/plugins/json_api/rulesets/check_parameters.py:109
 msgid "State when the request needed a retry"
 msgstr "État lorsque la requête a nécessité une nouvelle tentative"
 
-#: cmk_addons/plugins/json_api/rulesets/check_parameters.py:106
+#: cmk_addons/plugins/json_api/rulesets/check_parameters.py:111
 msgid ""
 "Applies when the endpoint's retry policy absorbed a failed attempt: the "
 "request did succeed, but not on the first try. OK by default - a retry doing "
@@ -2208,11 +2208,11 @@ msgstr ""
 "transforment jamais en silence une API qui se dégrade en un service "
 "durablement vert."
 
-#: cmk_addons/plugins/json_api/rulesets/check_parameters.py:119
+#: cmk_addons/plugins/json_api/rulesets/check_parameters.py:124
 msgid "State when the collection was read incompletely"
 msgstr "État lorsque la collection n'a été lue que partiellement"
 
-#: cmk_addons/plugins/json_api/rulesets/check_parameters.py:121
+#: cmk_addons/plugins/json_api/rulesets/check_parameters.py:126
 msgid ""
 "Applies when the endpoint follows the API's pagination and a further page "
 "existed that was not read - a page or element limit was reached, or the API "
@@ -2233,11 +2233,11 @@ msgstr ""
 "suivi des pages doit empêcher. Abaissez-le à OK pour un point de terminaison "
 "où ne lire que les N premières pages est voulu."
 
-#: cmk_addons/plugins/json_api/rulesets/check_parameters.py:139
+#: cmk_addons/plugins/json_api/rulesets/check_parameters.py:144
 msgid "State when the endpoint cannot be read"
 msgstr "État lorsque le point de terminaison ne peut pas être lu"
 
-#: cmk_addons/plugins/json_api/rulesets/check_parameters.py:141
+#: cmk_addons/plugins/json_api/rulesets/check_parameters.py:146
 msgid ""
 "Applies when the request fails outright: connection refused, a TLS error, a "
 "timeout, an HTTP status that is not accepted, or a response that is not JSON."
@@ -2246,7 +2246,7 @@ msgstr ""
 "erreur TLS, délai dépassé, statut HTTP non accepté ou réponse qui n'est pas "
 "du JSON."
 
-#: cmk_addons/plugins/json_api/rulesets/check_parameters.py:162
+#: cmk_addons/plugins/json_api/rulesets/check_parameters.py:167
 msgid "Generic JSON API endpoint"
 msgstr "Point de terminaison d'API JSON générique"
 
@@ -2327,6 +2327,10 @@ msgid "Response size"
 msgstr "Taille de la réponse"
 
 #: cmk_addons/plugins/json_api/graphing/json_api.py:160
+msgid "Certificate remaining validity"
+msgstr "Validité restante du certificat"
+
+#: cmk_addons/plugins/json_api/graphing/json_api.py:174
 msgid "Certificate expires in"
 msgstr "Le certificat expire dans"
 

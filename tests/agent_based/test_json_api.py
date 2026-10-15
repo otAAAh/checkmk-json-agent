@@ -1505,32 +1505,59 @@ def _endpoint_record(**kw):
     return base
 
 
-def test_endpoint_reports_certificate_validity_in_days(check, monkeypatch):
+def test_endpoint_reports_certificate_validity_in_seconds(check, monkeypatch):
     _fixed_clock(check, monkeypatch, 1700000000.0)
     section = _section(
         check, [], endpoints=[_endpoint_record(cert_expiry=1700000000.0 + 42 * 86400)]
     )
     results = list(check.check_json_api_endpoint("frontend", {}, section))
-    (metric,) = [r for r in results if isinstance(r, Metric) and r.name == "json_api_cert_expiry"]
-    assert metric.value == 42.0
-    assert "Certificate expires in: 42 days" in _details(results)
+    (metric,) = [
+        r for r in results if isinstance(r, Metric) and r.name == "json_api_cert_remaining_validity"
+    ]
+    assert metric.value == 42 * 86400.0
+    assert "Certificate expires in: 42 days 0 hours" in _details(results)
+    # The retired metric in days is never written again: its history would
+    # otherwise mix days and seconds.
+    assert not [r for r in results if isinstance(r, Metric) and r.name == "json_api_cert_expiry"]
 
 
-def test_endpoint_certificate_lower_levels_alert(check, monkeypatch):
-    # Lower levels: the alert is about running out of time.
-    _fixed_clock(check, monkeypatch, 1700000000.0)
-    section = _section(
-        check, [], endpoints=[_endpoint_record(cert_expiry=1700000000.0 + 5 * 86400)]
-    )
-    results = list(
-        check.check_json_api_endpoint(
-            "frontend", {"cert_expiry_levels": ["fixed", [30.0, 7.0]]}, section
-        )
-    )
+def _cert_result(results):
     (result,) = [
         r for r in results if isinstance(r, Result) and "Certificate expires in" in r.details
     ]
-    assert result.state == State.CRIT
+    return result
+
+
+@pytest.mark.parametrize(
+    ("days_left", "expected"),
+    [(40, State.OK), (20, State.WARN), (5, State.CRIT)],
+)
+def test_endpoint_certificate_lower_levels_alert(check, monkeypatch, days_left, expected):
+    # Lower levels, in seconds: the alert is about running out of time.
+    _fixed_clock(check, monkeypatch, 1700000000.0)
+    section = _section(
+        check, [], endpoints=[_endpoint_record(cert_expiry=1700000000.0 + days_left * 86400)]
+    )
+    params = {"cert_validity_levels": ("fixed", (30 * 86400.0, 7 * 86400.0))}
+    results = list(check.check_json_api_endpoint("frontend", params, section))
+    assert _cert_result(results).state == expected
+
+
+@pytest.mark.parametrize(
+    ("days_left", "expected"),
+    [(40, State.OK), (20, State.WARN), (5, State.CRIT)],
+)
+def test_an_unmigrated_rule_in_days_still_applies(check, monkeypatch, days_left, expected):
+    # Installing the package does not run the ruleset's migrate, so a rule
+    # nobody has opened since still holds its levels in DAYS under the old key -
+    # and must not be read as 30 / 7 seconds, which would never alert.
+    _fixed_clock(check, monkeypatch, 1700000000.0)
+    section = _section(
+        check, [], endpoints=[_endpoint_record(cert_expiry=1700000000.0 + days_left * 86400)]
+    )
+    params = {"cert_expiry_levels": ("fixed", (30.0, 7.0))}
+    results = list(check.check_json_api_endpoint("frontend", params, section))
+    assert _cert_result(results).state == expected
 
 
 def test_endpoint_without_certificate_info_reports_nothing_about_it(check):
@@ -1541,21 +1568,18 @@ def test_endpoint_without_certificate_info_reports_nothing_about_it(check):
     assert "Certificate" not in _details(results)
 
 
-def test_expired_certificate_renders_a_negative_number_of_days(check, monkeypatch):
-    # render.timespan-style crash guard: an expired cert is a negative duration.
+def test_expired_certificate_renders_a_negative_time(check, monkeypatch):
+    # render.timespan raises on a negative value; an expired certificate has one.
     _fixed_clock(check, monkeypatch, 1700000000.0)
     section = _section(
         check, [], endpoints=[_endpoint_record(cert_expiry=1700000000.0 - 3 * 86400)]
     )
-    results = list(check.check_json_api_endpoint("frontend", {}, section))
-    assert "Certificate expires in: -3 days" in _details(results)
-
-
-def test_render_days_keeps_one_decimal_for_a_partial_day():
-    # The last day before expiry must not read as '0 days'.
-    assert check_units._render_days(42.0) == "42 days"
-    assert check_units._render_days(0.4) == "0.4 days"
-    assert check_units._render_days(-3.0) == "-3 days"
+    params = {"cert_validity_levels": ("fixed", (30 * 86400.0, 7 * 86400.0))}
+    results = list(check.check_json_api_endpoint("frontend", params, section))
+    assert "Certificate expires in: -3 days 0 hours" in _details(results)
+    assert _cert_result(results).state == State.CRIT
+    (metric,) = [r for r in results if isinstance(r, Metric) and "cert" in r.name]
+    assert metric.value == -3 * 86400.0
 
 
 def _cache_endpoint(**kw):

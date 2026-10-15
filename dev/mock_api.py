@@ -714,8 +714,8 @@ def main() -> None:
         "--tls-days",
         type=int,
         default=20,
-        help="server certificate validity in days (default 20: inside the default "
-        "30/7 day certificate-expiry levels, so the endpoint service goes WARN)",
+        help="server certificate validity in days (default 20: inside the 30/7 days "
+        "the certificate levels suggest, so with those set the endpoint service goes WARN)",
     )
     parser.add_argument(
         "--tls-dir",

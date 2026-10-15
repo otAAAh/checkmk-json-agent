@@ -36,7 +36,8 @@ are defined in this module. Two consequences shape everything below:
   endpoint service carries three (response time, response size, certificate
   expiry) and therefore gets ONE bar, on the response time: the quantity that
   actually moves from check to check. The other two have their own graphs, and
-  the certificate's remaining days sit in the summary where a number beats a bar.
+  the certificate's remaining validity sits in the details where a number beats
+  a bar.
 
 A service holding SEVERAL fields (the 'group' option) gets no bar: its metrics
 are named after the fields at runtime, so there is nothing to declare here. That

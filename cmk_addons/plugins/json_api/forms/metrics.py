@@ -47,6 +47,7 @@ _DECLARED_METRICS = frozenset(
         "json_api_age",
         "json_api_response_time",
         "json_api_response_size",
+        "json_api_cert_remaining_validity",
         "json_api_cert_expiry",
     }
 )

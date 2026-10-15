@@ -114,7 +114,7 @@ the 3.0 line.
 - **One service per endpoint, for free**: every endpoint also gets a
   `JSON API <name>` service reporting the request itself — HTTP status,
   **response time** (with optional levels), response size and, for HTTPS, the
-  **TLS certificate's remaining validity** (with optional levels in days, read
+  **TLS certificate's remaining validity** (with optional levels in days and hours, read
   from the connection the agent already makes — no second check against the same
   URL) — no field configuration needed
 - **Transform the numeric value**: an optional arithmetic expression (using the

@@ -155,11 +155,23 @@ metric_json_api_response_size = metrics.Metric(
     color=metrics.Color.LIGHT_GREEN,
 )
 
+metric_json_api_cert_remaining_validity = metrics.Metric(
+    name="json_api_cert_remaining_validity",
+    title=Title("Certificate remaining validity"),
+    # Seconds, like Checkmk's own certificate checks: the graph scales it to
+    # days by itself, and the levels (a TimeSpan) are entered in days and hours.
+    unit=metrics.Unit(metrics.TimeNotation()),
+    color=metrics.Color.LIGHT_ORANGE,
+)
+
+# Retired: earlier versions recorded the remaining validity here, in DAYS.
+# It went to a metric of its own rather than changing unit under this name, so
+# no graph ever mixes days and seconds. Nothing emits it any more; it stays
+# defined so the history recorded under it keeps its unit, and its name stays
+# reserved (forms/metrics.py) so no field is ever named into it.
 metric_json_api_cert_expiry = metrics.Metric(
     name="json_api_cert_expiry",
     title=Title("Certificate expires in"),
-    # Days, not seconds: a certificate policy is written in days ("renew 30 days
-    # out"), so that is the unit the levels and the graph speak.
     unit=metrics.Unit(metrics.DecimalNotation("days")),
     color=metrics.Color.LIGHT_ORANGE,
 )
