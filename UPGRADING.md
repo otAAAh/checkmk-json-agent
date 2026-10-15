@@ -12,7 +12,7 @@ this list needs none.
 `scripts/gen_changelog.py --version X.Y.Z` appends the matching section to the
 GitHub Release body, so these notes travel with the release people actually read.
 
-## [0.24.1]
+## [0.25.0]
 
 ### The certificate's remaining validity is measured in seconds
 
