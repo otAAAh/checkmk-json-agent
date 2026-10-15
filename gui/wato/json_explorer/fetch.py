@@ -547,7 +547,10 @@ def _perform_request(conn: _Connection) -> requests.Response:
     elif conn.auth == "auth_token":
         headers["Authorization"] = "Bearer " + _resolve_password(conn.secret)
     elif conn.auth == "auth_header":
-        headers[conn.auth_header or "X-API-Key"] = _resolve_password(conn.secret)
+        # The same name the redirect guard strips, as in the agent: a blank one
+        # falls back to 'X-API-Key' in both places, or the guard would watch a
+        # header the request never sent.
+        headers[_auth_header_name(conn) or "X-API-Key"] = _resolve_password(conn.secret)
     elif conn.auth == "auth_query":
         query = {conn.auth_query or "api_key": _resolve_password(conn.secret)}
     elif conn.oauth2 is not None:

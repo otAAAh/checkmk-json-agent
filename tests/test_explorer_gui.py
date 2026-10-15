@@ -181,6 +181,22 @@ def test_an_api_key_header_is_stripped_on_a_cross_host_redirect(explorer_fetch, 
     assert "x-api-key" not in at_target[0].headers
 
 
+def test_a_blank_header_name_is_sent_and_guarded_as_x_api_key(explorer_fetch, serve):
+    """The request and the redirect guard must agree on the header's name, as in
+    the agent. A blank name used to be sent verbatim while the guard watched
+    'X-API-Key', so the key would have followed a cross-host redirect."""
+    target, at_target = serve(lambda request, handler: _reply(handler, 200, {"ok": True}))
+    start, at_start = serve(
+        lambda request, handler: _reply(handler, 302, headers={"Location": f"{target}/moved"})
+    )
+    connection = {"url": start, "auth": ("auth_header", {"header": "  ", "key": _SECRET})}
+
+    explorer_fetch._perform_request(explorer_fetch._parse_connection(connection))
+
+    assert at_start[0].headers.get("x-api-key") == "s3cr3t"
+    assert "x-api-key" not in at_target[0].headers
+
+
 def test_an_api_key_header_survives_a_same_host_redirect(explorer_fetch, serve):
     """The other half of the guard: a redirect inside the same host is the API
     routing its own request, and dropping the key there would break the preview
