@@ -3,7 +3,7 @@
 # and bump these pins. Runtime deps (cmk.*, requests) come from the Checkmk site,
 # not from here; pydantic and types-requests are needed only so mypy can type-check
 # the server-side call and the agent's HTTP code.
-ruff==0.16.10
+ruff==0.17.1
 mypy==2.4.0
 pydantic==2.14.0
 pytest==9.1.1
