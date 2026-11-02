@@ -4,7 +4,7 @@
 # not from here; pydantic and types-requests are needed only so mypy can type-check
 # the server-side call and the agent's HTTP code.
 ruff==0.17.2
-mypy==2.4.0
+mypy==2.4.1
 pydantic==2.14.2
 pytest==9.2.0
 types-requests==2.33.0.20261006
