@@ -5,6 +5,6 @@
 # the server-side call and the agent's HTTP code.
 ruff==0.17.3
 mypy==2.4.1
-pydantic==2.14.2
+pydantic==2.14.3
 pytest==9.2.0
 types-requests==2.33.0.20261006
